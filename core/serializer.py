@@ -54,6 +54,7 @@ def project_to_dict(proj: Project) -> dict:
         "created_at": proj.created_at,
         "modified_at": proj.modified_at,
         "description": proj.description,
+        "status": proj.status,
         "pages": [page_to_dict(p) for p in proj.pages],
     }
 
@@ -65,6 +66,7 @@ def project_from_dict(d: dict) -> Project:
     proj.created_at = d.get("created_at", proj.created_at)
     proj.modified_at = d.get("modified_at", proj.modified_at)
     proj.description = d.get("description", proj.description)
+    proj.status = d.get("status", proj.status)
     proj.pages = [page_from_dict(p) for p in d.get("pages", [])]
     if not proj.pages:
         proj.pages = [Page()]
