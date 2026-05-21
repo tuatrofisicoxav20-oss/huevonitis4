@@ -60,7 +60,7 @@ class ProjectManager:
                 proj = self.load(f.stem)
                 if proj:
                     projects.append(proj)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, ValueError, KeyError) as e:
                 logger.warning(f"Could not load project {f}: {e}")
         return projects
 
@@ -87,12 +87,12 @@ class ProjectManager:
                     with open(bak, encoding="utf-8") as f:
                         data = json.load(f)
                     logger.info(f"Loaded from backup {bak}")
-                except Exception as e2:
+                except (OSError, json.JSONDecodeError) as e2:
                     logger.error(f"Backup also corrupt {bak}: {e2}")
                     return None
             else:
                 return None
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Could not read {path}: {e}")
             return None
         return project_from_dict(data)
@@ -114,7 +114,7 @@ class ProjectManager:
                                     logger.debug(f"Removed orphan image {img_path}")
                                 except OSError as e:
                                     logger.warning(f"Could not remove image {img_path}: {e}")
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Could not clean up images for {project_id}: {e}")
             path.unlink(missing_ok=True)
             # Remove .bak as well

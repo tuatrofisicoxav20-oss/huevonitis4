@@ -49,6 +49,7 @@ class HuevonitisApp(ctk.CTk):
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
+        theme.init_fonts()
 
         self.title(f"Huevonitis {config.VERSION}")
         self.geometry(f"{config.WINDOW_DEFAULT_WIDTH}x{config.WINDOW_DEFAULT_HEIGHT}")

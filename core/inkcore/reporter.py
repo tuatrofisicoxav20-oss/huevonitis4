@@ -296,11 +296,11 @@ class InkCoreReporter:
                 ACCENT_RED = "#EF4444"
                 ACCENT_YELLOW = "#EAB308"
                 TIER_COLORS = {"Bronze": "#CD7F32", "Silver": "#C0C0C0", "Gold": "#FFD700"}
-                FONT_TITLE = ("Segoe UI", 22, "bold")
-                FONT_HEADING = ("Segoe UI", 16, "bold")
-                FONT_SUBHEADING = ("Segoe UI", 13, "bold")
-                FONT_BODY = ("Segoe UI", 11)
-                FONT_SMALL = ("Segoe UI", 9)
+                FONT_TITLE = ("TkDefaultFont", 22, "bold")
+                FONT_HEADING = ("TkDefaultFont", 16, "bold")
+                FONT_SUBHEADING = ("TkDefaultFont", 13, "bold")
+                FONT_BODY = ("TkDefaultFont", 11)
+                FONT_SMALL = ("TkDefaultFont", 9)
 
         win = ctk.CTkToplevel(parent_widget)
         win.title("Informe del Banco de Glifos")
@@ -354,7 +354,7 @@ class InkCoreReporter:
             card.pack(side="left", padx=4, pady=4, fill="y")
             ctk.CTkLabel(
                 card, text=value,
-                font=("Segoe UI", 18, "bold"),
+                font=(theme.FONT_HEADING[0], 18, "bold"),
                 text_color=color,
             ).pack(padx=12, pady=(8, 0))
             ctk.CTkLabel(
@@ -386,7 +386,7 @@ class InkCoreReporter:
         ]):
             ctk.CTkLabel(
                 scroll, text=text,
-                font=("Segoe UI", 10, "bold"),
+                font=(theme.FONT_SMALL[0], 10, "bold"),
                 text_color=theme.TEXT_SECONDARY,
             ).grid(row=0, column=col, padx=6, pady=4, sticky="w")
 
@@ -409,14 +409,14 @@ class InkCoreReporter:
             )
             row_bg = theme.CARD_BG if row_i % 2 == 0 else theme.BG_TERTIARY
 
-            ctk.CTkLabel(scroll, text=ch, font=("Segoe UI", 14, "bold"),
+            ctk.CTkLabel(scroll, text=ch, font=(theme.FONT_BODY[0], 14, "bold"),
                          text_color=theme.TEXT_PRIMARY,
                          fg_color=row_bg, corner_radius=4,
                          ).grid(row=row_i, column=0, padx=6, pady=1, sticky="w")
             ctk.CTkLabel(scroll, text=str(count), font=theme.FONT_SMALL,
                          text_color=theme.TEXT_SECONDARY,
                          ).grid(row=row_i, column=1, padx=6, pady=1)
-            ctk.CTkLabel(scroll, text=f"{q:.0%}", font=("Segoe UI", 10, "bold"),
+            ctk.CTkLabel(scroll, text=f"{q:.0%}", font=(theme.FONT_SMALL[0], 10, "bold"),
                          text_color=q_color,
                          ).grid(row=row_i, column=2, padx=6, pady=1)
             ctk.CTkLabel(scroll, text=tier, font=theme.FONT_SMALL,
@@ -428,7 +428,7 @@ class InkCoreReporter:
             ctk.CTkLabel(
                 scroll,
                 text="No hay glifos en el banco.",
-                font=("Segoe UI", 15, "bold"),
+                font=(theme.FONT_BODY[0], 15, "bold"),
                 text_color=theme.ACCENT_ORANGE,
             ).grid(row=1, column=0, columnspan=4, pady=(24, 4))
             ctk.CTkLabel(
@@ -471,7 +471,7 @@ class InkCoreReporter:
             command=_export,
             fg_color=theme.ACCENT_BLUE,
             hover_color="#1D4ED8",
-            font=("Segoe UI", 11, "bold"),
+            font=theme.FONT_BODY,
             height=34,
             corner_radius=8,
         ).pack(side="right", padx=12, pady=9)

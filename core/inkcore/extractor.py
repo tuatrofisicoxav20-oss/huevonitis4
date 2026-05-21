@@ -23,8 +23,6 @@ from typing import Optional
 
 import config
 from core.models import GlyphEntry
-from core.inkcore.extractor_preprocess import ImagePreprocessor
-from core.inkcore.extractor_segments import SegmentDetector
 
 logger = logging.getLogger(__name__)
 

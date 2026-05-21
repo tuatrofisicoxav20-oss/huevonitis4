@@ -25,16 +25,16 @@ class BusinessLedger:
                 with open(self.jobs_file, encoding="utf-8") as f:
                     data = json.load(f)
                 self._jobs = [self._job_from_dict(d) for d in data]
-            except Exception as e:
-                logger.error(f"Error loading jobs: {e}")
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Error loading jobs: {e}", exc_info=True)
                 self._jobs = []
         if self.payments_file.exists():
             try:
                 with open(self.payments_file, encoding="utf-8") as f:
                     data = json.load(f)
                 self._payments = [self._payment_from_dict(d) for d in data]
-            except Exception as e:
-                logger.error(f"Error loading payments: {e}")
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Error loading payments: {e}", exc_info=True)
                 self._payments = []
 
     def _atomic_write(self, target_path, data):
@@ -77,7 +77,7 @@ class BusinessLedger:
         def _sort_key(j):
             try:
                 return datetime.fromisoformat(j.created_at)
-            except Exception:
+            except (ValueError, TypeError):
                 return datetime.min
         return sorted(self._jobs, key=_sort_key)
 
@@ -113,7 +113,7 @@ class BusinessLedger:
                 continue
         try:
             return datetime.fromisoformat(date_str)
-        except Exception:
+        except (ValueError, TypeError):
             return None
 
     def monthly_income(self, year: int, month: int) -> float:

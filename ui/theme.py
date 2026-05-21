@@ -82,13 +82,50 @@ TIER_BG = {
 }
 
 # ── Typography ────────────────────────────────────────────────────────────────
-FONT_TITLE      = ("Segoe UI", 22, "bold")
-FONT_HEADING    = ("Segoe UI", 16, "bold")
-FONT_SUBHEADING = ("Segoe UI", 13, "bold")
-FONT_BODY       = ("Segoe UI", 11)
-FONT_SMALL      = ("Segoe UI", 9)
-FONT_MONO       = ("Consolas", 10)
-FONT_SIDEBAR    = ("Segoe UI", 12)   # slightly larger than before
+# Font family is resolved lazily after Tk is initialized. UI_FONT holds the
+# best available family; call init_fonts() from the app root setup.
+_UI_FONT_CANDIDATES = ["Segoe UI", "Inter", "DejaVu Sans", "Liberation Sans",
+                       "Helvetica", "TkDefaultFont"]
+_MONO_CANDIDATES = ["Consolas", "Fira Mono", "DejaVu Sans Mono",
+                    "Liberation Mono", "Courier New", "TkFixedFont"]
+
+UI_FONT = "TkDefaultFont"
+MONO_FONT = "TkFixedFont"
+
+
+def init_fonts() -> None:
+    """Resolve UI_FONT and MONO_FONT to best available; call after Tk root exists."""
+    global UI_FONT, MONO_FONT, FONT_TITLE, FONT_HEADING, FONT_SUBHEADING
+    global FONT_BODY, FONT_SMALL, FONT_MONO, FONT_SIDEBAR
+    try:
+        import tkinter.font as tkfont
+        available = set(tkfont.families())
+        for name in _UI_FONT_CANDIDATES:
+            if name in available or name.startswith("Tk"):
+                UI_FONT = name
+                break
+        for name in _MONO_CANDIDATES:
+            if name in available or name.startswith("Tk"):
+                MONO_FONT = name
+                break
+    except Exception:
+        pass
+    FONT_TITLE      = (UI_FONT, 22, "bold")
+    FONT_HEADING    = (UI_FONT, 16, "bold")
+    FONT_SUBHEADING = (UI_FONT, 13, "bold")
+    FONT_BODY       = (UI_FONT, 11)
+    FONT_SMALL      = (UI_FONT, 9)
+    FONT_MONO       = (MONO_FONT, 10)
+    FONT_SIDEBAR    = (UI_FONT, 12)
+
+
+FONT_TITLE      = (UI_FONT, 22, "bold")
+FONT_HEADING    = (UI_FONT, 16, "bold")
+FONT_SUBHEADING = (UI_FONT, 13, "bold")
+FONT_BODY       = (UI_FONT, 11)
+FONT_SMALL      = (UI_FONT, 9)
+FONT_MONO       = (MONO_FONT, 10)
+FONT_SIDEBAR    = (UI_FONT, 12)
 
 # ── Navigation items ──────────────────────────────────────────────────────────
 NAV_ITEMS = [
