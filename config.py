@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -29,3 +30,28 @@ SIDEBAR_COLLAPSED_WIDTH = 52
 def ensure_dirs():
     for d in [PROJECTS_DIR, TIPOGRAFIA_DIR, BUSINESS_DIR, AUTOSAVE_DIR, EXPORTS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def load_settings() -> None:
+    """Override module-level defaults from SETTINGS_FILE if present and valid."""
+    global BASE_PRICE_PER_PAGE_MXN, AUTOSAVE_INTERVAL_MS, TESSERACT_CMD
+    if not SETTINGS_FILE.exists():
+        return
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            s = json.load(f)
+    except Exception:
+        return
+    try:
+        BASE_PRICE_PER_PAGE_MXN = float(s["base_price"])
+    except (KeyError, ValueError, TypeError):
+        pass
+    try:
+        v = int(s["autosave_interval"])
+        if v > 0:
+            AUTOSAVE_INTERVAL_MS = v * 1000
+    except (KeyError, ValueError, TypeError):
+        pass
+    val = s.get("tesseract_path", "")
+    if isinstance(val, str) and val:
+        TESSERACT_CMD = val

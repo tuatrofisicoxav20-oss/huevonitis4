@@ -918,12 +918,20 @@ class InkCoreView(BaseView):
         if renderer is None:
             self.toast("El banco no está listo", "error")
             return
-        try:
-            pages = renderer.render_pages(text, opts)
-        except Exception as exc:
-            logger.error(f"render_pages export error: {exc}", exc_info=True)
-            self.toast("Error al renderizar", "error")
-            return
+        self.toast("Renderizando…", "info")
+
+        def _render():
+            try:
+                pages = renderer.render_pages(text, opts)
+            except Exception as exc:
+                logger.error(f"render_pages export error: {exc}", exc_info=True)
+                self.after(0, lambda: self.toast("Error al renderizar", "error"))
+                return
+            self.after(0, lambda: self._export_png_finish(pages))
+
+        threading.Thread(target=_render, daemon=True).start()
+
+    def _export_png_finish(self, pages):
         if not pages:
             self.toast("Error al renderizar", "error")
             return

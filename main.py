@@ -10,6 +10,7 @@ import sys
 import config
 
 config.ensure_dirs()
+config.load_settings()
 
 logging.basicConfig(
     level=logging.INFO,

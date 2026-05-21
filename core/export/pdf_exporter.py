@@ -1,4 +1,5 @@
 import logging
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -64,26 +65,28 @@ def export_image_pdf(image, output_path: str) -> bool:
         return False
     if not hasattr(image, 'save'):
         return False
-    temp_path = str(output_path).replace(".pdf", "_tmp.png")
+    tmp_file = None
     try:
-        # Bug fix #8: ReportLab does not natively handle RGBA images when
-        # rendering to PDF — the alpha channel produces unexpected results.
-        # Flatten to RGB over a white background before saving the temp file.
         if getattr(image, 'mode', None) == 'RGBA':
             background = PILImage.new("RGB", image.size, (255, 255, 255))
             background.paste(image, mask=image.getchannel('A'))
             save_image = background
         else:
             save_image = image.convert("RGB") if getattr(image, 'mode', None) != 'RGB' else image
-        save_image.save(temp_path)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            tmp_file = tf.name
+        save_image.save(tmp_file)
         c = rl_canvas.Canvas(output_path, pagesize=A4)
-        w, h = A4
-        c.drawImage(temp_path, 0, 0, width=w, height=h, preserveAspectRatio=True)
+        pw, ph = A4
+        margin = 2 * cm
+        c.drawImage(tmp_file, margin, margin,
+                    width=pw - 2 * margin, height=ph - 2 * margin,
+                    preserveAspectRatio=True)
         c.save()
         return True
     except Exception as e:
         logger.error(f"Image PDF export error: {e}")
         return False
     finally:
-        # Bug fix #9: always clean up the temp file, even if c.save() raised
-        Path(temp_path).unlink(missing_ok=True)
+        if tmp_file:
+            Path(tmp_file).unlink(missing_ok=True)

@@ -1,9 +1,12 @@
+import copy
 import tkinter as tk
 
 import customtkinter as ctk
 
 from core.models import LineElement, Page, RectElement, TextElement
 from ui import theme
+
+_IMG_CACHE_MAX = 50
 
 
 class CanvasEditor(ctk.CTkFrame):
@@ -20,6 +23,7 @@ class CanvasEditor(ctk.CTkFrame):
         self._undo_stack: list = []
         self._redo_stack: list = []
         self._canvas_images: dict = {}
+        self._img_cache: dict = {}  # (path, w, h) → PhotoImage, FIFO max 50
         self._build()
 
     def _build(self):
@@ -178,9 +182,15 @@ class CanvasEditor(ctk.CTkFrame):
         elif hasattr(el, 'image_path') and el.image_path:
             try:
                 from PIL import Image, ImageTk
-                img = Image.open(el.image_path)
-                img = img.resize((int(el.width * z), int(el.height * z)))
-                photo = ImageTk.PhotoImage(img)
+                tw, th = int(el.width * z), int(el.height * z)
+                cache_key = (el.image_path, tw, th)
+                photo = self._img_cache.get(cache_key)
+                if photo is None:
+                    img = Image.open(el.image_path).resize((tw, th))
+                    photo = ImageTk.PhotoImage(img)
+                    if len(self._img_cache) >= _IMG_CACHE_MAX:
+                        self._img_cache.pop(next(iter(self._img_cache)))
+                    self._img_cache[cache_key] = photo
                 self._canvas_images[el.id] = photo
                 self._canvas.create_image(x1, y1, anchor="nw", image=photo, tags=("element", el.id))
             except Exception:
@@ -224,6 +234,7 @@ class CanvasEditor(ctk.CTkFrame):
             self._selected_id = best.id
             self._drag_start = (cx, cy)
             self._drag_offset = (cx - (30 + best.x * z), cy - (30 + best.y * z))
+            self._push_undo()
             self._show_props(best)
         else:
             self._selected_id = None
@@ -309,6 +320,7 @@ class CanvasEditor(ctk.CTkFrame):
         entry.insert("0.0", el.text)
 
         def apply():
+            self._push_undo()
             el.text = entry.get("0.0", "end").strip()
             dlg.destroy()
             self.redraw()
@@ -346,9 +358,8 @@ class CanvasEditor(ctk.CTkFrame):
     def _push_undo(self):
         if not self._page:
             return
-        import copy
         self._undo_stack.append(copy.deepcopy(self._page.elements))
-        if len(self._undo_stack) > 30:
+        if len(self._undo_stack) > 50:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 

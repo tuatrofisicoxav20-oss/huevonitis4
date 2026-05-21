@@ -16,6 +16,7 @@ Mejoras sobre v2:
   • get_preprocessed_preview() para mostrar resultado del pre-proceso en UI
 """
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -238,8 +239,6 @@ class GlyphExtractor:
     @staticmethod
     def _clean_ref(text: str) -> str:
         """Quita separadores comunes (comas, puntos y coma, pipes) y espacios extra."""
-        import re
-        # Eliminar separadores que rodean letras/dígitos (comas/punto-coma usados como listado)
         cleaned = re.sub(r'[,;|]+', ' ', text)
         # Colapsar espacios múltiples
         cleaned = re.sub(r'  +', ' ', cleaned)

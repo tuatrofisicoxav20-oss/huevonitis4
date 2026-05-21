@@ -146,6 +146,17 @@ class ProjectsView(BaseView):
         self.toast("Proyecto creado", "success")
 
     def _load_project(self, proj: Project):
+        if (self._current and self._current.id != proj.id
+                and getattr(self.app.app_state, "unsaved_changes", False)):
+            answer = messagebox.askyesnocancel(
+                "Cambios sin guardar",
+                f"El proyecto «{self._current.name}» tiene cambios sin guardar.\n"
+                "¿Deseas guardarlos antes de abrir otro proyecto?",
+            )
+            if answer is None:
+                return
+            if answer:
+                self._save_project()
         self._current = proj
         self._page_index = 0
         self._proj_name_entry.delete(0, "end")
@@ -153,6 +164,7 @@ class ProjectsView(BaseView):
         self._update_canvas()
         self._empty_label.place_forget()
         self.app.app_state.current_project = proj
+        self.app.app_state.unsaved_changes = False
 
     def _update_canvas(self):
         if not self._current:

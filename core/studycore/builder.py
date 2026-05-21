@@ -1,8 +1,11 @@
+import hashlib
 import re
 import unicodedata
 from collections import Counter
 
 from core.studycore.models import Flashcard, QuizQuestion, StudyBundle
+
+_bundle_cache: dict[str, StudyBundle] = {}
 
 STOPWORDS_ES = {
     'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'un',
@@ -130,13 +133,18 @@ def extract_quiz(text: str, max_questions: int = 8) -> list[QuizQuestion]:
 def build_study_bundle(text: str) -> StudyBundle:
     if not text or not text.strip():
         return StudyBundle(source_text=text)
-    return StudyBundle(
+    key = hashlib.sha256(text.encode()).hexdigest()
+    if key in _bundle_cache:
+        return _bundle_cache[key]
+    bundle = StudyBundle(
         source_text=text,
         summary=extract_summary(text),
         key_terms=extract_key_terms(text),
         flashcards=extract_flashcards(text),
         quiz_questions=extract_quiz(text),
     )
+    _bundle_cache[key] = bundle
+    return bundle
 
 
 def grade_answer(expected: str, given: str, keywords: list[str]) -> float:

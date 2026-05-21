@@ -143,20 +143,20 @@ class GlyphBank:
                 new_hash = _avg_hash(new_img)
                 with _bank_lock:
                     existing_snapshot = [e for e in self._entries if e.char == char]
-                old_hashes = []
-                for e in existing_snapshot:
-                    if not Path(e.image_path).exists():
-                        continue
-                    try:
-                        old_hashes.append(_avg_hash(Image.open(e.image_path).convert("RGBA")))
-                    except Exception:
-                        pass
-                if old_hashes:
-                    best = min(_hamming(new_hash, h) for h in old_hashes)
-                    strict, _ = _dup_thresholds(char)
-                    if best <= strict:
-                        logger.debug(f"Duplicate glyph for '{char}' (hamming={best}), skipped")
-                        return None
+                    old_hashes = []
+                    for e in existing_snapshot:
+                        if not Path(e.image_path).exists():
+                            continue
+                        try:
+                            old_hashes.append(_avg_hash(Image.open(e.image_path).convert("RGBA")))
+                        except Exception:
+                            pass
+                    if old_hashes:
+                        best = min(_hamming(new_hash, h) for h in old_hashes)
+                        strict, _ = _dup_thresholds(char)
+                        if best <= strict:
+                            logger.debug(f"Duplicate glyph for '{char}' (hamming={best}), skipped")
+                            return None
             except Exception as e:
                 logger.warning(f"Hash dedup check failed: {e}")
 

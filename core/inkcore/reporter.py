@@ -443,6 +443,12 @@ class InkCoreReporter:
         bottom.pack(fill="x", side="bottom")
         bottom.pack_propagate(False)
 
+        status_lbl = ctk.CTkLabel(
+            bottom, text="",
+            font=theme.FONT_SMALL, text_color=theme.ACCENT_GREEN,
+        )
+        status_lbl.pack(side="left", padx=16)
+
         def _export():
             from tkinter import filedialog
             path = filedialog.asksaveasfilename(
@@ -478,11 +484,5 @@ class InkCoreReporter:
             height=34, width=90,
             corner_radius=8,
         ).pack(side="right", padx=(0, 6), pady=9)
-
-        status_lbl = ctk.CTkLabel(
-            bottom, text="",
-            font=theme.FONT_SMALL, text_color=theme.ACCENT_GREEN,
-        )
-        status_lbl.pack(side="left", padx=16)
 
         win.focus_set()

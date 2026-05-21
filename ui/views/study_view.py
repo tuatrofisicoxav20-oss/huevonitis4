@@ -185,10 +185,17 @@ class StudyView(BaseView):
         )
         if not path:
             return
-        text = self._ocr.read_docx(path)
-        self._text_input.delete("0.0", "end")
-        self._text_input.insert("0.0", text)
-        self.toast("Archivo Word importado", "success")
+        self.toast("Importando Word…", "info")
+
+        def _read():
+            text = self._ocr.read_docx(path)
+            def _done():
+                self._text_input.delete("0.0", "end")
+                self._text_input.insert("0.0", text)
+                self.toast("Archivo Word importado", "success")
+            self.after(0, _done)
+
+        threading.Thread(target=_read, daemon=True).start()
 
     def _clear_text(self):
         self._text_input.delete("0.0", "end")
