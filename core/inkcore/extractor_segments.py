@@ -28,7 +28,7 @@ except ImportError:
     PIL_OK = False
 
 try:
-    TESSERACT_OK
+    _ = TESSERACT_OK
 except NameError:
     TESSERACT_OK = PIL_OK and "pytesseract" in dir()
 
@@ -57,7 +57,8 @@ class SegmentDetector:
         start = 0
         for y in range(h):
             if proj[y] > threshold and not in_band:
-                start = y; in_band = True
+                start = y
+                in_band = True
             elif proj[y] <= threshold and in_band:
                 if y - start >= MIN_BAND_H:
                     raw_bands.append((start, y))
@@ -183,7 +184,7 @@ class SegmentDetector:
 
             result = sorted(all_boundaries)
             if result:
-                logger.info(f"Tesseract: {len(result)} fronteras (PSM 7+13, escala×{scale:.1f})")
+                logger.info(f"Tesseract: {len(result)} fronteras (PSM 7+13, escala\u00d7{scale:.1f})")
             return result
         except Exception as e:
             logger.debug(f"Tesseract boundary error: {e}")

@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from tkinter import messagebox
 
@@ -211,10 +212,8 @@ class HuevonitisApp(ctk.CTk):
         self.app_state.active_view = view_id
 
         if self._current_view:
-            try:
+            with contextlib.suppress(Exception):
                 self._current_view.on_hide()
-            except Exception:
-                pass
             self._current_view.pack_forget()
 
         # Issue #6: reuse cached view instances; only create each view once.
@@ -225,7 +224,7 @@ class HuevonitisApp(ctk.CTk):
         view = self._views[view_id]
         # Issue #5: pack (map) the widget before calling on_show() so that any
         # geometry queries inside on_show() (winfo_width, winfo_height, etc.)
-        # return valid values rather than 1×1 defaults.
+        # return valid values rather than 1x1 defaults.
         view.pack(fill="both", expand=True)
         self._current_view = view
         view.on_show()
@@ -237,10 +236,8 @@ class HuevonitisApp(ctk.CTk):
         self._status_label.configure(text=message, text_color=theme.TEXT_SECONDARY)
         if clear_after > 0:
             if self._status_clear_job is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self.after_cancel(self._status_clear_job)
-                except Exception:
-                    pass
             self._status_clear_job = self.after(clear_after, lambda: self._status_label.configure(
                 text="Listo", text_color=theme.TEXT_MUTED))
 
@@ -270,15 +267,11 @@ class HuevonitisApp(ctk.CTk):
 
     def _stop_spinner(self):
         if self._spinner_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._spinner_job)
-            except Exception:
-                pass
             self._spinner_job = None
-        try:
+        with contextlib.suppress(Exception):
             self._spinner_label.configure(text="")
-        except Exception:
-            pass
 
     def _schedule_title_update(self):
         def update():
@@ -419,19 +412,15 @@ class HuevonitisApp(ctk.CTk):
         for job_attr in ("_title_update_job", "_autosave_job", "_spinner_job", "_status_clear_job"):
             job = getattr(self, job_attr, None)
             if job is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self.after_cancel(job)
-                except Exception:
-                    pass
         self.destroy()
 
     def _schedule_autosave(self):
         def autosave():
             if self.app_state.current_project and self.app_state.unsaved_changes:
-                try:
+                with contextlib.suppress(Exception):
                     self.project_manager.autosave(self.app_state.current_project)
-                except Exception:
-                    pass
             self._autosave_job = self.after(config.AUTOSAVE_INTERVAL_MS, autosave)
 
         self._autosave_job = self.after(config.AUTOSAVE_INTERVAL_MS, autosave)

@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 
 try:
     from reportlab.lib import colors as rl_colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
@@ -295,7 +294,7 @@ class InkCoreReporter:
                 ACCENT_ORANGE = "#F97316"
                 ACCENT_RED = "#EF4444"
                 ACCENT_YELLOW = "#EAB308"
-                TIER_COLORS = {"Bronze": "#CD7F32", "Silver": "#C0C0C0", "Gold": "#FFD700"}
+                TIER_COLORS = {"Bronze": "#CD7F32", "Silver": "#C0C0C0", "Gold": "#FFD700"}  # noqa: RUF012
                 FONT_TITLE = ("TkDefaultFont", 22, "bold")
                 FONT_HEADING = ("TkDefaultFont", 16, "bold")
                 FONT_SUBHEADING = ("TkDefaultFont", 13, "bold")
@@ -381,7 +380,7 @@ class InkCoreReporter:
         scroll.columnconfigure(3, weight=1)
 
         # Header
-        for col, (text, anchor) in enumerate([
+        for col, (text, _) in enumerate([
             ("Char", "w"), ("Glifos", "center"), ("Calidad", "center"), ("Tier", "center")
         ]):
             ctk.CTkLabel(

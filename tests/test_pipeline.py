@@ -1,5 +1,4 @@
 """Smoke test for InkCorePipeline instantiation."""
-import pytest
 
 
 def test_pipeline_instantiates(tmp_path):

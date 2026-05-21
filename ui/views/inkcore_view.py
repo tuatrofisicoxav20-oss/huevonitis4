@@ -676,7 +676,7 @@ class InkCoreView(BaseView):
             cell.pack_propagate(False)
 
             del_btn = ctk.CTkButton(
-                cell, text="×", width=16, height=16,
+                cell, text="\u00d7", width=16, height=16,
                 font=("Segoe UI", 10, "bold"),
                 fg_color="#3a1a1a", hover_color=theme.ACCENT_RED,
                 text_color=theme.ACCENT_RED, corner_radius=8,
@@ -1352,7 +1352,7 @@ class InkCoreView(BaseView):
     def _review_batch_action(self, action: str):
         selected = [
             glyph for (cb, glyph), var
-            in zip(self._review_checkboxes, self._review_check_vars)
+            in zip(self._review_checkboxes, self._review_check_vars, strict=False)
             if var.get()
         ]
         if not selected:

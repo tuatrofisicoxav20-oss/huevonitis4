@@ -1,7 +1,5 @@
 """Tests for studycore: build_study_bundle, grade_answer, edge cases."""
-import pytest
 from core.studycore.builder import build_study_bundle, grade_answer
-
 
 SAMPLE_TEXT = """
 La fotosíntesis es el proceso por el cual las plantas convierten la luz solar en energía.

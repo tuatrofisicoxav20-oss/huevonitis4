@@ -1,3 +1,5 @@
+import contextlib
+
 import customtkinter as ctk
 
 from ui import theme
@@ -24,9 +26,9 @@ class ToastManager:
             "warning": theme.ACCENT_ORANGE,
             "error": theme.ACCENT_RED,
         }
-        icons = {"info": "ℹ", "success": "✓", "warning": "⚠", "error": "✕"}
+        icons = {"info": "\u2139", "success": "✓", "warning": "⚠", "error": "✕"}
         color = colors.get(kind, theme.ACCENT_BLUE)
-        icon = icons.get(kind, "ℹ")
+        icon = icons.get(kind, "\u2139")
 
         # Evict oldest if at max
         if len(self._toasts) >= self._max:
@@ -63,7 +65,7 @@ class ToastManager:
         ).pack(side="left", fill="x", expand=True)
 
         btn_close = ctk.CTkButton(
-            toast_row, text="×", width=24, height=24,
+            toast_row, text="\u00d7", width=24, height=24,
             fg_color="transparent", hover_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_SECONDARY, font=("Segoe UI", 14),
             command=lambda t=toast: self._dismiss(t),
@@ -148,10 +150,8 @@ class ToastManager:
             if i < steps:
                 toast.after(step_ms, lambda: step(i + 1))
             else:
-                try:
+                with contextlib.suppress(Exception):
                     toast.place(x=target_x, y=toast.winfo_y(), width=self.TOAST_WIDTH)
-                except Exception:
-                    pass
 
         step(1)
 

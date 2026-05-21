@@ -39,7 +39,7 @@ except ImportError:
     TESS_OK = False
     print("ADVERTENCIA: pytesseract no disponible — texto de referencia debe proveerse manualmente")
 
-from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
+from core.inkcore.extractor import ExtractionOptions, GlyphExtractor  # noqa: E402
 
 
 def get_reference_text_from_tesseract(line_mask: np.ndarray) -> str:
@@ -186,7 +186,6 @@ def run_comparison(image_path: str, ref_text: str = "") -> None:
         if note:
             print(f"{name:<38} {note:>28}")
             continue
-        marker = ""
         # Puntuación combinada: priorizar glifos completos + calidad promedio
         combined = avg * 0.7 + (gc / max(1, n)) * 0.3
         if combined > best_score:

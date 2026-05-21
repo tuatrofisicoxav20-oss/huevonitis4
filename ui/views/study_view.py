@@ -1,3 +1,4 @@
+import contextlib
 import threading
 from tkinter import filedialog
 
@@ -303,17 +304,13 @@ class StudyView(BaseView):
                 return
             t = (i + 1) / steps_grow
             wl = max(1, int(original_wraplength * t))
-            try:
+            with contextlib.suppress(Exception):
                 self._card_text.configure(wraplength=wl)
-            except Exception:
-                pass
             if i < steps_grow - 1:
                 self.after(step_ms, lambda: grow(i + 1))
             else:
-                try:
+                with contextlib.suppress(Exception):
                     self._card_text.configure(wraplength=original_wraplength)
-                except Exception:
-                    pass
 
         shrink(0)
 
@@ -386,19 +383,15 @@ class StudyView(BaseView):
             )
         self._quiz_index += 1
         if self._quiz_next_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._quiz_next_job)
-            except Exception:
-                pass
         self._quiz_next_job = self.after(1400, self._show_question)
 
     def on_hide(self):
         """Cancel any pending after-jobs when navigating away."""
         if self._quiz_next_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._quiz_next_job)
-            except Exception:
-                pass
             self._quiz_next_job = None
 
     def _gen_concepts(self):
@@ -413,13 +406,11 @@ class StudyView(BaseView):
             return
         row = ctk.CTkFrame(self._concepts_frame, fg_color="transparent")
         row.pack(fill="x", padx=4, pady=4)
-        col_count = 0
-        for term in terms:
+        for col_count, term in enumerate(terms, start=1):
             chip = ctk.CTkFrame(row, fg_color=theme.ACCENT_BLUE, corner_radius=20)
             chip.pack(side="left", padx=4, pady=4)
             ctk.CTkLabel(chip, text=f"  {term}  ", font=theme.FONT_SMALL,
                          text_color=theme.TEXT_PRIMARY).pack(padx=6, pady=4)
-            col_count += 1
             if col_count % 4 == 0:
                 row = ctk.CTkFrame(self._concepts_frame, fg_color="transparent")
                 row.pack(fill="x", padx=4, pady=2)

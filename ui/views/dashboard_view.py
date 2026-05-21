@@ -1,3 +1,4 @@
+import contextlib
 from datetime import datetime
 
 import customtkinter as ctk
@@ -106,7 +107,7 @@ class DashboardView(BaseView):
             ),
         ]
 
-        for col_idx, (icon, title, subtitle, cmd, color, bg) in enumerate(actions):
+        for col_idx, (icon, title, subtitle, cmd, color, _) in enumerate(actions):
             col_frame = ctk.CTkFrame(
                 actions_frame,
                 fg_color="transparent",
@@ -166,10 +167,8 @@ class DashboardView(BaseView):
     def _build_stats(self):
         # Cancel any pending animate callback from a previous on_show() call
         if self._stats_animate_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._stats_animate_job)
-            except Exception:
-                pass
             self._stats_animate_job = None
 
         for w in self._stats_row.winfo_children():
@@ -288,10 +287,8 @@ class DashboardView(BaseView):
 
     def on_hide(self):
         if self._stats_animate_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._stats_animate_job)
-            except Exception:
-                pass
             self._stats_animate_job = None
 
     def on_show(self):

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -41,10 +42,8 @@ def _atomic_write_json(path: Path, data) -> None:
                 logger.warning(f"Could not create backup {bak}: {e}")
         os.replace(tmp_path, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise
 
 

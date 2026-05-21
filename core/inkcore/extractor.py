@@ -12,7 +12,7 @@ Mejoras sobre v2:
   • Split de cajas anchas por valles de proyección vertical
   • RGBA anti-aliased (bordes suaves via Gaussian + distance transform)
   • Quality scoring mejorado: ancho de trazo (distance transform) + alineación
-  • Doble hash perceptual (8×8 + 16×16) para deduplicación más precisa
+  • Doble hash perceptual (8x8 + 16x16) para deduplicación más precisa
   • get_preprocessed_preview() para mostrar resultado del pre-proceso en UI
 """
 import logging
@@ -72,8 +72,10 @@ class BBox:
     __slots__ = ("h", "w", "x", "y")
 
     def __init__(self, x: int, y: int, w: int, h: int):
-        self.x = int(x); self.y = int(y)
-        self.w = int(max(1, w)); self.h = int(max(1, h))
+        self.x = int(x)
+        self.y = int(y)
+        self.w = int(max(1, w))
+        self.h = int(max(1, h))
 
     @property
     def x2(self) -> int: return self.x + self.w
@@ -96,7 +98,7 @@ def avg_hash(img: "Image.Image", size: int = 16) -> str:
 
 
 def hamming(a: str, b: str) -> int:
-    return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))
+    return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
 
 
 def _dual_hash(img: "Image.Image") -> tuple[str, str]:
@@ -175,7 +177,7 @@ class GlyphExtractor:
         if abs(skew) > 0.3:
             logger.debug(f"Corrección de inclinación: {skew:.2f}°")
 
-        gray, raw_mask, clean = self._full_preprocess(img, opts)
+        gray, _, clean = self._full_preprocess(img, opts)
 
         line_boxes = self._find_line_boxes(clean)
         if not line_boxes:
@@ -243,8 +245,8 @@ class GlyphExtractor:
     def _prepare_ref_lines(self, ref_text: str, line_boxes: list["BBox"]) -> list[str]:
         """Limpia el texto de referencia y lo divide entre los renglones detectados."""
         # Limpiar separadores en cada línea del texto
-        raw_lines = [self._clean_ref(l) for l in ref_text.splitlines()]
-        raw_lines = [l for l in raw_lines if l]
+        raw_lines = [self._clean_ref(ln) for ln in ref_text.splitlines()]
+        raw_lines = [ln for ln in raw_lines if ln]
         if not raw_lines:
             raw_lines = [self._clean_ref(ref_text)]
 
@@ -257,7 +259,7 @@ class GlyphExtractor:
         # Si hay más bandas que líneas de referencia:
         # distribuir todos los caracteres del texto entre las bandas
         # de forma proporcional al ancho de cada banda
-        all_chars = "".join(l.replace(" ", "") for l in raw_lines)
+        all_chars = "".join(ln.replace(" ", "") for ln in raw_lines)
         if not all_chars:
             return raw_lines
 
@@ -640,7 +642,8 @@ class GlyphExtractor:
         start = 0
         for y in range(h):
             if proj[y] > threshold and not in_band:
-                start = y; in_band = True
+                start = y
+                in_band = True
             elif proj[y] <= threshold and in_band:
                 if y - start >= MIN_BAND_H:
                     raw_bands.append((start, y))
@@ -747,7 +750,7 @@ class GlyphExtractor:
     def _tesseract_boundaries(self, line_mask: np.ndarray) -> list[int]:
         """Fronteras X de caracteres via Tesseract (varias estrategias).
 
-        • Escala a 3× la altura original (mín. 200 px) — Tesseract necesita
+        • Escala a 3x la altura original (mín. 200 px) — Tesseract necesita
           texto grande para operar con fiabilidad en escritura manual.
         • Añade borde blanco amplio — Tesseract descarta caracteres en los
           bordes; el borde evita esto.
@@ -761,7 +764,7 @@ class GlyphExtractor:
         try:
             h, w = line_mask.shape[:2]
 
-            # Escalar agresivamente: mínimo 200 px de altura, máximo 3×
+            # Escalar agresivamente: mínimo 200 px de altura, máximo 3x
             target_h = max(200, h * 3)
             scale = target_h / max(1, h)
             scaled_w = int(w * scale)
@@ -823,7 +826,7 @@ class GlyphExtractor:
             if result:
                 logger.info(
                     f"Tesseract: {len(result)} fronteras "
-                    f"(PSM 7+13, escala×{scale:.1f})"
+                    f"(PSM 7+13, escala\u00d7{scale:.1f})"
                 )
             return result
         except Exception as e:
@@ -894,17 +897,28 @@ class GlyphExtractor:
         Tabla calibrada para escritura manual española.
         Valores más específicos → mejor distribución de fronteras.
         """
-        if ch in ".,;:!¡|`'\"":          return 0.28
-        if ch in "iltI1íì":              return 0.40
-        if ch in "jr":                   return 0.50  # 'r' explícito para no confundirse con 's'
-        if ch in "fFtT":                 return 0.60
-        if ch in "scCeéèêëS":            return 0.63  # curvados estrechos; 's' era 0.78 → fijo r/s
-        if ch in "nuvbpkxyzñhúùü":       return 0.72  # grupo medio
-        if ch in "adgqáàâ":              return 0.80  # redondos con bucle
-        if ch in "oóòôöO":               return 0.85  # circular
-        if ch in "mwMW":                 return 1.30
-        if ch.isupper():                 return 0.92
-        if ch.isdigit():                 return 0.73
+        if ch in ".,;:!¡|`'\"":
+            return 0.28
+        if ch in "iltI1íì":
+            return 0.40
+        if ch in "jr":
+            return 0.50
+        if ch in "fFtT":
+            return 0.60
+        if ch in "scCeéèêëS":
+            return 0.63
+        if ch in "nuvbpkxyzñhúùü":
+            return 0.72
+        if ch in "adgqáàâ":
+            return 0.80
+        if ch in "oóòôöO":
+            return 0.85
+        if ch in "mwMW":
+            return 1.30
+        if ch.isupper():
+            return 0.92
+        if ch.isdigit():
+            return 0.73
         return 0.78
 
     # [testing] ── Estrategias alternativas de segmentación ──────────
@@ -954,7 +968,7 @@ class GlyphExtractor:
         valleys.sort(key=lambda v: -v[0])
         chosen = sorted([v[1] for v in valleys[:n - 1]])
 
-        bounds = [x_min] + chosen + [x_max]
+        bounds = [x_min, *chosen, x_max]
         for i in range(1, len(bounds)):
             if bounds[i] <= bounds[i - 1]:
                 bounds[i] = bounds[i - 1] + 1
@@ -1071,8 +1085,7 @@ class GlyphExtractor:
         if n <= 1:
             return [x_min, x_max]
 
-        h, w = binary_band.shape[:2]
-        num, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        num, _, stats, centroids = cv2.connectedComponentsWithStats(
             binary_band, connectivity=8
         )
 
@@ -1125,7 +1138,7 @@ class GlyphExtractor:
                 "cx": (g1["cx"] * g1["area"] + g2["cx"] * g2["area"])
                        / max(1, g1["area"] + g2["area"]),
             }
-            groups = groups[:min_gap_idx] + [merged] + groups[min_gap_idx + 2:]
+            groups = [*groups[:min_gap_idx], merged, *groups[min_gap_idx + 2:]]
 
         top_n = groups
 
@@ -1171,7 +1184,7 @@ class GlyphExtractor:
         char_w_avg = max(1, (x_max - x_min) / n)
         search_half = int(char_w_avg * 0.40)
 
-        num, labels, stats, _ = cv2.connectedComponentsWithStats(
+        _, labels, _, _ = cv2.connectedComponentsWithStats(
             binary_band, connectivity=8
         )
 
@@ -1306,7 +1319,7 @@ class GlyphExtractor:
             used.add(best_i)
             chosen.append(gap_centers[best_i])
 
-        bounds = [x_min] + sorted(chosen) + [x_max]
+        bounds = [x_min, *sorted(chosen), x_max]
         for i in range(1, len(bounds)):
             if bounds[i] <= bounds[i - 1]:
                 bounds[i] = bounds[i - 1] + 1

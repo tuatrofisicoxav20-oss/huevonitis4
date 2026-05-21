@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -42,16 +43,12 @@ def load_settings() -> None:
             s = json.load(f)
     except Exception:
         return
-    try:
+    with contextlib.suppress(KeyError, ValueError, TypeError):
         BASE_PRICE_PER_PAGE_MXN = float(s["base_price"])
-    except (KeyError, ValueError, TypeError):
-        pass
-    try:
+    with contextlib.suppress(KeyError, ValueError, TypeError):
         v = int(s["autosave_interval"])
         if v > 0:
             AUTOSAVE_INTERVAL_MS = v * 1000
-    except (KeyError, ValueError, TypeError):
-        pass
     val = s.get("tesseract_path", "")
     if isinstance(val, str) and val:
         TESSERACT_CMD = val

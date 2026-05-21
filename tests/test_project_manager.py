@@ -1,8 +1,7 @@
 """Tests for ProjectManager: save/load/autosave/delete + .bak fallback."""
-import json
-from pathlib import Path
 
 import pytest
+
 from core.models import Project
 
 

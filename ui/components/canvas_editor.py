@@ -35,7 +35,7 @@ class CanvasEditor(ctk.CTkFrame):
             ("select", "⬡ Seleccionar", "S"),
             ("text", "T Texto", "T"),
             ("rect", "▭ Rect", "R"),
-            ("line", "╱ Línea", "L"),
+            ("line", "\u2571 Línea", "L"),
         ]
         self._tool_buttons: dict = {}
         for tool_id, label, _ in tools:
@@ -53,7 +53,7 @@ class CanvasEditor(ctk.CTkFrame):
 
         zoom_frame = ctk.CTkFrame(toolbar, fg_color="transparent")
         zoom_frame.pack(side="right", padx=8)
-        ctk.CTkButton(zoom_frame, text="−", width=28, height=28, font=("Segoe UI", 14),
+        ctk.CTkButton(zoom_frame, text="\u2212", width=28, height=28, font=("Segoe UI", 14),
                       fg_color=theme.BG_SECONDARY, command=self._zoom_out).pack(side="left")
         self._zoom_label = ctk.CTkLabel(zoom_frame, text="100%", font=theme.FONT_SMALL,
                                         text_color=theme.TEXT_SECONDARY, width=44)
@@ -340,7 +340,7 @@ class CanvasEditor(ctk.CTkFrame):
     def _show_props(self, el):
         info_parts = [f"ID: {el.id[:8]}..."]
         info_parts.append(f"Pos: ({int(el.x)}, {int(el.y)})")
-        info_parts.append(f"Tam: {int(el.width)}×{int(el.height)}")
+        info_parts.append(f"Tam: {int(el.width)}\u00d7{int(el.height)}")
         if hasattr(el, 'text'):
             info_parts.append(f"Texto: {el.text[:20]}")
         self._props_label.configure(text="  |  ".join(info_parts), text_color=theme.TEXT_SECONDARY)

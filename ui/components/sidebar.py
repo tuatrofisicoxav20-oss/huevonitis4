@@ -1,3 +1,5 @@
+import contextlib
+
 import customtkinter as ctk
 
 import config
@@ -165,10 +167,8 @@ class CollapsibleSidebar(ctk.CTkFrame):
     def _hide_tooltip(self, view_id: str):
         tip = self._tooltips.pop(view_id, None)
         if tip:
-            try:
+            with contextlib.suppress(Exception):
                 tip.destroy()
-            except Exception:
-                pass
 
     # ── Active state ───────────────────────────────────────────────
 

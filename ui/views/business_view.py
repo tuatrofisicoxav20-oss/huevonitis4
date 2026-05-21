@@ -1,3 +1,4 @@
+import contextlib
 import tkinter as tk
 from tkinter import messagebox
 
@@ -187,10 +188,10 @@ class BusinessView(BaseView):
             ("Tipo de trabajo:", job.job_type),
             ("Páginas:", str(job.pages)),
             ("Urgencia:", job.urgency),
-            (f"Precio base ({job.pages} pág × ${config.BASE_PRICE_PER_PAGE_MXN:.0f}):", f"${breakdown['base']:,.2f}"),
-            ("Multiplicador urgencia:", f"×{breakdown['urgency_multiplier']}"),
-            ("Multiplicador tipo:", f"×{breakdown['type_multiplier']}"),
-            ("Factor complejidad:", f"×{breakdown['complexity_factor']}"),
+            (f"Precio base ({job.pages} pág \u00d7 ${config.BASE_PRICE_PER_PAGE_MXN:.0f}):", f"${breakdown['base']:,.2f}"),
+            ("Multiplicador urgencia:", f"\u00d7{breakdown['urgency_multiplier']}"),
+            ("Multiplicador tipo:", f"\u00d7{breakdown['type_multiplier']}"),
+            ("Factor complejidad:", f"\u00d7{breakdown['complexity_factor']}"),
         ]
         for label, value in fields:
             row = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -449,10 +450,8 @@ class BusinessView(BaseView):
     def _draw_status_chart(self, jobs: list[ClientJob]):
         # Cancel any in-flight pie animation before starting a new one
         if self._pie_anim_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._pie_anim_job)
-            except Exception:
-                pass
             self._pie_anim_job = None
 
         self._chart_canvas.delete("all")
@@ -498,7 +497,7 @@ class BusinessView(BaseView):
         if arc_idx >= len(arcs):
             self._pie_anim_job = None
             return
-        status, count, start_angle, extent, color = arcs[arc_idx]
+        _, _, start_angle, extent, color = arcs[arc_idx]
         steps = max(6, int(extent / 8))
         step_ms = 12
 
@@ -535,10 +534,8 @@ class BusinessView(BaseView):
 
     def on_hide(self):
         if self._pie_anim_job is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._pie_anim_job)
-            except Exception:
-                pass
             self._pie_anim_job = None
 
     def on_show(self):

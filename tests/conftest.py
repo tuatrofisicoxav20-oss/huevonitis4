@@ -1,5 +1,4 @@
 """Shared fixtures for Huevonitis 4 test suite."""
-import os
 import sys
 from pathlib import Path
 

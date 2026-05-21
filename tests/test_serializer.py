@@ -1,14 +1,25 @@
 """Round-trip serialization tests for all dataclasses."""
 import json
+
 from core.models import (
-    ClientJob, GlyphEntry, LineElement, Page, Payment, Project,
-    RectElement, TextElement,
+    ClientJob,
+    GlyphEntry,
+    LineElement,
+    Page,
+    Payment,
+    Project,
+    RectElement,
+    TextElement,
 )
 from core.serializer import (
-    job_from_dict, job_to_dict,
-    page_from_dict, page_to_dict,
-    payment_from_dict, payment_to_dict,
-    project_from_dict, project_to_dict,
+    job_from_dict,
+    job_to_dict,
+    page_from_dict,
+    page_to_dict,
+    payment_from_dict,
+    payment_to_dict,
+    project_from_dict,
+    project_to_dict,
 )
 
 

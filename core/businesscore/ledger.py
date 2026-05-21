@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -46,10 +47,8 @@ class BusinessLedger:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, target_path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
     def save(self):

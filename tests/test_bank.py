@@ -43,7 +43,6 @@ def test_add_glyph(bank, tmp_path):
     reason="Pillow not installed"
 )
 def test_add_and_reload(bank, tmp_path):
-    import config
     src = tmp_path / "glyph_b.png"
     if not _make_test_png(src):
         pytest.skip("PIL not available")

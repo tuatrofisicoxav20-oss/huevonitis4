@@ -259,7 +259,7 @@ class ProjectsView(BaseView):
             ).pack(side="left", anchor="w")
 
             ctk.CTkButton(
-                name_row, text="×", width=22, height=22,
+                name_row, text="\u00d7", width=22, height=22,
                 font=("Segoe UI", 13),
                 fg_color="transparent", hover_color=theme.ACCENT_RED,
                 text_color=theme.TEXT_MUTED,

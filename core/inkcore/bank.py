@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -34,7 +35,7 @@ def _avg_hash(img: "Image.Image", size: int = 16) -> str:
 
 
 def _hamming(a: str, b: str) -> int:
-    return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))
+    return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
 
 
 def _dup_thresholds(ch: str) -> tuple[int, int]:
@@ -87,10 +88,8 @@ class GlyphBank:
             if len(parts) == 2:
                 char = parts[0]
                 if char.startswith("punct_"):
-                    try:
+                    with contextlib.suppress(Exception):
                         char = chr(int(char[6:]))
-                    except Exception:
-                        pass
                 try:
                     idx = int(parts[1])
                 except ValueError:
@@ -121,10 +120,8 @@ class GlyphBank:
                     logger.warning(f"Could not create backup {bak}: {e}")
             os.replace(tmp_path, path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
     def save(self):
@@ -147,10 +144,8 @@ class GlyphBank:
                     for e in existing_snapshot:
                         if not Path(e.image_path).exists():
                             continue
-                        try:
+                        with contextlib.suppress(Exception):
                             old_hashes.append(_avg_hash(Image.open(e.image_path).convert("RGBA")))
-                        except Exception:
-                            pass
                     if old_hashes:
                         best = min(_hamming(new_hash, h) for h in old_hashes)
                         strict, _ = _dup_thresholds(char)

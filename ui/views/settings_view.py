@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import tempfile
@@ -33,10 +34,8 @@ class SettingsView(BaseView):
                 json.dump(self._settings, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, config.SETTINGS_FILE)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
     def _build(self):
@@ -159,18 +158,14 @@ class SettingsView(BaseView):
 def _apply_settings_to_config(settings: dict) -> None:
     """Apply saved settings values back to config module globals."""
     val = settings.get("base_price", "")
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         config.BASE_PRICE_PER_PAGE_MXN = float(val)
-    except (ValueError, TypeError):
-        pass
 
     val = settings.get("autosave_interval", "")
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         v = int(val)
         if v > 0:
             config.AUTOSAVE_INTERVAL_MS = v * 1000
-    except (ValueError, TypeError):
-        pass
 
     val = settings.get("tesseract_path", "")
     if val:

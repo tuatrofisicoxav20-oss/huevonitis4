@@ -1,4 +1,4 @@
-
+import contextlib
 
 # ── Easing functions ────────────────────────────────────────────────────────
 
@@ -90,17 +90,13 @@ def fade_frame_in(frame, steps: int = 8, step_ms: int = 20, callback=None):
     def step(i):
         t = ease_in_out(i / steps)
         color = _lerp_color(start_col, end_col, t)
-        try:
+        with contextlib.suppress(Exception):
             frame.configure(fg_color=color)
-        except Exception:
-            pass
         if i < steps:
             frame.after(step_ms, lambda: step(i + 1))
         else:
-            try:
+            with contextlib.suppress(Exception):
                 frame.configure(fg_color=end_col)
-            except Exception:
-                pass
             if callback:
                 callback()
 
@@ -119,10 +115,8 @@ def count_up(label, end_value: int | float, prefix: str = "", suffix: str = "",
     # Cancel any existing animation running on this label
     existing = _count_up_jobs.pop(id(label), None)
     if existing is not None:
-        try:
+        with contextlib.suppress(Exception):
             label.after_cancel(existing)
-        except Exception:
-            pass
 
     def step(i):
         t = ease_in_out(i / steps)
@@ -184,10 +178,8 @@ def animate_value(start: float, end: float, duration_ms: int, callback,
     # Cancel any in-flight animation on this widget
     existing = _animate_value_jobs.pop(id(widget), None)
     if existing is not None:
-        try:
+        with contextlib.suppress(Exception):
             widget.after_cancel(existing)
-        except Exception:
-            pass
 
     def step(i):
         t = ease_fn(i / steps)
@@ -234,10 +226,8 @@ def fade_in(widget, duration_ms: int = 250, steps: int = 15,
         if i < steps:
             widget.after(step_ms, lambda: step(i + 1))
         else:
-            try:
+            with contextlib.suppress(Exception):
                 widget.configure(fg_color=to_color)
-            except Exception:
-                pass
 
     step(1)
 
@@ -280,10 +270,8 @@ def slide_in(widget, direction: str = "right", distance_px: int = 40,
         if i < steps:
             widget.after(step_ms, lambda: step(i + 1))
         else:
-            try:
+            with contextlib.suppress(Exception):
                 widget.place(x=x0, y=y0, width=w, height=h)
-            except Exception:
-                pass
 
     step(1)
 
@@ -300,10 +288,8 @@ def pulse(widget, color_a: str, color_b: str, cycles: int = 3,
 
     def do_half(half_idx):
         if half_idx >= total_halves:
-            try:
+            with contextlib.suppress(Exception):
                 widget.configure(fg_color=color_a)
-            except Exception:
-                pass
             return
         from_c = color_a if half_idx % 2 == 0 else color_b
         to_c = color_b if half_idx % 2 == 0 else color_a
@@ -357,10 +343,8 @@ def bind_hover_color(widget, normal_color: str, hover_color: str,
             if i < steps:
                 widget.after(step_ms, lambda: step(i + 1))
             else:
-                try:
+                with contextlib.suppress(Exception):
                     widget.configure(fg_color=target)
-                except Exception:
-                    pass
 
         step(1)
 

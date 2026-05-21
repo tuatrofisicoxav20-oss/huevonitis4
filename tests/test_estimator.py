@@ -1,5 +1,6 @@
 """Tests for businesscore estimator."""
 import pytest
+
 from core.businesscore.estimator import calculate_price, get_price_breakdown
 from core.models import ClientJob
 

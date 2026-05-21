@@ -1,3 +1,5 @@
+import contextlib
+
 import customtkinter as ctk
 
 from ui import theme
@@ -96,7 +98,7 @@ class StatCard(ctk.CTkFrame):
         return f"{int(value):,}"
 
     def animate_value(self):
-        try:
+        with contextlib.suppress(Exception):
             count_up(
                 self._val_label,
                 float(self._value),
@@ -106,8 +108,6 @@ class StatCard(ctk.CTkFrame):
                 steps=24,
                 step_ms=25,
             )
-        except Exception:
-            pass
 
 
 class ProjectCard(ctk.CTkFrame):

@@ -4,6 +4,7 @@ DiagnosticsCollector — sistema de diagnóstico para Huevonitis 4.
 Registra eventos con timestamp en memoria y en archivo de log.
 Proporciona resumen de errores, operaciones lentas y eventos frecuentes.
 """
+import contextlib
 import functools
 import logging
 import time
@@ -18,10 +19,8 @@ _LOG_FILE = _LOG_DIR / "diagnostics.log"
 
 
 def _ensure_log_dir():
-    try:
+    with contextlib.suppress(Exception):
         _LOG_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
 
 
 class _Event:
