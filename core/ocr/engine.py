@@ -4,9 +4,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 try:
+    import numpy as np
     import pytesseract
     from PIL import Image
-    import numpy as np
     TESSERACT_OK = True
 except ImportError:
     TESSERACT_OK = False

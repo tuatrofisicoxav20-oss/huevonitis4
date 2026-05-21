@@ -7,9 +7,10 @@ import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
-from core.models import GlyphEntry
-from core.inkcore.quality import assess_glyph
+
 import config
+from core.inkcore.quality import assess_glyph
+from core.models import GlyphEntry
 
 logger = logging.getLogger(__name__)
 

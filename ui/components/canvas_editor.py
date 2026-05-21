@@ -1,7 +1,9 @@
 import tkinter as tk
+
 import customtkinter as ctk
+
+from core.models import LineElement, Page, RectElement, TextElement
 from ui import theme
-from core.models import TextElement, RectElement, LineElement, ImageElement, Page
 
 
 class CanvasEditor(ctk.CTkFrame):
@@ -201,9 +203,7 @@ class CanvasEditor(ctk.CTkFrame):
             self._try_select(cx, cy)
         elif self._tool == "text":
             self._create_text(cx, cy)
-        elif self._tool == "rect":
-            self._rect_start = (cx, cy)
-        elif self._tool == "line":
+        elif self._tool == "rect" or self._tool == "line":
             self._rect_start = (cx, cy)
 
     def _try_select(self, cx, cy):

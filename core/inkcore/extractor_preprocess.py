@@ -5,7 +5,6 @@ Extraído de extractor.py para mejorar la modularidad.
 Contiene todas las operaciones de imagen que preceden a la detección de segmentos.
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +97,7 @@ class ImagePreprocessor:
 
     def _four_point_transform(
         self, img: "np.ndarray", pts: "np.ndarray"
-    ) -> "Optional[np.ndarray]":
+    ) -> "np.ndarray | None":
         try:
             rect = self._order_points(pts.astype(np.float32))
             tl, tr, br, bl = rect
@@ -146,7 +145,7 @@ class ImagePreprocessor:
                                  borderValue=(255, 255, 255))
         return rotated, float(angle)
 
-    def _estimate_skew(self, mask: "np.ndarray", width: int) -> "Optional[float]":
+    def _estimate_skew(self, mask: "np.ndarray", width: int) -> "float | None":
         edges = cv2.Canny(mask, 50, 150)
         lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=max(50, width // 12))
         if lines is not None:

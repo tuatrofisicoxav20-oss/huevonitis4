@@ -1,7 +1,8 @@
 import customtkinter as ctk
-from ui import theme
-from ui.animations import animate_width, bind_hover_color
+
 import config
+from ui import theme
+from ui.animations import animate_width
 
 
 class CollapsibleSidebar(ctk.CTkFrame):

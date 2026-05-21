@@ -1,23 +1,23 @@
 import threading
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Any
 
 
 @dataclass
 class AppState:
-    current_project: Optional[Any] = None
+    current_project: Any | None = None
     current_page_index: int = 0
-    selected_element_id: Optional[str] = None
+    selected_element_id: str | None = None
     active_view: str = "dashboard"
     sidebar_expanded: bool = True
     unsaved_changes: bool = False
     status_message: str = ""
     current_tool: str = "select"
     zoom_level: float = 1.0
-    current_job_id: Optional[str] = None
+    current_job_id: str | None = None
     study_text: str = ""
-    study_bundle: Optional[Any] = None
-    inkcore_image_path: Optional[str] = None
+    study_bundle: Any | None = None
+    inkcore_image_path: str | None = None
     inkcore_extracted_glyphs: list = field(default_factory=list)
 
     def __post_init__(self):

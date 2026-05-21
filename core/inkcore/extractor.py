@@ -74,7 +74,7 @@ class ExtractionOptions:
 
 
 class _BBox:
-    __slots__ = ("x", "y", "w", "h")
+    __slots__ = ("h", "w", "x", "y")
 
     def __init__(self, x: int, y: int, w: int, h: int):
         self.x = int(x); self.y = int(y)
@@ -119,7 +119,7 @@ class GlyphExtractor:
         self,
         image_path: str,
         reference_text: str,
-        options: Optional[ExtractionOptions] = None,
+        options: ExtractionOptions | None = None,
     ) -> list[GlyphEntry]:
         if not CV2_OK or not PIL_OK:
             logger.warning("cv2/Pillow no disponibles")
@@ -136,7 +136,7 @@ class GlyphExtractor:
     def get_preprocessed_preview(
         self,
         image_path: str,
-        options: Optional[ExtractionOptions] = None,
+        options: ExtractionOptions | None = None,
     ) -> Optional["Image.Image"]:
         """Devuelve imagen lado a lado: original | máscara limpia (para UI)."""
         if not CV2_OK or not PIL_OK or not Path(image_path).exists():
@@ -445,7 +445,7 @@ class GlyphExtractor:
                 return crop
         return img
 
-    def _four_point_transform(self, img: np.ndarray, pts: np.ndarray) -> Optional[np.ndarray]:
+    def _four_point_transform(self, img: np.ndarray, pts: np.ndarray) -> np.ndarray | None:
         try:
             rect = self._order_points(pts.astype(np.float32))
             tl, tr, br, bl = rect
@@ -493,7 +493,7 @@ class GlyphExtractor:
                                  borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
         return rotated, float(angle)
 
-    def _estimate_skew(self, mask: np.ndarray, width: int) -> Optional[float]:
+    def _estimate_skew(self, mask: np.ndarray, width: int) -> float | None:
         edges = cv2.Canny(mask, 50, 150)
         lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=max(50, width // 12))
         if lines is not None:
@@ -1524,7 +1524,7 @@ class GlyphExtractor:
 
     def _align_pos(
         self, boxes: list[_BBox], text: str, line_h: float = 30.0,
-        line_mask: Optional[np.ndarray] = None,
+        line_mask: np.ndarray | None = None,
     ) -> list[tuple[_BBox, str, float]]:
         """Pipeline de alineación mejorado: hybrid_v2 primario + 3-etapas como fallback.
 
@@ -1783,7 +1783,7 @@ class GlyphExtractor:
     # ── Glifo → RGBA + calidad ─────────────────────────────────────
 
     @staticmethod
-    def _tight_crop(mask: np.ndarray, padding: int = 3) -> Optional[np.ndarray]:
+    def _tight_crop(mask: np.ndarray, padding: int = 3) -> np.ndarray | None:
         rows = np.any(mask > 0, axis=1)
         cols = np.any(mask > 0, axis=0)
         if not rows.any() or not cols.any():

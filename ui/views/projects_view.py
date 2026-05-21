@@ -1,10 +1,12 @@
-import customtkinter as ctk
 from tkinter import messagebox
-from ui.views.base_view import BaseView
-from ui.components.canvas_editor import CanvasEditor
-from ui import theme
-from core.models import Project, Page
+
+import customtkinter as ctk
+
+from core.models import Page, Project
 from core.project_manager import ProjectManager
+from ui import theme
+from ui.components.canvas_editor import CanvasEditor
+from ui.views.base_view import BaseView
 
 
 class ProjectsView(BaseView):

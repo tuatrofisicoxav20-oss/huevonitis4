@@ -1,14 +1,15 @@
 import tkinter as tk
-import customtkinter as ctk
-from datetime import datetime
 from tkinter import messagebox
-from ui.views.base_view import BaseView
+
+import customtkinter as ctk
+
+import config
+from core.businesscore.estimator import calculate_price, generate_whatsapp_message, get_price_breakdown
+from core.businesscore.ledger import BusinessLedger
+from core.businesscore.models import JOB_STATUSES, JOB_TYPES, STATUS_COLORS, URGENCIES, ClientJob, Payment
 from ui import theme
 from ui.animations import count_up
-from core.businesscore.models import ClientJob, Payment, JOB_STATUSES, STATUS_COLORS, JOB_TYPES, URGENCIES
-from core.businesscore.estimator import calculate_price, get_price_breakdown, generate_whatsapp_message
-from core.businesscore.ledger import BusinessLedger
-import config
+from ui.views.base_view import BaseView
 
 
 class BusinessView(BaseView):

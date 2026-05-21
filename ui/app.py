@@ -1,16 +1,18 @@
 import logging
-import customtkinter as ctk
 from tkinter import messagebox
+
+import customtkinter as ctk
+
+import config
 from ui import theme
 from ui.components.sidebar import CollapsibleSidebar
 from ui.components.toast import ToastManager
+from ui.views.business_view import BusinessView
 from ui.views.dashboard_view import DashboardView
-from ui.views.study_view import StudyView
 from ui.views.inkcore_view import InkCoreView
 from ui.views.projects_view import ProjectsView
-from ui.views.business_view import BusinessView
 from ui.views.settings_view import SettingsView
-import config
+from ui.views.study_view import StudyView
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,9 @@ import logging
 import os
 import tempfile
 from datetime import datetime
-from core.businesscore.models import ClientJob, Payment, JOB_STATUSES
+
 import config
+from core.businesscore.models import ClientJob, Payment
 
 logger = logging.getLogger(__name__)
 

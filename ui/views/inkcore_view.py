@@ -1,23 +1,25 @@
 import logging
 import threading
 import time
-import customtkinter as ctk
-from tkinter import filedialog
 from pathlib import Path
-from ui.views.base_view import BaseView
-from ui import theme
-from core.inkcore.pipeline import InkCorePipeline
-from core.inkcore.extractor import ExtractionOptions
-from core.inkcore.renderer import RenderOptions
+from tkinter import filedialog
+
+import customtkinter as ctk
+
+from core.diagnostics import diagnostics
 from core.inkcore.ai.classifier import FallbackGlyphClassifier
+from core.inkcore.extractor import ExtractionOptions
+from core.inkcore.pipeline import InkCorePipeline
+from core.inkcore.renderer import RenderOptions
 from core.inkcore.reporter import InkCoreReporter
 from core.models import GlyphEntry
-from core.diagnostics import diagnostics
+from ui import theme
+from ui.views.base_view import BaseView
 
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import Image, ImageTk, ImageEnhance
+    from PIL import Image, ImageEnhance, ImageTk
     PIL_OK = True
 except ImportError:
     PIL_OK = False
@@ -34,12 +36,12 @@ class InkCoreView(BaseView):
         self._image_path: str | None = None
         self._glyph_photos: list = []
         self._review_photos: list = []
-        self._original_img: "Image.Image | None" = None
+        self._original_img: Image.Image | None = None
         self._adj_collapsed = False
         self._review_checkboxes: list = []
         self._review_check_vars: list = []
         # Cache de thumbnails: (path, w, h) -> PhotoImage (instance-level)
-        self._thumb_cache: dict[tuple, "ImageTk.PhotoImage"] = {}
+        self._thumb_cache: dict[tuple, ImageTk.PhotoImage] = {}
         # Lista de PhotoImages para páginas del escritor (evita GC)
         self._writer_page_photos: list = []
         self._build()
@@ -552,7 +554,7 @@ class InkCoreView(BaseView):
             return
 
         ref = self._ref_text.get("1.0", "end").strip()
-        logger.info(f"_extract: texto de referencia = {repr(ref[:80])}")
+        logger.info(f"_extract: texto de referencia = {ref[:80]!r}")
         if not ref:
             logger.warning("_extract: texto de referencia vacío")
             self._extract_error.configure(

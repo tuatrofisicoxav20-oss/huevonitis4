@@ -1,8 +1,10 @@
-import customtkinter as ctk
 from datetime import datetime
-from ui.views.base_view import BaseView
-from ui.components.card import StatCard, ProjectCard
+
+import customtkinter as ctk
+
 from ui import theme
+from ui.components.card import ProjectCard, StatCard
+from ui.views.base_view import BaseView
 
 
 class DashboardView(BaseView):

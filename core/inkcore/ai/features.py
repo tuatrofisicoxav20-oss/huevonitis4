@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+
 from core.inkcore.ai.contracts import GlyphImageFeatures
 
 logger = logging.getLogger(__name__)

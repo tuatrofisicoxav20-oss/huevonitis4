@@ -1,4 +1,4 @@
-from core.inkcore.ai.contracts import GlyphPrediction, GlyphImageFeatures
 from core.inkcore.ai.classifier import FallbackGlyphClassifier
+from core.inkcore.ai.contracts import GlyphImageFeatures, GlyphPrediction
 
-__all__ = ["GlyphPrediction", "GlyphImageFeatures", "FallbackGlyphClassifier"]
+__all__ = ["FallbackGlyphClassifier", "GlyphImageFeatures", "GlyphPrediction"]

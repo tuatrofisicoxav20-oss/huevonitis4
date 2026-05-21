@@ -1,4 +1,5 @@
 import customtkinter as ctk
+
 from ui import theme
 from ui.animations import count_up
 

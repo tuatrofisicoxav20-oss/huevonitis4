@@ -1,7 +1,8 @@
 import re
 import unicodedata
 from collections import Counter
-from core.studycore.models import StudyBundle, Flashcard, QuizQuestion
+
+from core.studycore.models import Flashcard, QuizQuestion, StudyBundle
 
 STOPWORDS_ES = {
     'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'un',
@@ -12,8 +13,7 @@ STOPWORDS_ES = {
     'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos',
     'e', 'esto', 'antes', 'algunos', 'unos', 'yo', 'otro', 'otras', 'otra', 'él',
     'tanto', 'esa', 'estos', 'mucho', 'cual', 'poco', 'ella', 'estar', 'estas',
-    'algo', 'nosotros', 'mi', 'si', 'más', 'fue', 'son', 'ha', 'he', 'su', 'sus',
-    'del', 'las', 'los', 'con', 'por', 'para', 'una', 'que', 'en', 'de', 'a',
+    'algo', 'nosotros', 'mi', 'si', 'fue', 'son', 'ha', 'he',
 }
 
 DEFINITION_PATTERNS = [

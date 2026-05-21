@@ -1,15 +1,15 @@
 import threading
-import tkinter as tk
-import customtkinter as ctk
 from tkinter import filedialog
-from ui.views.base_view import BaseView
-from ui import theme
-from ui.animations import count_up
+
+import customtkinter as ctk
+
+from core.export.pdf_exporter import export_text_pdf
 from core.ocr.engine import OCREngine
 from core.studycore.builder import build_study_bundle, grade_answer
-from core.studycore.models import StudyBundle, Flashcard, QuizQuestion
-from core.export.pdf_exporter import export_text_pdf
-import config
+from core.studycore.models import Flashcard, QuizQuestion, StudyBundle
+from ui import theme
+from ui.animations import count_up
+from ui.views.base_view import BaseView
 
 
 class StudyView(BaseView):

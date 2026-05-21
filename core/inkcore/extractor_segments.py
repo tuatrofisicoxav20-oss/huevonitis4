@@ -5,7 +5,6 @@ Extraído de extractor.py para mejorar la modularidad.
 Contiene: find_line_boxes, split_wide_boxes, align_dp y todos los métodos de alineación.
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +170,8 @@ class SegmentDetector:
             pil_in = _PILImage.fromarray(tess_in, mode="L")
 
             all_boundaries: set[int] = set()
-            import io as _io, sys as _sys
+            import io as _io
+            import sys as _sys
             for psm in [7, 13]:
                 try:
                     _old_stderr = _sys.stderr

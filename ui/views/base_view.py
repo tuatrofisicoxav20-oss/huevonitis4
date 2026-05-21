@@ -1,6 +1,6 @@
 import customtkinter as ctk
+
 from ui import theme
-from ui.animations import bind_hover_color
 
 
 class BaseView(ctk.CTkFrame):

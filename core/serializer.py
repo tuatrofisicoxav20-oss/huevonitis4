@@ -1,8 +1,4 @@
-import json
-from core.models import (
-    Project, Page, TextElement, ImageElement, RectElement, LineElement,
-    ClientJob, Payment, GlyphEntry
-)
+from core.models import ClientJob, ImageElement, LineElement, Page, Payment, Project, RectElement, TextElement
 
 
 def element_to_dict(el) -> dict:

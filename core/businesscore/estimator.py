@@ -1,5 +1,5 @@
-from core.businesscore.models import ClientJob
 import config
+from core.businesscore.models import ClientJob
 
 URGENCY_MULTIPLIERS = {
     "Normal": 1.0,

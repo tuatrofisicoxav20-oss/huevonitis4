@@ -4,11 +4,11 @@ Huevonitis 4.0.0
 App de escritorio para producir apuntes con tu letra real y gestionar
 trabajos escolares freelance.
 """
-import sys
 import logging
-from pathlib import Path
+import sys
 
 import config
+
 config.ensure_dirs()
 
 logging.basicConfig(
@@ -23,12 +23,13 @@ logger = logging.getLogger("huevonitis4")
 logger.info(f"Starting Huevonitis {config.VERSION}")
 
 from core.diagnostics import diagnostics
+
 diagnostics.log_event("app", "start", config.VERSION)
 
 from app_state import STATE
-from core.project_manager import ProjectManager
-from core.inkcore.pipeline import InkCorePipeline
 from core.businesscore.ledger import BusinessLedger
+from core.inkcore.pipeline import InkCorePipeline
+from core.project_manager import ProjectManager
 from ui.app import HuevonitisApp
 
 

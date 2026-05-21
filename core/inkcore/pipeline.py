@@ -1,15 +1,13 @@
 import logging
-import shutil
 import threading
 import time
-from pathlib import Path
 
 import config
+from core.diagnostics import diagnostics
 from core.inkcore.bank import GlyphBank
-from core.inkcore.extractor import GlyphExtractor, ExtractionOptions
+from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
 from core.inkcore.renderer import HandwritingRenderer, RenderOptions
 from core.models import GlyphEntry
-from core.diagnostics import diagnostics
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,10 @@
 import json
+
 import customtkinter as ctk
-from ui.views.base_view import BaseView
-from ui import theme
+
 import config
+from ui import theme
+from ui.views.base_view import BaseView
 
 
 class SettingsView(BaseView):

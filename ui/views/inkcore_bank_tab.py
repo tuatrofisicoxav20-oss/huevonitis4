@@ -9,8 +9,8 @@ Uso futuro:
     tab = BankTab(parent_frame, pipeline=pipeline, thumb_cache=cache)
 """
 import logging
+
 import customtkinter as ctk
-from ui import theme
 
 logger = logging.getLogger(__name__)
 

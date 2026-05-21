@@ -4,12 +4,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
     from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
     RL_OK = True
 except ImportError:
     RL_OK = False

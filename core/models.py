@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
-from typing import Optional
-from enum import Enum
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 
 
 class ElementType(Enum):

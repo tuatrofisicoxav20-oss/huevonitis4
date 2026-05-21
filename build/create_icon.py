@@ -1,7 +1,7 @@
 """Generates the Huevonitis 4 app icon (PNG + ICO)."""
 from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
-import math
 
 SIZES = [16, 32,48, 64, 128, 256]
 
@@ -58,7 +58,7 @@ def main():
     # Save 256px PNG
     big = make_icon(256)
     big.save(out_dir / "icon.png")
-    print(f"Saved icon.png (256x256)")
+    print("Saved icon.png (256x256)")
 
     # Save ICO with multiple sizes
     icons = [make_icon(s) for s in SIZES]

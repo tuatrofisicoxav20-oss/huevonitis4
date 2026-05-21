@@ -11,18 +11,15 @@ Uso futuro:
     tab.on_bank_changed = lambda: ...  # callback
 """
 import logging
-import threading
+
 import customtkinter as ctk
-from tkinter import filedialog
-from pathlib import Path
-from ui import theme
-from core.inkcore.extractor import ExtractionOptions
+
 from core.models import GlyphEntry
 
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import Image, ImageTk, ImageEnhance
+    from PIL import Image, ImageEnhance, ImageTk
     PIL_OK = True
 except ImportError:
     PIL_OK = False

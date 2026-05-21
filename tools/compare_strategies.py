@@ -7,9 +7,9 @@ Uso:
 Si no se proporciona texto de referencia, se intenta usar Tesseract para
 obtener una estimación del texto de la primera línea.
 """
-import sys
-import os
 import logging
+import os
+import sys
 
 # Agregar el directorio raíz de la app al path
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,8 +39,7 @@ except ImportError:
     TESS_OK = False
     print("ADVERTENCIA: pytesseract no disponible — texto de referencia debe proveerse manualmente")
 
-import config
-from core.inkcore.extractor import GlyphExtractor, ExtractionOptions, _BBox
+from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
 
 
 def get_reference_text_from_tesseract(line_mask: np.ndarray) -> str:
@@ -69,7 +68,7 @@ def get_reference_text_from_tesseract(line_mask: np.ndarray) -> str:
 
 def run_comparison(image_path: str, ref_text: str = "") -> None:
     print(f"\n{'='*70}")
-    print(f"  COMPARACIÓN DE ESTRATEGIAS DE SEGMENTACIÓN")
+    print("  COMPARACIÓN DE ESTRATEGIAS DE SEGMENTACIÓN")
     print(f"  Imagen: {os.path.basename(image_path)}")
     print(f"{'='*70}\n")
 
@@ -207,15 +206,11 @@ def run_comparison(image_path: str, ref_text: str = "") -> None:
 
 
 def main():
-    # Imagen de prueba por defecto
-    default_image = "/home/exitili/Descargas/WhatsApp Image 2026-04-22 at 10.13.44 AM.jpeg"
+    if len(sys.argv) < 2:
+        print("Uso: python tools/compare_strategies.py <ruta_imagen> [texto_referencia]")
+        sys.exit(1)
 
-    if len(sys.argv) >= 2:
-        image_path = sys.argv[1]
-    else:
-        image_path = default_image
-        print(f"(usando imagen de prueba por defecto)")
-
+    image_path = sys.argv[1]
     ref_text = sys.argv[2] if len(sys.argv) >= 3 else ""
 
     run_comparison(image_path, ref_text)

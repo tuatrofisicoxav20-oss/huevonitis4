@@ -1,8 +1,7 @@
 import logging
 import random
-import math
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ STYLE_PRESETS: dict[str, dict] = {
 class HandwritingRenderer:
     def __init__(self, bank):
         self.bank = bank
-        self._raw_cache: dict[str, "Image.Image"] = {}  # path -> RGBA image raw
+        self._raw_cache: dict[str, Image.Image] = {}  # path -> RGBA image raw
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})

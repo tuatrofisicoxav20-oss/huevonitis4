@@ -10,8 +10,8 @@ Uso futuro:
     tab = WriterTab(parent_frame, pipeline=pipeline)
 """
 import logging
+
 import customtkinter as ctk
-from ui import theme
 
 logger = logging.getLogger(__name__)
 

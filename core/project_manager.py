@@ -1,14 +1,15 @@
 import json
+import logging
 import os
 import shutil
-import logging
 import tempfile
 import threading
-from pathlib import Path
 from datetime import datetime
-from core.models import Project, Page
-from core.serializer import project_to_dict, project_from_dict
+from pathlib import Path
+
 import config
+from core.models import Project
+from core.serializer import project_from_dict, project_to_dict
 
 logger = logging.getLogger(__name__)
 
