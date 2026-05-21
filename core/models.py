@@ -76,6 +76,7 @@ class Project:
     modified_at: str = field(default_factory=lambda: datetime.now().isoformat())
     pages: list = field(default_factory=lambda: [Page()])
     description: str = ""
+    status: str = "Borrador"
 
     def touch(self):
         self.modified_at = datetime.now().isoformat()

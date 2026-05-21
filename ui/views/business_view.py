@@ -6,7 +6,7 @@ import customtkinter as ctk
 import config
 from core.businesscore.estimator import calculate_price, generate_whatsapp_message, get_price_breakdown
 from core.businesscore.ledger import BusinessLedger
-from core.businesscore.models import JOB_STATUSES, JOB_TYPES, STATUS_COLORS, URGENCIES, ClientJob, Payment
+from core.businesscore.models import JOB_STATUSES, JOB_TYPES, URGENCIES, ClientJob, Payment
 from ui import theme
 from ui.animations import count_up
 from ui.views.base_view import BaseView
@@ -131,7 +131,7 @@ class BusinessView(BaseView):
         ctk.CTkLabel(row1, text=job.client_name or "Sin nombre", font=theme.FONT_SUBHEADING,
                      text_color=theme.TEXT_PRIMARY).pack(side="left")
 
-        status_color = STATUS_COLORS.get(job.status, "#888")
+        status_color = theme.STATUS_COLORS.get(job.status, "#888")
         badge = ctk.CTkFrame(row1, fg_color=status_color, corner_radius=12)
         badge.pack(side="right")
         ctk.CTkLabel(badge, text=f" {job.status} ", font=theme.FONT_SMALL,
@@ -318,7 +318,7 @@ class BusinessView(BaseView):
                      font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY).pack(pady=16, padx=20)
 
         for status in JOB_STATUSES:
-            color = STATUS_COLORS.get(status, "#888")
+            color = theme.STATUS_COLORS.get(status, "#888")
             ctk.CTkButton(
                 dlg, text=status, fg_color=color, hover_color=theme.BG_TERTIARY,
                 font=theme.FONT_BODY, height=36,
@@ -474,7 +474,7 @@ class BusinessView(BaseView):
         start_angle = 90  # start from top
         for status, count in counts.items():
             extent = 360 * count / total_count
-            color = STATUS_COLORS.get(status, "#888")
+            color = theme.STATUS_COLORS.get(status, "#888")
             arcs.append((status, count, start_angle, extent, color))
             start_angle += extent
 
