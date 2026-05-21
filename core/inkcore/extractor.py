@@ -23,12 +23,8 @@ from typing import Optional
 
 import config
 from core.models import GlyphEntry
-
-# Módulos auxiliares extraídos para mejorar la modularidad.
-# La API pública de GlyphExtractor permanece sin cambios.
-# Estos módulos están disponibles para importación directa si se necesita.
-# from core.inkcore.extractor_preprocess import ImagePreprocessor
-# from core.inkcore.extractor_segments import SegmentDetector
+from core.inkcore.extractor_preprocess import ImagePreprocessor
+from core.inkcore.extractor_segments import SegmentDetector
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +70,7 @@ class ExtractionOptions:
     max_per_char: int = 10
 
 
-class _BBox:
+class BBox:
     __slots__ = ("h", "w", "x", "y")
 
     def __init__(self, x: int, y: int, w: int, h: int):
@@ -90,6 +86,8 @@ class _BBox:
     def cx(self) -> float: return self.x + self.w / 2
     def cy(self) -> float: return self.y + self.h / 2
 
+
+_BBox = BBox  # backward compat alias
 
 # ── Hash perceptual ────────────────────────────────────────────────
 def avg_hash(img: "Image.Image", size: int = 16) -> str:
@@ -244,7 +242,7 @@ class GlyphExtractor:
         cleaned = re.sub(r'  +', ' ', cleaned)
         return cleaned.strip()
 
-    def _prepare_ref_lines(self, ref_text: str, line_boxes: list["_BBox"]) -> list[str]:
+    def _prepare_ref_lines(self, ref_text: str, line_boxes: list["BBox"]) -> list[str]:
         """Limpia el texto de referencia y lo divide entre los renglones detectados."""
         # Limpiar separadores en cada línea del texto
         raw_lines = [self._clean_ref(l) for l in ref_text.splitlines()]
@@ -282,7 +280,7 @@ class GlyphExtractor:
     def _extract_pass(
         self,
         clean: np.ndarray,
-        line_boxes: list[_BBox],
+        line_boxes: list[BBox],
         ref_lines: list[str],
         median_line_h: float,
         opts: "ExtractionOptions",
@@ -630,7 +628,7 @@ class GlyphExtractor:
 
     # ── Detección de líneas ────────────────────────────────────────
 
-    def _find_line_boxes(self, mask: np.ndarray) -> list[_BBox]:
+    def _find_line_boxes(self, mask: np.ndarray) -> list[BBox]:
         h, w = mask.shape[:2]
         proj = np.sum(mask > 0, axis=1).astype(np.float32)
         # Suavizado de proyección — kernel más grande para escritura irregular
@@ -669,13 +667,13 @@ class GlyphExtractor:
             split_merged.extend(self._split_tall_band(band, proj, h))
         merged = split_merged
 
-        boxes: list[_BBox] = []
+        boxes: list[BBox] = []
         for start, end in merged:
             y1 = max(0, start - 6)
             y2 = min(h, end + 6)
             cols = np.where(np.sum(mask[y1:y2] > 0, axis=0) > 0)[0]
             if len(cols):
-                boxes.append(_BBox(int(cols[0]), y1,
+                boxes.append(BBox(int(cols[0]), y1,
                                    int(cols[-1]) + 1 - int(cols[0]), y2 - y1))
         return boxes
 
@@ -1322,10 +1320,10 @@ class GlyphExtractor:
         word_bounds: list[int],
         line_mask: np.ndarray,
         line_h: float,
-    ) -> list[tuple["_BBox", str, float]]:
+    ) -> list[tuple["BBox", str, float]]:
         """Segmenta cada palabra de forma independiente usando los bounds dados."""
         h, w = line_mask.shape[:2]
-        result: list[tuple[_BBox, str, float]] = []
+        result: list[tuple[BBox, str, float]] = []
         for wi, word in enumerate(words):
             wx1 = word_bounds[wi]
             wx2 = word_bounds[wi + 1]
@@ -1338,7 +1336,7 @@ class GlyphExtractor:
             if len(word_chars) == 1:
                 bx = max(0, wx1)
                 bw_ = max(1, min(w, wx2) - bx)
-                box = _BBox(bx, 0, bw_, h)
+                box = BBox(bx, 0, bw_, h)
                 ink = float(np.sum(word_mask > 0))
                 cov = ink / max(1, h * bw_)
                 result.append((box, word_chars[0], min(1.0, max(0.1, cov / 0.18))))
@@ -1346,7 +1344,7 @@ class GlyphExtractor:
                 # Segmentación recursiva dentro de la palabra
                 sub = self._align_pos([], word, line_h, word_mask)
                 for box, ch, score in sub:
-                    result.append((_BBox(box.x + wx1, box.y, box.w, box.h), ch, score))
+                    result.append((BBox(box.x + wx1, box.y, box.w, box.h), ch, score))
         return result
 
     # [testing] ── Función de prueba de todas las estrategias ─────────
@@ -1522,9 +1520,9 @@ class GlyphExtractor:
         return results
 
     def _align_pos(
-        self, boxes: list[_BBox], text: str, line_h: float = 30.0,
+        self, boxes: list[BBox], text: str, line_h: float = 30.0,
         line_mask: np.ndarray | None = None,
-    ) -> list[tuple[_BBox, str, float]]:
+    ) -> list[tuple[BBox, str, float]]:
         """Pipeline de alineación mejorado: hybrid_v2 primario + 3-etapas como fallback.
 
         Etapa 1 — hybrid_v2 (InkFlow + búsqueda de mínimo absoluto + verificación CC)
@@ -1672,12 +1670,12 @@ class GlyphExtractor:
             if final[i] <= final[i - 1]:
                 final[i] = final[i - 1] + 1
 
-        result: list[tuple[_BBox, str, float]] = []
+        result: list[tuple[BBox, str, float]] = []
         for i, ch in enumerate(chars):
             x1 = final[i]
             x2 = min(final[i + 1], w)
             bw = max(1, x2 - x1)
-            box = _BBox(x1, 0, bw, h)
+            box = BBox(x1, 0, bw, h)
             ink = float(np.sum(line_mask[:, x1:x2] > 0))
             coverage = ink / max(1, h * bw)
             align_score = min(1.0, max(0.1, coverage / 0.18))

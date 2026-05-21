@@ -2,7 +2,7 @@
 SegmentDetector — detección de líneas y alineación de caracteres para GlyphExtractor.
 
 Extraído de extractor.py para mejorar la modularidad.
-Contiene: find_line_boxes, split_wide_boxes, align_dp y todos los métodos de alineación.
+Contiene: find_line_boxes, _split_tall_band, tesseract_boundaries.
 """
 import logging
 
@@ -17,12 +17,9 @@ except ImportError:
 
 try:
     import pytesseract
-    from PIL import Image as _PILImage
-    TESSERACT_OK = True
     PIL_OK = True
 except ImportError:
     TESSERACT_OK = False
-    PIL_OK = False
 
 try:
     from PIL import Image as _PILImage
@@ -30,7 +27,11 @@ try:
 except ImportError:
     PIL_OK = False
 
-# Constantes compartidas
+try:
+    TESSERACT_OK
+except NameError:
+    TESSERACT_OK = PIL_OK and "pytesseract" in dir()
+
 MIN_COMP_AREA = 10
 MIN_CHAR_W = 2
 MIN_CHAR_H = 3
@@ -38,27 +39,11 @@ MIN_BAND_H = 5
 LINE_THRESHOLD_F = 0.004
 
 
-class _BBoxRef:
-    """Referencia de importación: usa _BBox de extractor.py."""
-    pass
-
-
 class SegmentDetector:
     """Detecta bandas de líneas de texto y alinea segmentos de caracteres."""
 
     def find_line_boxes(self, mask: "np.ndarray", BBox) -> list:
         return self._find_line_boxes(mask, BBox)
-
-    def attach_floaters(self, *args, **kwargs):
-        pass  # handled inline in GlyphExtractor
-
-    def split_wide_boxes(self, *args, **kwargs):
-        pass  # handled inline via _split_tall_band
-
-    def align_dp(self, *args, **kwargs):
-        pass  # use align_pos from GlyphExtractor
-
-    # ── Detección de líneas ────────────────────────────────────────
 
     def _find_line_boxes(self, mask: "np.ndarray", BBox) -> list:
         h, w = mask.shape[:2]
@@ -151,8 +136,6 @@ class SegmentDetector:
                 result.extend(SegmentDetector._split_tall_band(sub, proj, img_h))
         return result or [band]
 
-    # ── Tesseract ──────────────────────────────────────────────────
-
     def tesseract_boundaries(self, line_mask: "np.ndarray") -> list[int]:
         if not TESSERACT_OK or not CV2_OK or not PIL_OK:
             return []
@@ -169,9 +152,9 @@ class SegmentDetector:
             tess_in = 255 - lm
             pil_in = _PILImage.fromarray(tess_in, mode="L")
 
-            all_boundaries: set[int] = set()
             import io as _io
             import sys as _sys
+            all_boundaries: set[int] = set()
             for psm in [7, 13]:
                 try:
                     _old_stderr = _sys.stderr
