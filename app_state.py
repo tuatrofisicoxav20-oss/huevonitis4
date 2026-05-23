@@ -17,6 +17,7 @@ class AppState:
     current_job_id: str | None = None
     study_text: str = ""
     study_bundle: Any | None = None
+    study_document: Any | None = None  # Document estructurado del último import en Study
     inkcore_image_path: str | None = None
     inkcore_extracted_glyphs: list = field(default_factory=list)
 

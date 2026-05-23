@@ -1,77 +1,80 @@
+"""
+OCREngine — wrapper público de OCR.
+
+Mantiene la misma firma pública de todas las versiones anteriores.
+Delega internamente al backend configurado en config.OCR_BACKEND.
+Default: Tesseract (sin dependencias nuevas).
+"""
 import logging
-from pathlib import Path
+
+import config
 
 logger = logging.getLogger(__name__)
 
-try:
-    import pytesseract
-    from PIL import Image
-    TESSERACT_OK = True
-except ImportError:
-    TESSERACT_OK = False
-
-try:
-    import cv2
-    CV2_OK = True
-except ImportError:
-    CV2_OK = False
-
-try:
-    import docx
-    DOCX_OK = True
-except ImportError:
-    DOCX_OK = False
-
 
 class OCREngine:
-    def preprocess(self, image_path: str):
-        if not CV2_OK:
-            return None
-        img = cv2.imread(str(image_path))
-        if img is None:
-            return None
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        _, otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        adaptive = cv2.adaptiveThreshold(
-            enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-        )
-        combined = cv2.bitwise_and(otsu, adaptive)
-        return combined
+
+    def __init__(self):
+        from core.ocr import backends as _backends
+        self._backend = _backends.get_backend(config.OCR_BACKEND)
+        logger.debug(f"OCREngine usando backend: {self._backend.name}")
 
     def extract_text(self, image_path: str) -> str:
-        if not TESSERACT_OK:
-            return (
-                "Error: pytesseract no está disponible.\n"
-                "Instalar: pip install pytesseract\n"
-                "También necesitas Tesseract: sudo dnf install tesseract tesseract-langpack-spa"
-            )
-        path = Path(image_path)
-        if not path.exists():
-            return f"Error: archivo no encontrado: {image_path}"
-        try:
-            if CV2_OK:
-                processed = self.preprocess(image_path)
-                if processed is not None:
-                    from PIL import Image as PILImage
-                    pil_img = PILImage.fromarray(processed)
-                    text = pytesseract.image_to_string(pil_img, lang="spa", config="--oem 3 --psm 6")
-                    return text.strip()
-            img = Image.open(image_path)
-            text = pytesseract.image_to_string(img, lang="spa", config="--oem 3 --psm 6")
-            return text.strip()
-        except Exception as e:
-            logger.error(f"OCR error: {e}")
-            return f"Error en OCR: {e}"
+        """Extrae texto de una imagen usando el backend activo."""
+        return self._backend.extract_text(image_path)
+
+    def extract_text_with_boxes(self, image_path: str) -> list[dict]:
+        """Extrae texto con bounding boxes."""
+        return self._backend.extract_text_with_boxes(image_path)
 
     def read_docx(self, docx_path: str) -> str:
-        if not DOCX_OK:
-            return "Error: python-docx no disponible. Instalar: pip install python-docx"
-        try:
-            doc = docx.Document(docx_path)
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n\n".join(paragraphs)
-        except Exception as e:
-            logger.error(f"DOCX error: {e}")
-            return f"Error leyendo Word: {e}"
+        """Lee el texto de un documento .docx."""
+        from core.ocr.document_readers.docx_reader import read_docx
+        return read_docx(docx_path)
+
+    def read_pdf(self, pdf_path: str) -> str:
+        """Lee el texto de un PDF (con texto o escaneado)."""
+        from core.ocr.document_readers.pdf_reader import read_pdf
+        return read_pdf(pdf_path, self._backend)
+
+    def ingest_document(
+        self,
+        source_path: str,
+        options=None,
+        progress_cb=None,
+        cancel_event=None,
+    ):
+        """
+        Ingesta un documento (PDF, DOCX, imagen, carpeta) y devuelve un Document
+        estructurado con TextBlocks tipados.
+
+        Args:
+            source_path: Ruta al archivo o carpeta.
+            options: OCROptions (None = defaults).
+            progress_cb: callable(fracción 0-1, mensaje).
+            cancel_event: threading.Event para cancelar procesamiento largo.
+        Returns:
+            core.ocr.document_model.Document
+        """
+        from core.ocr.ingestion import DocumentIngestion
+        from core.ocr.options import OCROptions
+        if options is None:
+            options = OCROptions()
+        ingestion = DocumentIngestion(self._backend, options)
+        return ingestion.ingest(source_path, progress_cb=progress_cb, cancel_event=cancel_event)
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend.name
+
+    def switch_backend(self, name: str) -> None:
+        """Cambia el backend en tiempo de ejecución (sin reiniciar la app)."""
+        from core.ocr import backends as _backends
+        self._backend = _backends.get_backend(name)
+        logger.info(f"OCREngine cambiado a backend: {self._backend.name}")
+
+    @staticmethod
+    def available_backends() -> dict[str, bool]:
+        """Devuelve {nombre_backend: disponible} para la UI."""
+        from core.ocr import backends as _backends
+        return _backends.get_available()

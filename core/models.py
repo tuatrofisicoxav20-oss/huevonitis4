@@ -145,6 +145,10 @@ class GlyphEntry:
     tier: str = "Bronze"
     ink_coverage: float = 0.0
     index: int = 0
+    # Metadatos opcionales generados por el pipeline ensemble (B9)
+    predicted_char: str | None = None
+    label_confidence: float | None = None
+    detector_sources: list = field(default_factory=list)
 
 
 @dataclass

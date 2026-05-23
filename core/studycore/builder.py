@@ -1,11 +1,53 @@
 import hashlib
+import logging
 import re
+import shelve
+import time
 import unicodedata
 from collections import Counter
 
+import config
 from core.studycore.models import Flashcard, QuizQuestion, StudyBundle
 
+logger = logging.getLogger(__name__)
+
+_TTL_SECONDS = 30 * 24 * 3600  # 30 días
+
+# Caché en memoria como fallback y capa rápida
 _bundle_cache: dict[str, StudyBundle] = {}
+
+
+def _cache_path() -> str:
+    return str(config.DATA_DIR / "study_bundle_cache")
+
+
+def _disk_get(key: str) -> "StudyBundle | None":
+    try:
+        with shelve.open(_cache_path()) as db:
+            entry = db.get(key)
+            if entry is None:
+                return None
+            ts, bundle = entry
+            if time.time() - ts > _TTL_SECONDS:
+                del db[key]
+                return None
+            return bundle
+    except Exception as exc:
+        logger.debug("study_bundle disk cache read failed: %s", exc)
+        return None
+
+
+def _disk_put(key: str, bundle: "StudyBundle") -> None:
+    try:
+        with shelve.open(_cache_path()) as db:
+            # Purgar entradas viejas al guardar (mantiene el archivo pequeño)
+            expired = [k for k, v in db.items()
+                       if isinstance(v, tuple) and time.time() - v[0] > _TTL_SECONDS]
+            for k in expired:
+                del db[k]
+            db[key] = (time.time(), bundle)
+    except Exception as exc:
+        logger.debug("study_bundle disk cache write failed: %s", exc)
 
 STOPWORDS_ES = {
     'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'un',
@@ -136,6 +178,10 @@ def build_study_bundle(text: str) -> StudyBundle:
     key = hashlib.sha256(text.encode()).hexdigest()
     if key in _bundle_cache:
         return _bundle_cache[key]
+    cached = _disk_get(key)
+    if cached is not None:
+        _bundle_cache[key] = cached
+        return cached
     bundle = StudyBundle(
         source_text=text,
         summary=extract_summary(text),
@@ -144,6 +190,92 @@ def build_study_bundle(text: str) -> StudyBundle:
         quiz_questions=extract_quiz(text),
     )
     _bundle_cache[key] = bundle
+    _disk_put(key, bundle)
+    return bundle
+
+
+def build_study_bundle_from_document(doc: "object") -> StudyBundle:
+    """Versión estructurada que aprovecha la jerarquía del Document.
+
+    - Headings H + primer párrafo siguiente → Flashcard de alta confianza.
+    - key_terms: headings primero, complementa con extract_key_terms(texto).
+    - Quiz: solo párrafos como fuente (no headings).
+    build_study_bundle(text) clásico sigue existiendo para compat.
+    """
+    from core.ocr.document_model import BlockType
+
+    full_text = doc.full_text() if callable(getattr(doc, "full_text", None)) else ""
+    if not full_text.strip():
+        return StudyBundle(source_text=full_text)
+
+    key = "doc:" + hashlib.sha256(full_text.encode()).hexdigest()
+    if key in _bundle_cache:
+        return _bundle_cache[key]
+    cached = _disk_get(key)
+    if cached is not None:
+        _bundle_cache[key] = cached
+        return cached
+
+    all_blocks = [b for p in doc.pages for b in p.blocks]
+
+    # ── Flashcards estructuradas (heading + párrafo siguiente) ──────
+    structured_cards: list[Flashcard] = []
+    for i, block in enumerate(all_blocks):
+        if block.block_type == BlockType.HEADING:
+            heading_text = block.text.strip()
+            if not heading_text or len(heading_text) > 120:
+                continue
+            # Buscar el primer párrafo o list_item siguiente
+            answer_text = ""
+            for j in range(i + 1, min(i + 5, len(all_blocks))):
+                nb = all_blocks[j]
+                if nb.block_type in (BlockType.PARAGRAPH, BlockType.LIST_ITEM):
+                    answer_text = nb.text.strip()[:200]
+                    break
+                if nb.block_type == BlockType.HEADING:
+                    break
+            if answer_text:
+                structured_cards.append(Flashcard(
+                    question=f"¿Qué es {heading_text}?",
+                    answer=answer_text,
+                    topic=heading_text,
+                ))
+
+    # Complementar con heurístico si hay pocas tarjetas
+    if len(structured_cards) < 4:
+        heuristic = extract_flashcards(full_text, max_cards=12 - len(structured_cards))
+        structured_cards.extend(heuristic)
+
+    # ── key_terms: headings primero ─────────────────────────────────
+    heading_terms = [
+        b.text.strip() for b in all_blocks
+        if b.block_type == BlockType.HEADING and b.text.strip()
+    ]
+    generic_terms = extract_key_terms(full_text, max_terms=15)
+    seen: set[str] = set()
+    combined_terms: list[str] = []
+    for t in heading_terms + generic_terms:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            combined_terms.append(t)
+    key_terms = combined_terms[:15]
+
+    # ── Quiz: solo párrafos ─────────────────────────────────────────
+    para_text = "\n\n".join(
+        b.text for b in all_blocks
+        if b.block_type in (BlockType.PARAGRAPH, BlockType.LIST_ITEM)
+    )
+    quiz = extract_quiz(para_text or full_text, max_questions=8)
+
+    bundle = StudyBundle(
+        source_text=full_text,
+        summary=extract_summary(full_text),
+        key_terms=key_terms,
+        flashcards=structured_cards[:12],
+        quiz_questions=quiz,
+    )
+    _bundle_cache[key] = bundle
+    _disk_put(key, bundle)
     return bundle
 
 

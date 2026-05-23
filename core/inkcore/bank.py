@@ -128,8 +128,26 @@ class GlyphBank:
         with _bank_lock:
             self._atomic_write(self.manifest_file, [self._to_dict(e) for e in self._entries])
 
-    def add_glyph(self, char: str, source_path: str) -> GlyphEntry | None:
-        """Add glyph to bank. Returns None if it's a perceptual duplicate."""
+    def add_glyph(
+        self,
+        char: str,
+        source_path: str,
+        *,
+        predicted_char: "str | None" = None,
+        label_confidence: "float | None" = None,
+        detector_sources: "list | None" = None,
+        quality_override: "dict | None" = None,
+    ) -> "GlyphEntry | None":
+        """Add glyph to bank. Returns None if it's a perceptual duplicate.
+
+        kwargs (todos keyword-only, opcionales):
+          predicted_char    — char predicho por el labeler del pipeline.
+          label_confidence  — confianza del labeler (0-1).
+          detector_sources  — detectores que encontraron este glifo.
+          quality_override  — dict con score/tier/ink_coverage ya calculados
+                              por el pipeline (evita doble cómputo de quality).
+        Callers legacy add_glyph(char, path) siguen funcionando sin cambios.
+        """
         if not Path(source_path).exists():
             logger.warning(f"add_glyph: source image not found: {source_path}")
             return None
@@ -161,7 +179,7 @@ class GlyphBank:
             safe = char if char.isalnum() else f"punct_{ord(char)}"
             dest = self.bank_dir / f"{safe}_{idx:03d}.png"
             shutil.copy2(source_path, dest)
-            metrics = assess_glyph(str(dest))
+            metrics = quality_override or assess_glyph(str(dest))
             entry = GlyphEntry(
                 char=char,
                 image_path=str(dest),
@@ -169,6 +187,9 @@ class GlyphBank:
                 tier=metrics["tier"],
                 ink_coverage=metrics["ink_coverage"],
                 index=idx,
+                predicted_char=predicted_char,
+                label_confidence=label_confidence,
+                detector_sources=list(detector_sources or []),
             )
             self._entries.append(entry)
         self.save()

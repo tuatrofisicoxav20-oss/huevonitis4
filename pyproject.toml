@@ -38,3 +38,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "slow: tests lentos con I/O de imagen real — no corren en pytest default (usa -m slow)",
+]

@@ -18,6 +18,19 @@ from ui.views.study_view import StudyView
 logger = logging.getLogger(__name__)
 
 
+def _load_saved_theme() -> str:
+    """Return 'dark', 'light', or 'system' from saved settings (default 'dark')."""
+    import json
+    _map = {"Oscuro": "dark", "Claro": "light", "Sistema": "system"}
+    try:
+        if config.SETTINGS_FILE.exists():
+            with open(config.SETTINGS_FILE, encoding="utf-8") as _f:
+                return _map.get(json.load(_f).get("theme", "Oscuro"), "dark")
+    except Exception:
+        pass
+    return "dark"
+
+
 VIEW_NAMES = {
     "dashboard": "Dashboard",
     "projects":  "Proyectos",
@@ -48,8 +61,11 @@ class HuevonitisApp(ctk.CTk):
         self.inkcore = inkcore
         self.ledger = ledger
 
-        ctk.set_appearance_mode("dark")
+        _saved_theme = _load_saved_theme()
+        _ctk_mode = {"dark": "dark", "light": "light", "system": "system"}.get(_saved_theme, "dark")
+        ctk.set_appearance_mode(_ctk_mode)
         ctk.set_default_color_theme("blue")
+        theme.apply_theme(_saved_theme)
         theme.init_fonts()
 
         self.title(f"Huevonitis {config.VERSION}")

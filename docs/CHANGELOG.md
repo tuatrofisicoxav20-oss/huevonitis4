@@ -1,5 +1,51 @@
 # Changelog — Huevonitis 4
 
+## [4.1.0] — 2026-05-22 (integración end-to-end + limpieza)
+
+### Bugs de integración corregidos
+- **A1**: UI "Pipeline avanzada" ahora propaga `use_pipeline`, `pipeline_config`
+  y `min_quality` al `GlyphExtractor.extract_from_image()`.
+- **A2/A3**: `bank.add_glyph()` acepta `predicted_char`, `label_confidence`,
+  `detector_sources` y `quality_override`; `save_glyphs_to_bank` los pasa,
+  eliminando el doble cómputo de quality.
+- **A4**: "Reescribir con mi letra" transfiere el texto real a InkCore Escritor
+  vía `app_state.study_text`; `on_show()` lo carga automáticamente.
+- **A5**: `FallbackGlyphClassifier` eliminado de InkCoreView (dead code).
+- **A6**: `extractor_preprocess.py` y `extractor_segments.py` marcados como
+  DEPRECATED con `DeprecationWarning`.
+- **Hotfix OCR cache**: `invalidate()` ahora filtra por source_path en vez
+  de borrar todo el caché.
+- **Hotfix double toast**: eliminado toast redundante "Texto importado" en
+  `_on_ocr_done`.
+
+### Estructura del Document aprovechada
+- **B1**: `renderer.render_document(doc, options)` — renderiza con jerarquía
+  (headings escalados, bullets para list_item, páginas A4).
+- **B2**: `export_document_pdf(doc, path)` — PDF con estilos por block_type
+  (Heading→H1/H2/H3, list_item→bullet, code→Courier).
+- **B3**: `export_rendered_pages_pdf(images, path)` — pega imágenes renderizadas
+  como páginas A4 de un PDF.
+- **B4**: Botón "📄 Exportar PDF con mi letra" en InkCore Escritor.
+- **B5**: `build_study_bundle_from_document(doc)` — flashcards de alta
+  confianza desde headings, key_terms ordenados, quiz solo desde párrafos.
+- **B6**: Cache de StudyBundle migrado de in-memory a `shelve` con TTL 30 días.
+
+### Calidad de vida
+- **C1**: Sección "Diagnóstico" en Settings → ventana con `get_report()`,
+  copiar al portapapeles y limpiar eventos.
+- **C2**: Botón "📱 Abrir WhatsApp" en cotizaciones → abre `wa.me/` con
+  número y mensaje pre-rellenado.
+- **C3**: `psutil` documentado en `requirements-optional.txt`.
+
+### Tests nuevos (D1–D5)
+- `test_bank_ensemble_metadata.py` (3 tests)
+- `test_studycore_document.py` (4 tests)
+- `test_pipeline_options_wiring.py` (2 tests)
+- `test_pdf_exporter.py` (3 tests)
+- Total: 100 tests pasando (96 anteriores + 12 nuevos - 8 ya existentes).
+
+---
+
 ## [4.0.1] — 2026-05-21 (sesión de limpieza técnica)
 
 ### Infra / higiene (F1)

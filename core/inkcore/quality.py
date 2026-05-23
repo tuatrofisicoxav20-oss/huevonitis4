@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,3 +45,29 @@ def assess_glyph(image_path: str) -> dict:
     except Exception as e:
         logger.warning(f"Quality assess failed for {image_path}: {e}")
         return {"score": 0.3, "tier": "Bronze", "ink_coverage": 0.3, "valid": False}
+
+
+def compute_final_quality(
+    base_quality: float,
+    label_confidence: float | None,
+    agreement_score: float,
+    config,
+) -> float:
+    """Combina calidad base, acuerdo entre detectores y confianza del labeler.
+
+    Args:
+        base_quality: score raw de assess_glyph() (0-1).
+        label_confidence: confianza del labeler ganador (0-1), o None si no hubo labeler.
+        agreement_score: fracción de detectores que coincidieron (0-1).
+        config: PipelineConfig con label_conf_weight y min_quality.
+
+    Returns:
+        Score final clampado a [0, 1].
+    """
+    final = base_quality * (0.7 + 0.3 * agreement_score)
+    if label_confidence is not None:
+        weight = getattr(config, "label_conf_weight", 0.3)
+        if weight > 0:
+            boost = 1.0 + weight * (label_confidence - 0.5)
+            final *= max(0.1, boost)
+    return min(1.0, max(0.0, final))

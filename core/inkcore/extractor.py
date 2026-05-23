@@ -66,6 +66,9 @@ class ExtractionOptions:
     rotation_deg: float = 0.0
     min_quality: float = QUALITY_MIN
     max_per_char: int = 10
+    # Pipeline ensemble (B8) — False por defecto para mantener backward compat
+    use_pipeline: bool = False
+    pipeline_config: "object | None" = None  # type: PipelineConfig | None
 
 
 class BBox:
@@ -114,12 +117,51 @@ def _dual_dist(a: tuple[str, str], b: tuple[str, str]) -> float:
 # ── Extractor principal ────────────────────────────────────────────
 class GlyphExtractor:
 
+    def __init__(self):
+        # Delegados de preprocesamiento (Fase 4A — extractor refactor)
+        from core.inkcore.extractor_preprocess import ImagePreprocessor
+        from core.inkcore.extractor_segments import SegmentDetector
+        self._preprocessor = ImagePreprocessor()
+        self._seg_detector = SegmentDetector()
+        # Detector de glifos opcional — se inicializa desde config.GLYPH_DETECTOR.
+        self._detector = None
+        try:
+            det_name = getattr(config, "GLYPH_DETECTOR", "classic_cv")
+            if det_name != "classic_cv":
+                from core.inkcore import glyph_detectors as _gd
+                det = _gd.get_detector(det_name)
+                if det.available:
+                    self._detector = det
+                    logger.info(f"GlyphExtractor usando detector: {det_name}")
+                else:
+                    logger.warning(
+                        f"Detector '{det_name}' no disponible ({det.install_hint()}); "
+                        "usando pipeline clásico"
+                    )
+        except Exception as exc:
+            logger.warning(f"No se pudo cargar el detector de glifos: {exc}")
+
     def extract_from_image(
         self,
         image_path: str,
         reference_text: str,
         options: ExtractionOptions | None = None,
     ) -> list[GlyphEntry]:
+        opts = options or ExtractionOptions()
+        if opts.use_pipeline:
+            try:
+                from core.inkcore.extraction_pipeline import (
+                    GlyphExtractionPipeline, PipelineConfig,
+                )
+                cfg = opts.pipeline_config or PipelineConfig()
+                pipeline = GlyphExtractionPipeline(cfg)
+                result = pipeline.extract(image_path, reference_text)
+                return result.glyphs
+            except Exception as exc:
+                logger.error("Pipeline ensemble falló, cayendo a legacy: %s", exc,
+                             exc_info=True)
+                # Caer al flujo legacy si la pipeline falla
+
         if not CV2_OK or not PIL_OK:
             logger.warning("cv2/Pillow no disponibles")
             return []
@@ -127,7 +169,7 @@ class GlyphExtractor:
             logger.warning(f"Imagen no existe: {image_path}")
             return []
         try:
-            return self._run(image_path, reference_text, options or ExtractionOptions())
+            return self._run(image_path, reference_text, opts)
         except Exception as exc:
             logger.error(f"Error en extracción: {exc}", exc_info=True)
             return []
@@ -394,356 +436,96 @@ class GlyphExtractor:
     # ── Ajustes manuales ───────────────────────────────────────────
 
     def _apply_manual(self, img: np.ndarray, opts: ExtractionOptions) -> np.ndarray:
-        if abs(opts.rotation_deg) > 0.1:
-            h, w = img.shape[:2]
-            M = cv2.getRotationMatrix2D((w / 2, h / 2), -opts.rotation_deg, 1.0)
-            img = cv2.warpAffine(img, M, (w, h),
-                                 borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
-        if abs(opts.brightness) > 0.5 or abs(opts.contrast) > 0.5:
-            alpha = max(0.05, 1.0 + opts.contrast / 100.0)
-            beta = opts.brightness
-            img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
-        return img
-
-    # ── Escala ─────────────────────────────────────────────────────
+        return self._preprocessor.apply_options(img, opts)
 
     def _scale(self, img: np.ndarray) -> np.ndarray:
-        h, w = img.shape[:2]
-        ls = max(h, w)
-        if ls <= TARGET_LONG:
-            return img
-        s = TARGET_LONG / ls
-        return cv2.resize(img, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
-
-    # ── Autocrop + corrección de perspectiva ───────────────────────
+        return self._preprocessor.scale(img)
 
     def _autocrop(self, img: np.ndarray) -> np.ndarray:
-        h, w = img.shape[:2]
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-        edges = cv2.Canny(blurred, 25, 90)
-        edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (12, 12)))
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return img
-        for cnt in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
-            if cv2.contourArea(cnt) < 0.12 * h * w:
-                continue
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.025 * peri, True)
-            if len(approx) == 4:
-                warped = self._four_point_transform(img, approx.reshape(4, 2))
-                if warped is not None:
-                    return warped
-            x, y, cw, ch = cv2.boundingRect(cnt)
-            m = 10
-            crop = img[max(0, y-m):min(h, y+ch+m), max(0, x-m):min(w, x+cw+m)]
-            if crop.size > 0:
-                return crop
-        return img
+        return self._preprocessor.autocrop(img)
 
     def _four_point_transform(self, img: np.ndarray, pts: np.ndarray) -> np.ndarray | None:
-        try:
-            rect = self._order_points(pts.astype(np.float32))
-            tl, tr, br, bl = rect
-            wA = float(np.linalg.norm(br - bl))
-            wB = float(np.linalg.norm(tr - tl))
-            hA = float(np.linalg.norm(tr - br))
-            hB = float(np.linalg.norm(tl - bl))
-            mW = max(1, max(int(wA), int(wB)))
-            mH = max(1, max(int(hA), int(hB)))
-            if mW < 80 or mH < 80:
-                return None
-            dst = np.array([[0, 0], [mW-1, 0], [mW-1, mH-1], [0, mH-1]], dtype=np.float32)
-            M = cv2.getPerspectiveTransform(rect, dst)
-            return cv2.warpPerspective(img, M, (mW, mH),
-                                       borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
-        except Exception:
-            return None
+        return self._preprocessor._four_point_transform(img, pts)
 
     @staticmethod
     def _order_points(pts: np.ndarray) -> np.ndarray:
-        rect = np.zeros((4, 2), dtype=np.float32)
-        s = pts.sum(axis=1)
-        rect[0] = pts[np.argmin(s)]
-        rect[2] = pts[np.argmax(s)]
-        d = np.diff(pts, axis=1)
-        rect[1] = pts[np.argmin(d)]
-        rect[3] = pts[np.argmax(d)]
-        return rect
-
-    # ── Deskew ─────────────────────────────────────────────────────
+        from core.inkcore.extractor_preprocess import ImagePreprocessor
+        return ImagePreprocessor._order_points(pts)
 
     def _deskew(self, img: np.ndarray) -> tuple[np.ndarray, float]:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        binary = self._filtered_mask(binary)
-        angle = self._estimate_skew(binary, img.shape[1])
-        if angle is None or abs(angle) < 0.25:
-            return img, 0.0
-        if abs(angle) > MAX_DESKEW_DEG:
-            logger.warning(f"Inclinación {angle:.1f}° fuera del límite, no se corrige")
-            return img, 0.0
-        h, w = img.shape[:2]
-        M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-        rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR,
-                                 borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
-        return rotated, float(angle)
+        return self._preprocessor.deskew(img)
 
     def _estimate_skew(self, mask: np.ndarray, width: int) -> float | None:
-        edges = cv2.Canny(mask, 50, 150)
-        lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=max(50, width // 12))
-        if lines is not None:
-            angles = []
-            for line in lines:
-                theta = float(line[0][1])
-                a = np.degrees(theta) - 90.0
-                if abs(a) <= MAX_DESKEW_DEG:
-                    angles.append(a)
-            if len(angles) >= 2:
-                return float(np.median(angles))
-        # Fallback: buscar el ángulo que maximiza varianza de proyección horizontal
-        best_angle, best_var = 0.0, -1.0
-        for a in np.arange(-MAX_DESKEW_DEG, MAX_DESKEW_DEG + 0.5, 1.0):
-            M = cv2.getRotationMatrix2D((mask.shape[1]/2, mask.shape[0]/2), a, 1.0)
-            rot = cv2.warpAffine(mask, M, (mask.shape[1], mask.shape[0]))
-            proj = np.sum(rot > 0, axis=1, dtype=np.float32)
-            v = float(np.var(proj))
-            if v > best_var:
-                best_var = v
-                best_angle = a
-        return best_angle if abs(best_angle) > 0.3 else None
-
-    # ── Pre-procesamiento completo ─────────────────────────────────
+        return self._preprocessor._estimate_skew(mask, width)
 
     def _full_preprocess(
         self, img: np.ndarray, opts: ExtractionOptions
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # Normalización de iluminación: dividir por fondo estimado
-        gray = self._normalize_illumination(gray)
-
-        # Suavizado muy ligero para reducir ruido de sensor
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-        # CLAHE para contraste local adaptativo.
-        # El tamaño de tile se ajusta dinámicamente al ancho de la imagen:
-        # imágenes muy anchas necesitan tiles más grandes para no ser demasiado
-        # granulares y crear artefactos en zonas homogéneas.
-        img_w = gray.shape[1]
-        tile = max(8, min(32, img_w // 60))
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(tile, tile))
-        enhanced = clahe.apply(gray)
-
-        # 5 estrategias de umbralización → votación
-        _, m1 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        m2 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY_INV, 31, 8)
-        m3 = self._sauvola(enhanced, window=25, k=0.14)
-        m4 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                   cv2.THRESH_BINARY_INV, 19, 6)
-        m5 = self._sauvola(enhanced, window=41, k=0.20)
-
-        vote = ((m1 > 0).astype(np.int16) + (m2 > 0).astype(np.int16)
-                + (m3 > 0).astype(np.int16) + (m4 > 0).astype(np.int16)
-                + (m5 > 0).astype(np.int16))
-
-        # Umbral de votación adaptativo: si la máscara con ≥2 es muy vacía, bajar a ≥1
-        # Umbral subido a 0.008 para capturar escritura con poco contraste.
-        mask = np.where(vote >= 2, np.uint8(255), np.uint8(0))
-        ink_ratio = np.sum(mask > 0) / max(1, mask.size)
-        if ink_ratio < 0.008:
-            mask = np.where(vote >= 1, np.uint8(255), np.uint8(0))
-            logger.debug(f"Votación relajada a ≥1 (ratio={ink_ratio:.4f})")
-
-        # Limpieza morfológica
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-        raw = mask.copy()
-
-        if opts.remove_lines:
-            mask = self._remove_lines(mask)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
-
-        clean = self._filtered_mask(mask)
-        return gray, raw, clean
+        return self._preprocessor.full_preprocess(img, opts)
 
     @staticmethod
     def _normalize_illumination(gray: np.ndarray) -> np.ndarray:
-        """Sustrae el fondo estimado por dilatación morfológica → iluminación uniforme."""
-        ks = max(51, gray.shape[1] // 10)
-        ks = ks if ks % 2 == 1 else ks + 1
-        # Acotar a 201 para evitar kernels extremadamente grandes en imágenes anchas
-        ks = min(ks, 201)
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (ks, ks))
-        bg = cv2.morphologyEx(gray, cv2.MORPH_DILATE, k)
-        norm = cv2.divide(gray.astype(np.float32), bg.astype(np.float32), scale=255.0)
-        return np.clip(norm, 0, 255).astype(np.uint8)
+        from core.inkcore.extractor_preprocess import ImagePreprocessor
+        return ImagePreprocessor.normalize_illumination(gray)
 
     @staticmethod
     def _sauvola(gray: np.ndarray, window: int = 25, k: float = 0.20) -> np.ndarray:
-        """Thresholding de Sauvola — mucho mejor que Otsu para escritura a mano."""
-        g = gray.astype(np.float32)
-        mean = cv2.boxFilter(g, cv2.CV_32F, (window, window))
-        sq_mean = cv2.boxFilter(g * g, cv2.CV_32F, (window, window))
-        std = np.sqrt(np.maximum(0.0, sq_mean - mean * mean))
-        threshold = mean * (1.0 + k * (std / 128.0 - 1.0))
-        threshold = np.maximum(0.0, threshold)
-        return (g < threshold).astype(np.uint8) * 255
+        from core.inkcore.extractor_preprocess import ImagePreprocessor
+        return ImagePreprocessor.sauvola(gray, window=window, k=k)
 
     @staticmethod
     def _filtered_mask(mask: np.ndarray) -> np.ndarray:
-        num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-        out = np.zeros_like(mask)
-        for i in range(1, num):
-            a = int(stats[i, cv2.CC_STAT_AREA])
-            w = int(stats[i, cv2.CC_STAT_WIDTH])
-            h = int(stats[i, cv2.CC_STAT_HEIGHT])
-            if a >= MIN_COMP_AREA and w >= MIN_CHAR_W and h >= MIN_CHAR_H:
-                out[labels == i] = 255
-        return out
+        from core.inkcore.extractor_preprocess import ImagePreprocessor
+        return ImagePreprocessor.filtered_mask(mask)
 
     def _remove_lines(self, mask: np.ndarray) -> np.ndarray:
-        mask = np.where(mask > 0, np.uint8(255), np.uint8(0))
-        h, w = mask.shape[:2]
-        if h == 0 or w == 0:
-            return mask
-        kl = max(40, w // 12)
-        horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (kl, 1))
-        detected = cv2.morphologyEx(mask, cv2.MORPH_OPEN, horiz)
-        row_strength = np.sum(detected > 0, axis=1) / max(1, w)
-        line_mask = np.zeros_like(mask)
-        line_mask[row_strength > 0.18, :] = detected[row_strength > 0.18, :]
-        line_mask = cv2.dilate(line_mask,
-                               cv2.getStructuringElement(cv2.MORPH_RECT, (3, 2)), iterations=1)
-        vert = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(5, h // 20)))
-        protect = cv2.dilate(
-            cv2.morphologyEx(mask, cv2.MORPH_OPEN, vert),
-            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=1,
-        )
-        cleaned = mask.copy()
-        cleaned[cv2.bitwise_and(line_mask, cv2.bitwise_not(protect)) > 0] = 0
-        return np.where(cleaned > 0, np.uint8(255), np.uint8(0))
+        return self._preprocessor.remove_lines(mask)
 
-    # ── Detección de líneas ────────────────────────────────────────
+    # ── Detección de líneas — delegado a SegmentDetector ─────────
 
     def _find_line_boxes(self, mask: np.ndarray) -> list[BBox]:
-        h, w = mask.shape[:2]
-        proj = np.sum(mask > 0, axis=1).astype(np.float32)
-        # Suavizado de proyección — kernel más grande para escritura irregular
-        if h > 20:
-            proj = cv2.GaussianBlur(proj.reshape(-1, 1), (1, 15), 0).flatten()
-        threshold = max(1, int(w * LINE_THRESHOLD_F))
-
-        # Detectar bandas de texto
-        raw_bands: list[tuple[int, int]] = []
-        in_band = False
-        start = 0
-        for y in range(h):
-            if proj[y] > threshold and not in_band:
-                start = y
-                in_band = True
-            elif proj[y] <= threshold and in_band:
-                if y - start >= MIN_BAND_H:
-                    raw_bands.append((start, y))
-                in_band = False
-        if in_band and h - start >= MIN_BAND_H:
-            raw_bands.append((start, h))
-
-        # Fusionar bandas cercanas para no partir una línea en dos.
-        # El umbral escala con la imagen para manejar fotos de mayor resolución.
-        merge_gap = max(8, h // 40)
-        merged: list[list[int]] = []
-        for band in raw_bands:
-            if merged and band[0] - merged[-1][1] <= merge_gap:
-                merged[-1][1] = band[1]
-            else:
-                merged.append([band[0], band[1]])
-
-        # Aplicar split a todas las bandas (no solo cuando hay 1).
-        # Cada banda que contenga 2 renglones fusionados se divide recursivamente.
-        split_merged = []
-        for band in merged:
-            split_merged.extend(self._split_tall_band(band, proj, h))
-        merged = split_merged
-
-        boxes: list[BBox] = []
-        for start, end in merged:
-            y1 = max(0, start - 6)
-            y2 = min(h, end + 6)
-            cols = np.where(np.sum(mask[y1:y2] > 0, axis=0) > 0)[0]
-            if len(cols):
-                boxes.append(BBox(int(cols[0]), y1,
-                                   int(cols[-1]) + 1 - int(cols[0]), y2 - y1))
-        return boxes
+        return self._seg_detector.find_line_boxes(mask)
 
     @staticmethod
     def _split_tall_band(
         band: list[int], proj: np.ndarray, img_h: int
     ) -> list[list[int]]:
-        """Divide una banda alta en sub-bandas usando prominencia del valle.
+        from core.inkcore.extractor_segments import SegmentDetector
+        return SegmentDetector.split_tall_band(band, proj, img_h)
 
-        La prominencia = min(pico_izquierdo - valle, pico_derecho - valle).
-        Un separador real entre renglones tiene alta prominencia (la tinta sube
-        claramente a ambos lados). Las variaciones internas de un renglón tienen
-        prominencia baja (solo un lado sube mucho).
+    # ── Detección asistida por detector alternativo ───────────────
+
+    def _get_detector_boundaries(self, line_mask: np.ndarray) -> list[int]:
+        """Fronteras X de caracteres via el detector alternativo (CRAFT / Paddle).
+
+        Convierte la máscara binaria a BGR, llama al detector y extrae los
+        bordes izquierdo/derecho de cada bbox como hints para _align_pos.
+        Devuelve lista vacía si el detector no está activo o falla.
         """
-        y0, y1 = band
-        band_h = y1 - y0
-        if band_h < 30:
-            return [band]
-
-        band_proj = proj[y0:y1].copy()
-        local_max = float(np.max(band_proj))
-        if local_max == 0:
-            return [band]
-
-        # Acotar el margen superior para bandas muy altas (> 300px) donde
-        # band_h // 6 puede ser demasiado grande y dejar fuera la zona de separación.
-        margin = max(8, min(band_h // 6, 30))
-        if band_h - 2 * margin < 1:
-            return [band]
-
-        # Precomputar máximo acumulado prefijo y sufijo para prominencia O(n)
-        prefix_max = np.maximum.accumulate(band_proj)
-        suffix_max = np.maximum.accumulate(band_proj[::-1])[::-1]
-
-        # Encontrar la posición con mayor PROMINENCIA (no solo la más profunda).
-        # La prominencia = min(pico_izq - valle, pico_der - valle).
-        # El valle entre renglones tiene altísima prominencia porque hay picos
-        # grandes a ambos lados. Las variaciones dentro de un renglón tienen
-        # prominencia menor porque uno de los lados es bajo.
-        best_prom = 0.0
-        best_i = -1
-        for i in range(margin, band_h - margin):
-            val = float(band_proj[i])
-            lp = float(prefix_max[i - 1]) if i > 0 else val
-            rp = float(suffix_max[i + 1]) if i < band_h - 1 else val
-            prom = min(lp - val, rp - val)
-            if prom > best_prom:
-                best_prom = prom
-                best_i = i
-
-        min_val = float(band_proj[best_i]) if best_i >= 0 else local_max
-        # Condición doble: alta prominencia Y valle suficientemente bajo.
-        # El valle entre renglones está por debajo del 30% del máximo; las
-        # variaciones internas de un renglón tienen valores mucho más altos.
-        if best_i < 0 or best_prom < local_max * 0.40 or min_val > local_max * 0.30:
-            return [band]
-        # Bug fix #7: guard against split_row at or beyond band edges
-        split_y = y0 + best_i
-        if best_i <= 0 or best_i >= band_h:
-            return [band]
-        logger.info(
-            f"Renglón separado en y={split_y} "
-            f"(prominencia={best_prom:.0f}/{local_max:.0f}={best_prom/local_max*100:.0f}%)"
-        )
-        result = []
-        for sub in [[y0, split_y], [split_y, y1]]:
-            if sub[1] - sub[0] >= MIN_BAND_H:
-                result.extend(GlyphExtractor._split_tall_band(sub, proj, img_h))
-        return result or [band]
+        if self._detector is None or not CV2_OK:
+            return []
+        try:
+            line_bgr = cv2.cvtColor(line_mask, cv2.COLOR_GRAY2BGR)
+            boxes = self._detector.detect(line_bgr)
+            if not boxes:
+                return []
+            boundaries: set[int] = set()
+            w = line_mask.shape[1]
+            for b in boxes:
+                if 0 <= b.x < w:
+                    boundaries.add(b.x)
+                if 0 < b.x2 <= w:
+                    boundaries.add(b.x2)
+            result = sorted(boundaries)
+            if result:
+                logger.debug(
+                    f"Detector '{self._detector.name}': "
+                    f"{len(result)} fronteras en línea de {w}px"
+                )
+            return result
+        except Exception as exc:
+            logger.debug(f"_get_detector_boundaries error: {exc}")
+            return []
 
     # ── Detección asistida por IA (Tesseract) ─────────────────────
 
@@ -1652,8 +1434,12 @@ class GlyphExtractor:
                     f"Fallback InkFlow+VPP elegido ({fallback_q:.3f} ≥ {primary_q:.3f})"
                 )
 
-        # ── Etapa final: Anclaje con Tesseract ────────────────────
+        # ── Etapa final: Anclaje con Tesseract + detector alternativo ────
         tess_bdry = self._tesseract_boundaries(line_mask)
+        det_bdry = self._get_detector_boundaries(line_mask)
+        # Unión de fronteras de ambas fuentes
+        all_hints = sorted(set(tess_bdry) | set(det_bdry))
+        tess_bdry = all_hints  # reutilizamos variable para el bloque siguiente
         if tess_bdry:
             snap_r = max(3, int(char_w_avg * 0.22))
             final: list[int] = [use_bounds[0]]

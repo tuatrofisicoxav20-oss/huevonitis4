@@ -225,12 +225,26 @@ class BusinessView(BaseView):
             self.clipboard_append(msg)
             self.toast("Mensaje copiado al portapapeles", "success")
 
+        def open_whatsapp():
+            import webbrowser
+            from urllib.parse import quote
+            msg = generate_whatsapp_message(job, breakdown['total'])
+            phone = (job.client_phone or "").lstrip("+").replace(" ", "").replace("-", "")
+            if phone:
+                url = f"https://wa.me/{phone}?text={quote(msg)}"
+            else:
+                url = f"https://wa.me/?text={quote(msg)}"
+            webbrowser.open(url)
+
         btn_row = ctk.CTkFrame(scroll, fg_color="transparent")
         btn_row.pack(fill="x", pady=12)
         self.primary_button(btn_row, "✓ Aplicar Precio", apply_price).pack(side="left", padx=6)
-        ctk.CTkButton(btn_row, text="📱 Copiar WhatsApp", width=160,
+        ctk.CTkButton(btn_row, text="📋 Copiar WhatsApp", width=160,
                       fg_color=theme.ACCENT_GREEN, hover_color="#16A34A",
-                      font=theme.FONT_BODY, command=copy_whatsapp).pack(side="left")
+                      font=theme.FONT_BODY, command=copy_whatsapp).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="📱 Abrir WhatsApp", width=160,
+                      fg_color="#25D366", hover_color="#128C7E",
+                      font=theme.FONT_BODY, command=open_whatsapp).pack(side="left")
 
     def _new_job_dialog(self):
         dlg = ctk.CTkToplevel(self)

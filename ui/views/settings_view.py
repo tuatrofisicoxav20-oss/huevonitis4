@@ -1,5 +1,6 @@
 import contextlib
 import json
+import logging
 import os
 import tempfile
 
@@ -9,6 +10,8 @@ import config
 from ui import theme
 from ui.views.base_view import BaseView
 
+logger = logging.getLogger(__name__)
+
 
 class SettingsView(BaseView):
     def __init__(self, parent, app, **kwargs):
@@ -17,14 +20,32 @@ class SettingsView(BaseView):
         self._field_widgets: dict = {}
         self._build()
 
+    def on_show(self):
+        """Refresca los valores de los dropdowns con el estado live de config."""
+        self._settings = self._load_settings()
+        for key, (ftype, w) in self._field_widgets.items():
+            if ftype == "menu":
+                live_val = self._settings.get(key, "")
+                try:
+                    vals = w.cget("values")
+                    if live_val and live_val in vals:
+                        w.set(live_val)
+                except Exception:
+                    pass
+
     def _load_settings(self) -> dict:
+        # Base con los valores live de config (para que los dropdowns muestren el backend activo)
+        base: dict = {
+            "ocr_backend": config.OCR_BACKEND,
+            "glyph_detector": config.GLYPH_DETECTOR,
+        }
         if config.SETTINGS_FILE.exists():
             try:
                 with open(config.SETTINGS_FILE, encoding="utf-8") as f:
-                    return json.load(f)
+                    base.update(json.load(f))
             except Exception:
                 pass
-        return {}
+        return base
 
     def _save_settings(self):
         config.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -45,14 +66,49 @@ class SettingsView(BaseView):
         ctk.CTkLabel(scroll, text="Configuración", font=theme.FONT_TITLE,
                      text_color=theme.TEXT_PRIMARY).pack(anchor="w", pady=(0, 20))
 
-        # "Claro" removed — not implemented (see docs/KNOWN_ISSUES.md)
         self._section(scroll, "🎨 Apariencia", [
-            ("Tema", "theme", "menu", ["Oscuro", "Sistema"]),
+            ("Tema", "theme", "menu", ["Oscuro", "Claro", "Sistema"]),
         ])
+        # Backends disponibles (solo los que tienen las dependencias instaladas)
+        try:
+            from core.ocr.engine import OCREngine
+            _ocr_avail = {k for k, v in OCREngine.available_backends().items() if v}
+        except Exception:
+            _ocr_avail = {"tesseract"}
+        try:
+            from core.inkcore import glyph_detectors as _gd
+            _det_avail = {k for k, v in _gd.get_available().items() if v}
+        except Exception:
+            _det_avail = {"classic_cv"}
+
+        ocr_opts = sorted(_ocr_avail) or ["tesseract"]
+        det_opts = sorted(_det_avail) or ["classic_cv"]
+
         self._section(scroll, "✍️ InkCore", [
             ("Ruta de Tesseract", "tesseract_path", "entry", None),
             ("Calidad mínima de glifo (0-1)", "min_glyph_quality", "entry", None),
+            ("Backend OCR", "ocr_backend", "menu", ocr_opts),
+            ("Detector de glifos", "glyph_detector", "menu", det_opts),
         ])
+
+        # Tooltip para backends opcionales no instalados
+        try:
+            from core.ocr.engine import OCREngine as _OCREngine
+            all_backends = _OCREngine.available_backends()
+            missing = [f"{k}" for k, v in all_backends.items() if not v]
+            if missing:
+                hint_card = self.card_frame(scroll)
+                hint_card.pack(fill="x", pady=(0, 8))
+                ctk.CTkLabel(
+                    hint_card,
+                    text="💡 Backends no instalados: " + ", ".join(missing)
+                    + "\nVer requirements-optional.txt para instalar más opciones.",
+                    font=theme.FONT_BODY,
+                    text_color=theme.TEXT_MUTED,
+                    justify="left",
+                ).pack(anchor="w", padx=16, pady=(8, 12))
+        except Exception:
+            pass
         self._section(scroll, "💼 Negocio", [
             ("Nombre de tu negocio", "business_name", "entry", None),
             ("Precio base por página (MXN)", "base_price", "entry", None),
@@ -60,6 +116,9 @@ class SettingsView(BaseView):
         self._section(scroll, "💾 Datos", [
             ("Intervalo de autosave (segundos)", "autosave_interval", "entry", None),
         ])
+
+        self._build_cache_section(scroll)
+        self._build_diagnostics_section(scroll)
 
         self.primary_button(scroll, "💾 Guardar Configuración", self._apply_save, 200).pack(pady=20, anchor="w")
 
@@ -72,6 +131,118 @@ class SettingsView(BaseView):
         ctk.CTkLabel(about,
                      text="App de escritorio para producir apuntes con tu letra real\ny gestionar trabajos escolares freelance.",
                      font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, justify="left").pack(anchor="w", padx=16, pady=(4, 12))
+
+    def _build_diagnostics_section(self, parent):
+        card = self.card_frame(parent)
+        card.pack(fill="x", pady=8)
+
+        ctk.CTkLabel(card, text="🔍 Diagnóstico", font=theme.FONT_SUBHEADING,
+                     text_color=theme.TEXT_PRIMARY).pack(anchor="w", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(
+            card,
+            text="Muestra errores recientes, operaciones lentas y eventos frecuentes de la sesión.",
+            font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        ctk.CTkButton(
+            card, text="📊 Ver reporte de diagnóstico",
+            command=self._show_diagnostics_report,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+            font=theme.FONT_BODY, height=32,
+        ).pack(anchor="w", padx=16, pady=(0, 12))
+
+        ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(0, 0))
+
+    def _show_diagnostics_report(self):
+        from core.diagnostics import diagnostics as _diag
+
+        win = ctk.CTkToplevel(self)
+        win.title("Diagnóstico — Huevonitis 4")
+        win.geometry("720x560")
+        win.grab_set()
+
+        txt = ctk.CTkTextbox(win, font=theme.FONT_MONO, fg_color=theme.BG_TERTIARY,
+                              text_color=theme.TEXT_PRIMARY)
+        txt.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        txt.insert("0.0", _diag.get_report())
+        txt.configure(state="disabled")
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(0, 12))
+
+        def _copy():
+            content = txt.cget("state")
+            txt.configure(state="normal")
+            report = txt.get("0.0", "end")
+            txt.configure(state="disabled")
+            self.clipboard_clear()
+            self.clipboard_append(report)
+            self.toast("Reporte copiado al portapapeles", "info")
+
+        def _clear():
+            _diag.clear()
+            win.destroy()
+            self.toast("Eventos de diagnóstico limpiados", "info")
+
+        ctk.CTkButton(btn_row, text="🗑 Limpiar eventos", command=_clear,
+                      fg_color=theme.ACCENT_RED, hover_color="#b03030",
+                      font=theme.FONT_BODY, width=160).pack(side="left")
+        ctk.CTkButton(btn_row, text="📋 Copiar", command=_copy,
+                      fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+                      font=theme.FONT_BODY, width=120).pack(side="left", padx=8)
+        ctk.CTkButton(btn_row, text="Cerrar", command=win.destroy,
+                      fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
+                      text_color=theme.TEXT_SECONDARY,
+                      font=theme.FONT_BODY, width=100).pack(side="right")
+
+    def _build_cache_section(self, parent):
+        """Sección de caché OCR con info de tamaño y botón para limpiar."""
+        card = self.card_frame(parent)
+        card.pack(fill="x", pady=8)
+
+        ctk.CTkLabel(card, text="🗄️ Caché OCR", font=theme.FONT_SUBHEADING,
+                     text_color=theme.TEXT_PRIMARY).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self._cache_size_label = ctk.CTkLabel(
+            card, text=self._get_cache_size_text(),
+            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
+        )
+        self._cache_size_label.pack(anchor="w", padx=16, pady=4)
+
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(anchor="w", padx=16, pady=(4, 12))
+
+        self.secondary_button(row, "🔄 Actualizar", self._refresh_cache_size, 120).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            row, text="🗑 Limpiar caché", width=140,
+            fg_color=theme.ACCENT_RED, hover_color="#b03030",
+            font=theme.FONT_BODY, command=self._clear_cache,
+        ).pack(side="left")
+
+        ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(4, 0))
+
+    def _get_cache_size_text(self) -> str:
+        try:
+            from core.ocr.result_cache import OCRResultCache
+            cache = OCRResultCache()
+            mb = cache.cache_size_mb()
+            count = len(list(config.OCR_CACHE_DIR.glob("*.pkl"))) if config.OCR_CACHE_DIR.exists() else 0
+            return f"Tamaño: {mb:.2f} MB  |  Entradas: {count}"
+        except Exception:
+            return "Caché OCR no disponible"
+
+    def _refresh_cache_size(self):
+        self._cache_size_label.configure(text=self._get_cache_size_text())
+
+    def _clear_cache(self):
+        try:
+            from core.ocr.result_cache import OCRResultCache
+            removed = OCRResultCache().clear()
+            self._cache_size_label.configure(text=self._get_cache_size_text())
+            self.toast(f"Caché limpiada ({removed} entradas)", "success")
+        except Exception as exc:
+            self.toast(f"Error al limpiar caché: {exc}", "error")
 
     def _section(self, parent, title: str, fields: list):
         card = self.card_frame(parent)
@@ -109,7 +280,34 @@ class SettingsView(BaseView):
 
         ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(4, 12))
 
+    def _notify_backends(self, prev_ocr: str, prev_det: str) -> None:
+        """Actualiza instancias vivas de OCREngine y GlyphExtractor sin reiniciar la app."""
+        new_ocr = self._settings.get("ocr_backend", prev_ocr)
+        new_det = self._settings.get("glyph_detector", prev_det)
+        tess_changed = bool(self._settings.get("tesseract_path"))
+
+        # StudyView._ocr: cambiar backend o recargar cmd de Tesseract en caliente
+        if new_ocr != prev_ocr or tess_changed:
+            try:
+                study = self.app._views.get("study")
+                if study is not None and hasattr(study, "_ocr"):
+                    study._ocr.switch_backend(new_ocr)
+            except Exception as exc:
+                logger.warning("No se pudo actualizar OCREngine en StudyView: %s", exc)
+
+        # InkCorePipeline: recargar extractor si cambió el detector
+        if new_det != prev_det:
+            try:
+                if hasattr(self.app, "inkcore"):
+                    self.app.inkcore.reload_extractor()
+            except Exception as exc:
+                logger.warning("No se pudo recargar GlyphExtractor: %s", exc)
+
     def _apply_save(self):
+        # Guardar valores previos ANTES de leer los widgets (para comparar después)
+        prev_ocr = self._settings.get("ocr_backend", config.OCR_BACKEND)
+        prev_det = self._settings.get("glyph_detector", config.GLYPH_DETECTOR)
+
         errors = []
         for key, (ftype, w) in self._field_widgets.items():
             if ftype == "entry":
@@ -147,12 +345,14 @@ class SettingsView(BaseView):
             return
 
         theme_val = self._settings.get("theme", "Oscuro")
-        mode_map = {"Oscuro": "dark", "Sistema": "system"}
-        ctk.set_appearance_mode(mode_map.get(theme_val, "dark"))
+        mode_map = {"Oscuro": "dark", "Claro": "light", "Sistema": "system"}
+        ctk_mode = mode_map.get(theme_val, "dark")
+        ctk.set_appearance_mode(ctk_mode)
 
         self._save_settings()
         _apply_settings_to_config(self._settings)
-        self.toast("Configuración guardada", "success")
+        self._notify_backends(prev_ocr, prev_det)
+        self.toast("Configuración guardada — reinicia la app para aplicar el tema", "success")
 
 
 def _apply_settings_to_config(settings: dict) -> None:
@@ -171,6 +371,14 @@ def _apply_settings_to_config(settings: dict) -> None:
     if val:
         config.TESSERACT_CMD = val
 
+    val = settings.get("ocr_backend", "")
+    if val and isinstance(val, str):
+        config.OCR_BACKEND = val
+
+    val = settings.get("glyph_detector", "")
+    if val and isinstance(val, str):
+        config.GLYPH_DETECTOR = val
+
 
 def load_and_apply_settings() -> None:
     """Call at startup to override config defaults from SETTINGS_FILE."""
@@ -182,3 +390,16 @@ def load_and_apply_settings() -> None:
         _apply_settings_to_config(settings)
     except Exception:
         pass
+
+
+def get_backend_install_hints() -> dict[str, str]:
+    """Devuelve {nombre: hint_de_instalación} para backends no disponibles."""
+    hints = {}
+    try:
+        from core.ocr import backends as _backends
+        for name, cls in _backends.REGISTRY.items():
+            if not cls.available:
+                hints[name] = cls().install_hint()
+    except Exception:
+        pass
+    return hints

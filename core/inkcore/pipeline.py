@@ -51,6 +51,22 @@ class InkCorePipeline:
             logger.error("InkCorePipeline failed to initialise: %s", exc, exc_info=True)
             raise
 
+    def reload_extractor(self) -> None:
+        """Reinicializa GlyphExtractor para tomar el nuevo GLYPH_DETECTOR desde config.
+
+        Llamar cuando el usuario cambia el detector de glifos en Configuración.
+        Usa el mismo lock que reload_bank() para no colisionar con extracciones en curso.
+        """
+        with self._bank_lock:
+            try:
+                self.extractor = GlyphExtractor()
+                det = getattr(config, "GLYPH_DETECTOR", "classic_cv")
+                logger.info("GlyphExtractor reinicializado (detector: %s)", det)
+            except Exception as exc:
+                logger.error(
+                    "Error al reinicializar GlyphExtractor: %s", exc, exc_info=True
+                )
+
     def reload_bank(self):
         with self._bank_lock:
             t0 = time.perf_counter()
@@ -84,12 +100,28 @@ class InkCorePipeline:
         with self._bank_lock:
             for g in glyphs:
                 try:
-                    result = self.bank.add_glyph(g.char, g.image_path)
+                    has_pipeline_meta = (
+                        g.predicted_char is not None
+                        or g.label_confidence is not None
+                        or bool(g.detector_sources)
+                    )
+                    quality_override = None
+                    if has_pipeline_meta:
+                        quality_override = {
+                            "score": g.quality_score,
+                            "tier": g.tier,
+                            "ink_coverage": g.ink_coverage,
+                        }
+                    result = self.bank.add_glyph(
+                        g.char, g.image_path,
+                        predicted_char=g.predicted_char,
+                        label_confidence=g.label_confidence,
+                        detector_sources=g.detector_sources,
+                        quality_override=quality_override,
+                    )
                     if result is not None:
                         saved += 1
                 except Exception as exc:
-                    # Bug fix #5: log instead of silently swallowing so
-                    # problematic glyphs are visible in the log.
                     logger.warning(
                         "Failed to add glyph '%s' (%s) to bank: %s",
                         g.char, g.image_path, exc,

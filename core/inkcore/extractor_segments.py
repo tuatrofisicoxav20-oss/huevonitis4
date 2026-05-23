@@ -1,9 +1,11 @@
 """
-SegmentDetector — detección de líneas y alineación de caracteres para GlyphExtractor.
+SegmentDetector — detección de líneas y bandas de texto para GlyphExtractor.
 
-Extraído de extractor.py para mejorar la modularidad.
-Contiene: find_line_boxes, _split_tall_band, tesseract_boundaries.
+Movido desde extractor.py (Fase 4A). Contiene la lógica de _find_line_boxes
+y _split_tall_band que previamente eran métodos inline de GlyphExtractor.
 """
+from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,37 +17,31 @@ try:
 except ImportError:
     CV2_OK = False
 
-try:
-    import pytesseract
-    PIL_OK = True
-except ImportError:
-    TESSERACT_OK = False
-
-try:
-    from PIL import Image as _PILImage
-    PIL_OK = True
-except ImportError:
-    PIL_OK = False
-
-try:
-    _ = TESSERACT_OK
-except NameError:
-    TESSERACT_OK = PIL_OK and "pytesseract" in dir()
-
-MIN_COMP_AREA = 10
-MIN_CHAR_W = 2
-MIN_CHAR_H = 3
-MIN_BAND_H = 5
+# Constantes compartidas con extractor.py
 LINE_THRESHOLD_F = 0.004
+MIN_BAND_H = 5
+
+# Importar BBox desde extractor para no duplicar la definición
+# (se hace lazy para evitar import circular al cargar el módulo)
+def _BBox():
+    from core.inkcore.extractor import BBox
+    return BBox
 
 
 class SegmentDetector:
-    """Detecta bandas de líneas de texto y alinea segmentos de caracteres."""
+    """Detecta bandas de texto y sus límites horizontales en una máscara binaria.
 
-    def find_line_boxes(self, mask: "np.ndarray", BBox) -> list:
-        return self._find_line_boxes(mask, BBox)
+    Se instancia una vez en GlyphExtractor.__init__ como self._seg_detector.
+    """
 
-    def _find_line_boxes(self, mask: "np.ndarray", BBox) -> list:
+    def find_line_boxes(self, mask: "np.ndarray") -> list:
+        """Detecta bandas de texto (líneas de escritura) en la máscara.
+
+        Devuelve lista de BBox con las coordenadas de cada banda.
+        """
+        if not CV2_OK:
+            return []
+        BBox = _BBox()
         h, w = mask.shape[:2]
         proj = np.sum(mask > 0, axis=1).astype(np.float32)
         if h > 20:
@@ -74,15 +70,15 @@ class SegmentDetector:
             else:
                 merged.append([band[0], band[1]])
 
-        split_merged = []
+        split_merged: list[list[int]] = []
         for band in merged:
-            split_merged.extend(self._split_tall_band(band, proj, h))
+            split_merged.extend(self.split_tall_band(band, proj, h))
         merged = split_merged
 
         boxes = []
-        for start, end in merged:
-            y1 = max(0, start - 6)
-            y2 = min(h, end + 6)
+        for start_y, end_y in merged:
+            y1 = max(0, start_y - 6)
+            y2 = min(h, end_y + 6)
             cols = np.where(np.sum(mask[y1:y2] > 0, axis=0) > 0)[0]
             if len(cols):
                 boxes.append(BBox(int(cols[0]), y1,
@@ -90,9 +86,14 @@ class SegmentDetector:
         return boxes
 
     @staticmethod
-    def _split_tall_band(
-        band: list, proj: "np.ndarray", img_h: int
-    ) -> list:
+    def split_tall_band(
+        band: list[int], proj: "np.ndarray", img_h: int
+    ) -> list[list[int]]:
+        """Divide una banda alta en sub-bandas por prominencia de valle.
+
+        La prominencia = min(pico_izquierdo - valle, pico_derecho - valle).
+        Un separador real entre renglones tiene alta prominencia.
+        """
         y0, y1 = band
         band_h = y1 - y0
         if band_h < 30:
@@ -128,64 +129,11 @@ class SegmentDetector:
         if best_i <= 0 or best_i >= band_h:
             return [band]
         logger.info(
-            f"Renglón separado en y={split_y} "
-            f"(prominencia={best_prom:.0f}/{local_max:.0f}={best_prom/local_max*100:.0f}%)"
+            "Renglón separado en y=%d (prominencia=%.0f/%.0f=%.0f%%)",
+            split_y, best_prom, local_max, best_prom / local_max * 100,
         )
-        result = []
+        result: list[list[int]] = []
         for sub in [[y0, split_y], [split_y, y1]]:
             if sub[1] - sub[0] >= MIN_BAND_H:
-                result.extend(SegmentDetector._split_tall_band(sub, proj, img_h))
+                result.extend(SegmentDetector.split_tall_band(sub, proj, img_h))
         return result or [band]
-
-    def tesseract_boundaries(self, line_mask: "np.ndarray") -> list[int]:
-        if not TESSERACT_OK or not CV2_OK or not PIL_OK:
-            return []
-        try:
-            h, w = line_mask.shape[:2]
-            target_h = max(200, h * 3)
-            scale = target_h / max(1, h)
-            scaled_w = int(w * scale)
-            lm = cv2.resize(line_mask, (scaled_w, target_h), interpolation=cv2.INTER_LINEAR)
-            _, lm = cv2.threshold(lm, 127, 255, cv2.THRESH_BINARY)
-            border = 50
-            lm = cv2.copyMakeBorder(lm, border, border, border, border,
-                                    cv2.BORDER_CONSTANT, value=0)
-            tess_in = 255 - lm
-            pil_in = _PILImage.fromarray(tess_in, mode="L")
-
-            import io as _io
-            import sys as _sys
-            all_boundaries: set[int] = set()
-            for psm in [7, 13]:
-                try:
-                    _old_stderr = _sys.stderr
-                    _sys.stderr = _io.StringIO()
-                    try:
-                        raw = pytesseract.image_to_boxes(
-                            pil_in, lang="spa", config=f"--psm {psm} --oem 3",
-                        )
-                    finally:
-                        _sys.stderr = _old_stderr
-                    for ln in raw.strip().split("\n"):
-                        parts = ln.split()
-                        if len(parts) < 5:
-                            continue
-                        try:
-                            bx1, bx2 = int(parts[1]), int(parts[3])
-                        except ValueError:
-                            continue
-                        orig_x1 = max(0, int((bx1 - border) / scale))
-                        orig_x2 = max(0, int((bx2 - border) / scale))
-                        if orig_x2 > orig_x1 and orig_x1 < w:
-                            all_boundaries.add(min(orig_x1, w))
-                            all_boundaries.add(min(orig_x2, w))
-                except Exception:
-                    continue
-
-            result = sorted(all_boundaries)
-            if result:
-                logger.info(f"Tesseract: {len(result)} fronteras (PSM 7+13, escala\u00d7{scale:.1f})")
-            return result
-        except Exception as e:
-            logger.debug(f"Tesseract boundary error: {e}")
-            return []

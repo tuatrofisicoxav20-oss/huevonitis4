@@ -204,15 +204,271 @@ def run_comparison(image_path: str, ref_text: str = "") -> None:
     print(f"\n{'='*70}\n")
 
 
+def run_ocr_comparison(image_path: str) -> None:
+    """Compara todos los backends OCR disponibles sobre la misma imagen."""
+    import time
+    import config  # noqa: E402
+
+    print(f"\n{'='*70}")
+    print("  COMPARACIÓN DE BACKENDS OCR")
+    print(f"  Imagen: {os.path.basename(image_path)}")
+    print(f"{'='*70}\n")
+
+    if not os.path.exists(image_path):
+        print(f"ERROR: imagen no encontrada: {image_path}")
+        return
+
+    try:
+        from core.ocr import backends as _backends
+    except ImportError as e:
+        print(f"ERROR: no se puede importar backends OCR: {e}")
+        return
+
+    available = _backends.get_available()
+    print(f"Backends registrados: {list(available.keys())}")
+    print(f"Disponibles: {[k for k, v in available.items() if v]}\n")
+
+    results = {}
+    for name, is_avail in available.items():
+        if not is_avail:
+            results[name] = {"status": "no instalado", "text": "", "time_ms": 0}
+            continue
+        print(f"Probando {name}...")
+        try:
+            backend = _backends.get_backend(name)
+            t0 = time.perf_counter()
+            text = backend.extract_text(image_path)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            word_count = len(text.split()) if text else 0
+            results[name] = {
+                "status": "ok",
+                "text": text[:200] + ("…" if len(text) > 200 else ""),
+                "time_ms": elapsed_ms,
+                "word_count": word_count,
+            }
+            print(f"  {elapsed_ms:.0f} ms | {word_count} palabras")
+        except Exception as exc:
+            results[name] = {"status": f"error: {exc}", "text": "", "time_ms": 0}
+            print(f"  ERROR: {exc}")
+
+    print(f"\n{'─'*70}")
+    print(f"{'Backend':<16} {'Estado':>12} {'ms':>8} {'Palabras':>10}")
+    print(f"{'─'*70}")
+    for name, r in results.items():
+        status = r.get("status", "?")
+        t = r.get("time_ms", 0)
+        w = r.get("word_count", "-")
+        print(f"{name:<16} {status:>12} {t:>8.0f} {str(w):>10}")
+    print(f"{'─'*70}\n")
+
+    for name, r in results.items():
+        if r.get("status") == "ok" and r.get("text"):
+            print(f"[{name}] primeras líneas:")
+            for line in r["text"].split("\n")[:5]:
+                if line.strip():
+                    print(f"  {line}")
+            print()
+
+
+def run_ensemble_comparison(
+    image_path: str,
+    strategies: list[str],
+    labelers: list[str],
+    output_html: str | None,
+) -> None:
+    """Compara estrategias del pipeline ensemble y genera informe HTML opcional."""
+    import time
+    import base64
+    import io
+
+    print(f"\n{'='*70}")
+    print("  COMPARACIÓN DE ESTRATEGIAS ENSEMBLE")
+    print(f"  Imagen: {os.path.basename(image_path)}")
+    print(f"  Estrategias: {strategies}")
+    print(f"  Labelers:    {labelers}")
+    print(f"{'='*70}\n")
+
+    if not os.path.exists(image_path):
+        print(f"ERROR: imagen no encontrada: {image_path}")
+        return
+
+    try:
+        from core.inkcore.extraction_pipeline import (
+            GlyphExtractionPipeline, PipelineConfig,
+        )
+    except ImportError as exc:
+        print(f"ERROR: {exc}")
+        return
+
+    _STRATEGY_CONFIGS = {
+        "legacy": None,  # usa flujo extractor legacy
+        "classic_only": PipelineConfig(detectors=["classic_cv"], labelers=labelers,
+                                       debug_overlay=False),
+        "craft_only": PipelineConfig(detectors=["craft"], labelers=labelers,
+                                     debug_overlay=False),
+        "paddle_only": PipelineConfig(detectors=["paddle_det"], labelers=labelers,
+                                      debug_overlay=False),
+        "ensemble_all": PipelineConfig(detectors=["classic_cv", "craft", "paddle_det"],
+                                       detector_fusion="union", labelers=labelers,
+                                       debug_overlay=True),
+        "union": PipelineConfig(detectors=["classic_cv", "craft"],
+                                detector_fusion="union", labelers=labelers),
+        "intersection": PipelineConfig(detectors=["classic_cv", "craft"],
+                                       detector_fusion="intersection", labelers=labelers),
+        "cascade": PipelineConfig(detectors=["classic_cv", "craft"],
+                                  detector_fusion="cascade", labelers=labelers),
+    }
+
+    results_by_strategy = {}
+    overlay_paths = {}
+
+    for strat_name in strategies:
+        cfg = _STRATEGY_CONFIGS.get(strat_name)
+        print(f"Ejecutando '{strat_name}'...")
+        t0 = time.perf_counter()
+        try:
+            if strat_name == "legacy" or cfg is None:
+                from core.inkcore.extractor import GlyphExtractor, ExtractionOptions
+                ext = GlyphExtractor()
+                glyphs = ext.extract_from_image(
+                    image_path, "", ExtractionOptions(use_pipeline=False)
+                )
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                results_by_strategy[strat_name] = {
+                    "glyphs": glyphs,
+                    "time_ms": elapsed_ms,
+                    "stats": {"fused_count": len(glyphs)},
+                    "timings": {"total_ms": elapsed_ms},
+                }
+            else:
+                cfg.debug_overlay = output_html is not None
+                pipeline = GlyphExtractionPipeline(cfg)
+                result = pipeline.extract(image_path)
+                elapsed_ms = result.timings_ms.get("total_ms", 0)
+                results_by_strategy[strat_name] = {
+                    "glyphs": result.glyphs,
+                    "time_ms": elapsed_ms,
+                    "stats": result.stats,
+                    "timings": result.timings_ms,
+                }
+                if result.debug_image_path:
+                    overlay_paths[strat_name] = result.debug_image_path
+        except Exception as exc:
+            print(f"  ERROR: {exc}")
+            results_by_strategy[strat_name] = {
+                "glyphs": [], "time_ms": 0, "stats": {"error": str(exc)},
+                "timings": {},
+            }
+
+    # Imprimir tabla
+    print(f"\n{'─'*70}")
+    print(f"{'Estrategia':<22} {'Glifos':>7} {'AvgQ':>7} {'Time(ms)':>9}")
+    print(f"{'─'*70}")
+    for name, r in results_by_strategy.items():
+        glyphs = r["glyphs"]
+        avg_q = (sum(g.quality_score for g in glyphs) / len(glyphs)
+                 if glyphs else 0.0)
+        print(f"{name:<22} {len(glyphs):>7}  {avg_q:>6.3f}  {r['time_ms']:>8}")
+    print(f"{'─'*70}\n")
+
+    if output_html:
+        _write_html_report(image_path, results_by_strategy, overlay_paths, output_html)
+        print(f"Informe HTML guardado en: {output_html}")
+
+
+def _write_html_report(image_path: str, results: dict, overlays: dict, out: str) -> None:
+    import base64, io
+    from pathlib import Path
+
+    def img_to_b64(path: str) -> str:
+        try:
+            return base64.b64encode(Path(path).read_bytes()).decode()
+        except Exception:
+            return ""
+
+    orig_b64 = img_to_b64(image_path)
+    ext_lower = Path(image_path).suffix.lower().lstrip(".")
+    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png"}.get(ext_lower, "png")
+
+    rows_html = ""
+    for strat, r in results.items():
+        glyphs = r["glyphs"]
+        avg_q = (sum(g.quality_score for g in glyphs) / len(glyphs)
+                 if glyphs else 0.0)
+        overlay_html = ""
+        if strat in overlays:
+            ov_b64 = img_to_b64(overlays[strat])
+            if ov_b64:
+                overlay_html = (
+                    f'<img src="data:image/png;base64,{ov_b64}" '
+                    f'style="max-width:300px;border:1px solid #444">'
+                )
+        chars_found = ", ".join(
+            f"{g.char}({g.quality_score:.2f})" for g in glyphs[:20]
+        )
+        rows_html += f"""
+        <tr>
+          <td><b>{strat}</b></td>
+          <td>{len(glyphs)}</td>
+          <td>{avg_q:.3f}</td>
+          <td>{r['time_ms']} ms</td>
+          <td style="font-size:0.8em">{chars_found}</td>
+          <td>{overlay_html}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<title>Compare Strategies — {Path(image_path).name}</title>
+<style>
+  body{{font-family:sans-serif;background:#1a1a2e;color:#e0e0e0;padding:20px}}
+  table{{border-collapse:collapse;width:100%}}
+  th,td{{border:1px solid #444;padding:8px 12px;text-align:left}}
+  th{{background:#16213e}} tr:nth-child(even){{background:#0f3460}}
+  img{{border-radius:4px}}
+</style></head>
+<body>
+<h1>Comparación de estrategias</h1>
+<p><b>Imagen:</b> {image_path}</p>
+<img src="data:image/{mime};base64,{orig_b64}" style="max-width:600px;margin-bottom:20px">
+<table>
+  <tr><th>Estrategia</th><th>Glifos</th><th>Avg Q</th><th>Tiempo</th>
+      <th>Chars encontrados</th><th>Overlay</th></tr>
+  {rows_html}
+</table>
+</body></html>"""
+    Path(out).write_text(html, encoding="utf-8")
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Uso: python tools/compare_strategies.py <ruta_imagen> [texto_referencia]")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Comparación de estrategias de extracción de glifos"
+    )
+    parser.add_argument("image", help="Ruta a la imagen")
+    parser.add_argument("ref_text", nargs="?", default="",
+                        help="Texto de referencia (para modo legacy)")
+    parser.add_argument("--ocr", action="store_true",
+                        help="Comparar backends OCR en vez de estrategias de segmentación")
+    parser.add_argument("--strategies",
+                        default="legacy,classic_only,ensemble_all",
+                        help="Estrategias separadas por coma "
+                             "(legacy,classic_only,craft_only,paddle_only,"
+                             "ensemble_all,union,intersection,cascade)")
+    parser.add_argument("--labelers", default="",
+                        help="Labelers separados por coma (tesseract_labeler,trocr_labeler)")
+    parser.add_argument("--output", default=None,
+                        help="Ruta del informe HTML de salida")
 
-    image_path = sys.argv[1]
-    ref_text = sys.argv[2] if len(sys.argv) >= 3 else ""
+    args = parser.parse_args()
 
-    run_comparison(image_path, ref_text)
+    if args.ocr:
+        run_ocr_comparison(args.image)
+    elif args.strategies and args.strategies != "segmentation":
+        strats = [s.strip() for s in args.strategies.split(",") if s.strip()]
+        labelers = [l.strip() for l in args.labelers.split(",") if l.strip()]
+        run_ensemble_comparison(args.image, strats, labelers, args.output)
+    else:
+        run_comparison(args.image, args.ref_text)
 
 
 if __name__ == "__main__":

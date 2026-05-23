@@ -1,9 +1,12 @@
 """
 ImagePreprocessor — preprocesamiento de imágenes para GlyphExtractor.
 
-Extraído de extractor.py para mejorar la modularidad.
-Contiene todas las operaciones de imagen que preceden a la detección de segmentos.
+Movido desde extractor.py (Fase 4A). La clase contiene todos los métodos
+de preprocesamiento previamente inline en GlyphExtractor, que ahora
+delegan aquí. La API pública de GlyphExtractor no cambia.
 """
+from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,38 +22,24 @@ except ImportError:
 MIN_COMP_AREA = 10
 MIN_CHAR_W = 2
 MIN_CHAR_H = 3
-MAX_DESKEW_DEG = 15.0
+CHAR_PAD = 6
 TARGET_LONG = 2200
+MAX_DESKEW_DEG = 15.0
 
 
 class ImagePreprocessor:
-    """Maneja todas las operaciones de preprocesamiento de imagen:
-    ajustes manuales, escala, autocrop, deskew, umbralización y limpieza.
+    """Preprocesa imágenes BGR de apuntes para extracción de glifos.
+
+    Todos los métodos son puros respecto a la imagen (no guardan estado
+    entre llamadas). Se instancia una vez en GlyphExtractor.__init__.
     """
 
+    # ── Ajustes manuales (brillo/contraste/rotación) ───────────────
+
     def apply_options(self, img: "np.ndarray", opts) -> "np.ndarray":
-        """Aplica rotación y ajustes de brillo/contraste manuales."""
-        return self._apply_manual(img, opts)
-
-    def normalize_illumination(self, gray: "np.ndarray") -> "np.ndarray":
-        return self._normalize_illumination(gray)
-
-    def deskew(self, img: "np.ndarray") -> "tuple[np.ndarray, float]":
-        return self._deskew(img)
-
-    def remove_notebook_lines(self, mask: "np.ndarray") -> "np.ndarray":
-        return self._remove_lines(mask)
-
-    def multi_threshold_vote(self, gray: "np.ndarray") -> "np.ndarray":
-        """Votación de 5 estrategias de umbralización."""
-        return self._multi_threshold_vote(gray)
-
-    def perspective_correct(self, img: "np.ndarray") -> "np.ndarray":
-        return self._autocrop(img)
-
-    # ── Implementaciones ────────────────────────────────────────────
-
-    def _apply_manual(self, img: "np.ndarray", opts) -> "np.ndarray":
+        """Aplica ajustes manuales de brillo, contraste y rotación."""
+        if not CV2_OK:
+            return img
         if abs(opts.rotation_deg) > 0.1:
             h, w = img.shape[:2]
             M = cv2.getRotationMatrix2D((w / 2, h / 2), -opts.rotation_deg, 1.0)
@@ -62,7 +51,12 @@ class ImagePreprocessor:
             img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
         return img
 
+    # ── Escala ─────────────────────────────────────────────────────
+
     def scale(self, img: "np.ndarray") -> "np.ndarray":
+        """Reduce imágenes grandes a TARGET_LONG en el lado mayor."""
+        if not CV2_OK:
+            return img
         h, w = img.shape[:2]
         ls = max(h, w)
         if ls <= TARGET_LONG:
@@ -70,7 +64,12 @@ class ImagePreprocessor:
         s = TARGET_LONG / ls
         return cv2.resize(img, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
 
-    def _autocrop(self, img: "np.ndarray") -> "np.ndarray":
+    # ── Autocrop + corrección de perspectiva ───────────────────────
+
+    def autocrop(self, img: "np.ndarray") -> "np.ndarray":
+        """Detecta y recorta el área de escritura; corrige perspectiva si es posible."""
+        if not CV2_OK:
+            return img
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (7, 7), 0)
@@ -90,14 +89,14 @@ class ImagePreprocessor:
                     return warped
             x, y, cw, ch = cv2.boundingRect(cnt)
             m = 10
-            crop = img[max(0, y-m):min(h, y+ch+m), max(0, x-m):min(w, x+cw+m)]
+            crop = img[max(0, y - m):min(h, y + ch + m), max(0, x - m):min(w, x + cw + m)]
             if crop.size > 0:
                 return crop
         return img
 
-    def _four_point_transform(
-        self, img: "np.ndarray", pts: "np.ndarray"
-    ) -> "np.ndarray | None":
+    def _four_point_transform(self, img: "np.ndarray", pts: "np.ndarray") -> "np.ndarray | None":
+        if not CV2_OK:
+            return None
         try:
             rect = self._order_points(pts.astype(np.float32))
             tl, tr, br, bl = rect
@@ -109,11 +108,10 @@ class ImagePreprocessor:
             mH = max(1, max(int(hA), int(hB)))
             if mW < 80 or mH < 80:
                 return None
-            dst = np.array([[0, 0], [mW-1, 0], [mW-1, mH-1], [0, mH-1]], dtype=np.float32)
+            dst = np.array([[0, 0], [mW - 1, 0], [mW - 1, mH - 1], [0, mH - 1]], dtype=np.float32)
             M = cv2.getPerspectiveTransform(rect, dst)
             return cv2.warpPerspective(img, M, (mW, mH),
-                                       borderMode=cv2.BORDER_CONSTANT,
-                                       borderValue=(255, 255, 255))
+                                       borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
         except Exception:
             return None
 
@@ -128,7 +126,12 @@ class ImagePreprocessor:
         rect[3] = pts[np.argmax(d)]
         return rect
 
-    def _deskew(self, img: "np.ndarray") -> "tuple[np.ndarray, float]":
+    # ── Deskew ─────────────────────────────────────────────────────
+
+    def deskew(self, img: "np.ndarray") -> "tuple[np.ndarray, float]":
+        """Endereza la imagen si está inclinada. Devuelve (imagen, ángulo_grados)."""
+        if not CV2_OK:
+            return img, 0.0
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         binary = self.filtered_mask(binary)
@@ -136,13 +139,12 @@ class ImagePreprocessor:
         if angle is None or abs(angle) < 0.25:
             return img, 0.0
         if abs(angle) > MAX_DESKEW_DEG:
-            logger.warning(f"Inclinación {angle:.1f}° fuera del límite, no se corrige")
+            logger.warning("Inclinación %.1f° fuera del límite, no se corrige", angle)
             return img, 0.0
         h, w = img.shape[:2]
         M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
         rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR,
-                                 borderMode=cv2.BORDER_CONSTANT,
-                                 borderValue=(255, 255, 255))
+                                 borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
         return rotated, float(angle)
 
     def _estimate_skew(self, mask: "np.ndarray", width: int) -> "float | None":
@@ -159,7 +161,7 @@ class ImagePreprocessor:
                 return float(np.median(angles))
         best_angle, best_var = 0.0, -1.0
         for a in np.arange(-MAX_DESKEW_DEG, MAX_DESKEW_DEG + 0.5, 1.0):
-            M = cv2.getRotationMatrix2D((mask.shape[1]/2, mask.shape[0]/2), a, 1.0)
+            M = cv2.getRotationMatrix2D((mask.shape[1] / 2, mask.shape[0] / 2), a, 1.0)
             rot = cv2.warpAffine(mask, M, (mask.shape[1], mask.shape[0]))
             proj = np.sum(rot > 0, axis=1, dtype=np.float32)
             v = float(np.var(proj))
@@ -168,54 +170,11 @@ class ImagePreprocessor:
                 best_angle = a
         return best_angle if abs(best_angle) > 0.3 else None
 
-    def full_preprocess(
-        self, img: "np.ndarray", opts
-    ) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
-        """Normalización + umbralización + limpieza. Retorna (gray, raw_mask, clean_mask)."""
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray = self._normalize_illumination(gray)
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        img_w = gray.shape[1]
-        tile = max(8, min(32, img_w // 60))
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(tile, tile))
-        enhanced = clahe.apply(gray)
-
-        mask = self._multi_threshold_vote(enhanced)
-
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-        raw = mask.copy()
-
-        if opts.remove_lines:
-            mask = self._remove_lines(mask)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
-
-        clean = self.filtered_mask(mask)
-        return gray, raw, clean
-
-    def _multi_threshold_vote(self, enhanced: "np.ndarray") -> "np.ndarray":
-        """5 estrategias de umbralización con votación adaptativa."""
-        _, m1 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        m2 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY_INV, 31, 8)
-        m3 = self._sauvola(enhanced, window=25, k=0.14)
-        m4 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                   cv2.THRESH_BINARY_INV, 19, 6)
-        m5 = self._sauvola(enhanced, window=41, k=0.20)
-
-        vote = ((m1 > 0).astype(np.int16) + (m2 > 0).astype(np.int16)
-                + (m3 > 0).astype(np.int16) + (m4 > 0).astype(np.int16)
-                + (m5 > 0).astype(np.int16))
-
-        mask = np.where(vote >= 2, np.uint8(255), np.uint8(0))
-        ink_ratio = np.sum(mask > 0) / max(1, mask.size)
-        if ink_ratio < 0.008:
-            mask = np.where(vote >= 1, np.uint8(255), np.uint8(0))
-            logger.debug(f"Votación relajada a ≥1 (ratio={ink_ratio:.4f})")
-        return mask
+    # ── Umbralización y normalización ──────────────────────────────
 
     @staticmethod
-    def _normalize_illumination(gray: "np.ndarray") -> "np.ndarray":
+    def normalize_illumination(gray: "np.ndarray") -> "np.ndarray":
+        """Sustrae el fondo estimado por dilatación → iluminación uniforme."""
         ks = max(51, gray.shape[1] // 10)
         ks = ks if ks % 2 == 1 else ks + 1
         ks = min(ks, 201)
@@ -225,7 +184,8 @@ class ImagePreprocessor:
         return np.clip(norm, 0, 255).astype(np.uint8)
 
     @staticmethod
-    def _sauvola(gray: "np.ndarray", window: int = 25, k: float = 0.20) -> "np.ndarray":
+    def sauvola(gray: "np.ndarray", window: int = 25, k: float = 0.20) -> "np.ndarray":
+        """Thresholding de Sauvola — robusto para escritura a mano con iluminación variable."""
         g = gray.astype(np.float32)
         mean = cv2.boxFilter(g, cv2.CV_32F, (window, window))
         sq_mean = cv2.boxFilter(g * g, cv2.CV_32F, (window, window))
@@ -236,7 +196,7 @@ class ImagePreprocessor:
 
     @staticmethod
     def filtered_mask(mask: "np.ndarray") -> "np.ndarray":
-        """Elimina componentes demasiado pequeños (ruido)."""
+        """Elimina componentes de ruido (demasiado pequeños)."""
         num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         out = np.zeros_like(mask)
         for i in range(1, num):
@@ -247,7 +207,8 @@ class ImagePreprocessor:
                 out[labels == i] = 255
         return out
 
-    def _remove_lines(self, mask: "np.ndarray") -> "np.ndarray":
+    def remove_lines(self, mask: "np.ndarray") -> "np.ndarray":
+        """Elimina líneas horizontales de cuaderno preservando trazos verticales."""
         mask = np.where(mask > 0, np.uint8(255), np.uint8(0))
         h, w = mask.shape[:2]
         if h == 0 or w == 0:
@@ -268,3 +229,51 @@ class ImagePreprocessor:
         cleaned = mask.copy()
         cleaned[cv2.bitwise_and(line_mask, cv2.bitwise_not(protect)) > 0] = 0
         return np.where(cleaned > 0, np.uint8(255), np.uint8(0))
+
+    # ── Preprocesamiento completo ──────────────────────────────────
+
+    def full_preprocess(
+        self, img: "np.ndarray", opts
+    ) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+        """Preprocesamiento completo: normalización + multi-threshold + limpieza.
+
+        Devuelve (gray_normalizado, thresh_raw, mask_limpia).
+        """
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = self.normalize_illumination(gray)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+        img_w = gray.shape[1]
+        tile = max(8, min(32, img_w // 60))
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(tile, tile))
+        enhanced = clahe.apply(gray)
+
+        # Votación de 5 estrategias de umbralización
+        _, m1 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        m2 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, 31, 8)
+        m3 = self.sauvola(enhanced, window=25, k=0.14)
+        m4 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                   cv2.THRESH_BINARY_INV, 19, 6)
+        m5 = self.sauvola(enhanced, window=41, k=0.20)
+
+        vote = ((m1 > 0).astype(np.int16) + (m2 > 0).astype(np.int16)
+                + (m3 > 0).astype(np.int16) + (m4 > 0).astype(np.int16)
+                + (m5 > 0).astype(np.int16))
+
+        mask = np.where(vote >= 2, np.uint8(255), np.uint8(0))
+        ink_ratio = np.sum(mask > 0) / max(1, mask.size)
+        if ink_ratio < 0.008:
+            mask = np.where(vote >= 1, np.uint8(255), np.uint8(0))
+            logger.debug("Votación relajada a ≥1 (ratio=%.4f)", ink_ratio)
+
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+        raw = mask.copy()
+
+        if opts.remove_lines:
+            mask = self.remove_lines(mask)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+
+        clean = self.filtered_mask(mask)
+        return gray, raw, clean

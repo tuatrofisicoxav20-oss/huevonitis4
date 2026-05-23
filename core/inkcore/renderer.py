@@ -336,3 +336,94 @@ class HandwritingRenderer:
             font = ImageFont.load_default()
         draw.text((2, 2), char, fill=(40, 40, 40, 200), font=font)
         return img
+
+    def render_document(
+        self,
+        doc: "object",
+        options: "RenderOptions",
+        page_height: int = 1122,
+    ) -> "list[Image.Image]":
+        """Renderiza un Document estructurado preservando jerarquía de bloques.
+
+        Headings: font_size ×1.4 (H1) o ×1.2 (H2), línea en blanco previa.
+        list_item: bullet "• " al inicio.
+        code: sin transformación especial (usa glifos normales).
+        No rompe render_text/render_pages — API de texto plano inalterada.
+        """
+        if not PIL_OK:
+            return []
+
+        from core.ocr.document_model import BlockType
+        import copy
+
+        lines: list[tuple[str, RenderOptions]] = []
+
+        for page in doc.pages:
+            for block in page.blocks:
+                text = block.text.strip()
+                if not text:
+                    continue
+
+                block_opts = copy.copy(options)
+
+                if block.block_type == BlockType.HEADING:
+                    lvl = getattr(block, "heading_level", 1) or 1
+                    scale = 1.4 if lvl == 1 else 1.2 if lvl == 2 else 1.0
+                    block_opts.font_size = max(16, int(options.font_size * scale))
+                    # Línea en blanco antes del heading
+                    lines.append(("", options))
+
+                elif block.block_type == BlockType.LIST_ITEM:
+                    text = "• " + text
+
+                lines.append((text, block_opts))
+
+            # Separador entre páginas del documento (línea vacía)
+            lines.append(("", options))
+
+        if not lines:
+            return []
+
+        # Renderizar como páginas usando el ancho de la primera opción
+        usable_width = options.page_width - 2 * options.page_margin
+        pages_out: list = []
+        current_page_lines: list[tuple] = []
+        current_h = options.page_margin
+
+        for text_line, line_opts in lines:
+            line_h = int(line_opts.font_size * line_opts.line_height)
+            if current_h + line_h > page_height - options.page_margin and current_page_lines:
+                pages_out.append(self._render_page_from_lines(current_page_lines, options, page_height, usable_width))
+                current_page_lines = []
+                current_h = options.page_margin
+            current_page_lines.append((text_line, line_opts))
+            current_h += line_h
+
+        if current_page_lines:
+            pages_out.append(self._render_page_from_lines(current_page_lines, options, page_height, usable_width))
+
+        return pages_out if pages_out else [Image.new("RGB", (options.page_width, page_height), "#FFFFFF")]
+
+    def _render_page_from_lines(
+        self,
+        lines: "list[tuple[str, RenderOptions]]",
+        base_options: "RenderOptions",
+        page_height: int,
+        usable_width: int,
+    ) -> "Image.Image":
+        import copy
+        canvas = Image.new("RGBA", (base_options.page_width, page_height), base_options.background_color)
+        self._draw_background_decorations(canvas, base_options, int(base_options.font_size * base_options.line_height), page_height)
+        y_cursor = base_options.page_margin
+
+        for text_line, line_opts in lines:
+            line_h = int(line_opts.font_size * line_opts.line_height)
+            if text_line.strip():
+                line_img = self._render_line(text_line, line_opts, usable_width)
+                if line_img:
+                    jitter_y = random.randint(-line_opts.jitter_px, line_opts.jitter_px)
+                    paste_y = max(0, min(page_height - line_img.height, y_cursor + jitter_y))
+                    canvas.paste(line_img, (base_options.page_margin, paste_y), line_img)
+            y_cursor += line_h
+
+        return canvas.convert("RGB")

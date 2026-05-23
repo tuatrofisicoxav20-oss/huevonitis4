@@ -1,0 +1,61 @@
+# =============================================================================
+# Huevonitis 4 — Dependencias opcionales
+# =============================================================================
+# Las dependencias BASE están en requirements.txt (no tocar).
+# Todo lo de aquí es EXTRA; instala solo lo que necesites.
+# Ninguna de estas se descargará ni importará automáticamente — se activan
+# solo al seleccionar el backend correspondiente en Configuración.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# OCR backends adicionales
+# -----------------------------------------------------------------------------
+
+# Tesseract ya viene en requirements.txt base — no repetir aquí.
+
+# PaddleOCR PP-OCRv5 — recomendado; mejor soporte español, det+rec integrado.
+# paddleocr>=3.0
+# paddlepaddle>=3.0          # CPU puro
+# paddlepaddle-gpu>=3.0      # GPU CUDA (alternativa, descomentar solo una)
+
+# docTR — bueno para texto impreso, layout complejo.
+# python-doctr[torch]>=0.8
+
+# EasyOCR — ligero, buen fallback.
+# easyocr>=1.7
+
+# -----------------------------------------------------------------------------
+# Detección de glifos alternativa
+# -----------------------------------------------------------------------------
+
+# CRAFT — detección a nivel de carácter (link_threshold bajo en CRAFTDetector).
+# craft-text-detector>=0.4.3
+
+# PaddleDetector usa el mismo paquete que PaddleOCR (ver arriba).
+
+# -----------------------------------------------------------------------------
+# Etiquetado automático de glifos (banco de tipografía)
+# -----------------------------------------------------------------------------
+
+# TrOCR de Microsoft — escrito a mano, descarga ~400 MB en primera ejecución.
+# transformers>=4.40
+# torch>=2.0                 # CPU; torch-cuda-XX para GPU
+
+# -----------------------------------------------------------------------------
+# Lectura de PDFs
+# -----------------------------------------------------------------------------
+
+# pdfplumber y pdf2image son REQUERIDOS y están en requirements.txt base.
+# No repetir aquí.
+
+# ocrmypdf — hacer PDFs escaneados "searchable" (opcional, pesado).
+# Requiere: sudo dnf install ghostscript
+# ocrmypdf>=16.0
+
+# -----------------------------------------------------------------------------
+# Utilidades de sistema
+# -----------------------------------------------------------------------------
+
+# psutil — muestra uso de RAM al "Liberar modelos de memoria" en InkCore.
+# Mejora la UX pero NO es crítico — el botón funciona sin él.
+# psutil>=5.9
