@@ -120,8 +120,20 @@ class DocumentIngestion:
         if ext == ".pdf":
             return self._read_pdf(source_path, opts, progress_cb, cancel_event)
 
-        if ext in (".docx", ".doc"):
+        if ext == ".docx":
             return self._read_docx(source_path)
+
+        if ext == ".doc":
+            from core.ocr.document_model import Document, DocumentPage, TextBlock
+            doc = Document(source_path=source_path, source_type="unsupported")
+            page = DocumentPage(page_number=1, source_path=source_path)
+            page.blocks.append(TextBlock(
+                text="El formato .doc (Word 97-2003) no es compatible. "
+                     "Convierte el archivo a .docx con LibreOffice o Microsoft Word.",
+                block_type="paragraph",
+            ))
+            doc.pages.append(page)
+            return doc
 
         if ext in _IMAGE_EXTS:
             return self._read_image(source_path, opts, progress_cb)

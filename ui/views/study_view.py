@@ -64,12 +64,19 @@ def _quick_analyze(path: str, backend_name: str) -> dict:
             t, label, needs = _labels.get(pdf_type, ("unknown", "PDF", True))
             info.update({"type": t, "type_label": label, "needs_ocr": needs})
 
-        elif p.suffix.lower() in (".docx", ".doc"):
+        elif p.suffix.lower() == ".docx":
             info.update({
                 "type": "docx",
                 "type_label": "Documento Word — extracción directa",
                 "needs_ocr": False,
                 "pages": 1,
+            })
+        elif p.suffix.lower() == ".doc":
+            info.update({
+                "type": "unsupported",
+                "type_label": "⚠ .doc no compatible — convierte a .docx primero",
+                "needs_ocr": False,
+                "pages": 0,
             })
 
         elif p.suffix.lower() in _IMAGE_EXTS:
@@ -482,9 +489,9 @@ class StudyView(BaseView):
         path = filedialog.askopenfilename(
             title="Importar documento",
             filetypes=[
-                ("Documentos", "*.pdf *.docx *.doc *.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
+                ("Documentos", "*.pdf *.docx *.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
                 ("PDF", "*.pdf"),
-                ("Word", "*.docx *.doc"),
+                ("Word (.docx)", "*.docx"),
                 ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
                 ("Todos", "*.*"),
             ],
@@ -608,7 +615,7 @@ class StudyView(BaseView):
 
     def _import_word(self):
         path = filedialog.askopenfilename(
-            title="Seleccionar Word", filetypes=[("Word", "*.docx *.doc")]
+            title="Seleccionar Word (.docx)", filetypes=[("Word (.docx)", "*.docx")]
         )
         if path:
             self._ingest_path(path)
