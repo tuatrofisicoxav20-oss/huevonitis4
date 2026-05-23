@@ -6,6 +6,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+import config
 from core.inkcore.extractor import ExtractionOptions
 from ui import theme
 
@@ -318,7 +319,7 @@ class ExtractorTabMixin:
             rotation_deg=float(self._rotation_slider.get()),
             use_pipeline=use_p,
             pipeline_config=cfg,
-            min_quality=float(self._min_quality_slider.get()) if use_p else 0.18,
+            min_quality=float(self._min_quality_slider.get()) if use_p else config.MIN_GLYPH_QUALITY,
         )
         logger.info("_extract: opts=%s, iniciando hilo", opts)
 

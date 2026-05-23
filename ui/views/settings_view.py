@@ -379,6 +379,11 @@ def _apply_settings_to_config(settings: dict) -> None:
     if val and isinstance(val, str):
         config.GLYPH_DETECTOR = val
 
+    with contextlib.suppress(ValueError, TypeError):
+        v = float(settings.get("min_glyph_quality", ""))
+        if 0.0 <= v <= 1.0:
+            config.MIN_GLYPH_QUALITY = v
+
 
 def load_and_apply_settings() -> None:
     """Call at startup to override config defaults from SETTINGS_FILE."""

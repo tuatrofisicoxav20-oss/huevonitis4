@@ -24,6 +24,8 @@ TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
 OCR_BACKEND = "tesseract"
 GLYPH_DETECTOR = "classic_cv"
 
+MIN_GLYPH_QUALITY = 0.18
+
 BASE_PRICE_PER_PAGE_MXN = 50.0
 AUTOSAVE_INTERVAL_MS = 30_000
 
@@ -44,7 +46,7 @@ def ensure_dirs():
 def load_settings() -> None:
     """Override module-level defaults from SETTINGS_FILE if present and valid."""
     global BASE_PRICE_PER_PAGE_MXN, AUTOSAVE_INTERVAL_MS, TESSERACT_CMD
-    global OCR_BACKEND, GLYPH_DETECTOR
+    global OCR_BACKEND, GLYPH_DETECTOR, MIN_GLYPH_QUALITY
     if not SETTINGS_FILE.exists():
         return
     try:
@@ -67,3 +69,7 @@ def load_settings() -> None:
     val = s.get("glyph_detector", "")
     if isinstance(val, str) and val:
         GLYPH_DETECTOR = val
+    with contextlib.suppress(KeyError, ValueError, TypeError):
+        v = float(s["min_glyph_quality"])
+        if 0.0 <= v <= 1.0:
+            MIN_GLYPH_QUALITY = v

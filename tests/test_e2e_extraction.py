@@ -18,7 +18,8 @@ EXPECTATIONS_FILE = FIXTURES_DIR / "expectations.json"
 
 def _load_expectations() -> dict:
     if not EXPECTATIONS_FILE.exists():
-        pytest.skip("Sin expectations.json — añadir fixtures con tools/measure_fixture.py")
+        pytest.skip("Sin expectations.json — añadir fixtures con tools/measure_fixture.py",
+                    allow_module_level=True)
     with open(EXPECTATIONS_FILE) as f:
         data = json.load(f)
     return data.get("fixtures", {})
@@ -27,14 +28,15 @@ def _load_expectations() -> dict:
 def _list_fixtures():
     exp = _load_expectations()
     if not exp:
-        pytest.skip("expectations.json sin fixtures definidos")
+        pytest.skip("expectations.json sin fixtures definidos", allow_module_level=True)
     params = []
     for name in exp:
         path = FIXTURES_DIR / name
         if path.exists():
             params.append(pytest.param(name, id=name))
     if not params:
-        pytest.skip("Sin imágenes en fixtures/handwriting/ (sube tus fotos primero)")
+        pytest.skip("Sin imágenes en fixtures/handwriting/ (sube tus fotos primero)",
+                    allow_module_level=True)
     return params
 
 
