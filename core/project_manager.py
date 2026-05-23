@@ -107,12 +107,21 @@ class ProjectManager:
                     for el in page.get("elements", []):
                         if el.get("element_type") == "image":
                             img_path = Path(el.get("image_path", ""))
-                            if img_path.exists():
+                            # Only delete files that live inside the app's data directory.
+                            # External paths must never be touched.
+                            try:
+                                img_path.resolve().relative_to(config.DATA_DIR.resolve())
+                                _inside = True
+                            except ValueError:
+                                _inside = False
+                            if _inside and img_path.exists():
                                 try:
                                     img_path.unlink()
                                     logger.debug(f"Removed orphan image {img_path}")
                                 except OSError as e:
                                     logger.warning(f"Could not remove image {img_path}: {e}")
+                            elif not _inside and img_path.exists():
+                                logger.debug(f"Skipping external image {img_path} (outside DATA_DIR)")
             except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Could not clean up images for {project_id}: {e}")
             path.unlink(missing_ok=True)
