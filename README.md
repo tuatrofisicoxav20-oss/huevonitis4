@@ -59,7 +59,7 @@ huevonitis 4/
 │   ├── ai-integration-notes.md  # Guía para integrar clasificador ONNX real
 │   ├── CHANGELOG.md
 │   └── KNOWN_ISSUES.md
-├── tests/                    # pytest — 63 tests
+├── tests/                    # pytest — 121 tests
 ├── requirements.txt
 └── pyproject.toml            # ruff + pytest config
 ```

@@ -6,7 +6,7 @@ set -euo pipefail
 
 APP_NAME="Huevonitis 4"
 APP_ID="huevonitis4"
-VERSION="4.0.0"
+VERSION="4.0.1"
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/$APP_ID"
@@ -63,7 +63,10 @@ pip install -q \
     "python-docx>=1.2" \
     "reportlab>=4.4" \
     "numpy>=2.0" \
-    "lxml>=6.0"
+    "lxml>=6.0" \
+    "tqdm>=4.66" \
+    "pdf2image>=1.17" \
+    "pdfplumber>=0.11"
 success "Dependencias instaladas"
 deactivate
 

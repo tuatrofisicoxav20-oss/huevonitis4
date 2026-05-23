@@ -119,6 +119,61 @@ def test_bulk_runner_handles_nonexistent_files(tmp_path, monkeypatch):
     assert isinstance(session.candidates, list)
 
 
+def test_bulk_candidate_source_label():
+    """source_label es legible y distinto de source_image (path)."""
+    from core.inkcore.bulk_capture import BulkGlyphCandidate
+    from core.models import GlyphEntry
+
+    g = GlyphEntry(char="a", image_path="/tmp/a.png", quality_score=0.8,
+                   tier="Gold", ink_coverage=0.4, index=0)
+    cand = BulkGlyphCandidate(
+        glyph=g, source_image="/tmp/page_1_abc.png",
+        source_page_num=3, source_label="Página 3",
+    )
+    assert cand.source_label == "Página 3"
+    assert cand.source_page_num == 3
+
+
+def test_bulk_session_new_fields():
+    """BulkCaptureSession lleva is_pdf, total_pages, elapsed_s."""
+    from core.inkcore.bulk_capture import BulkCaptureSession
+    s = BulkCaptureSession(sources=["test.pdf"], is_pdf=True, total_pages=6, elapsed_s=12.3)
+    assert s.is_pdf
+    assert s.total_pages == 6
+    assert s.elapsed_s == pytest.approx(12.3)
+
+
+def test_bulk_runner_run_pdf_cancellation(tmp_path, monkeypatch):
+    """run_pdf con cancel activo aborta limpiamente sin candidatos."""
+    import sys
+    import threading
+    from unittest.mock import MagicMock
+
+    import config
+    monkeypatch.setattr(config, "TIPOGRAFIA_DIR", tmp_path / "tipo")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    config.ensure_dirs()
+
+    # Inyectar pdf2image falso en sys.modules (puede no estar instalado)
+    mock_pdf2image = MagicMock()
+    mock_pdf2image.pdfinfo_from_path.return_value = {"Pages": 10}
+    mock_pdf2image.convert_from_path.return_value = []
+    monkeypatch.setitem(sys.modules, "pdf2image", mock_pdf2image)
+
+    cancel = threading.Event()
+    cancel.set()  # cancelar de inmediato
+
+    from core.inkcore.extraction_pipeline import PipelineConfig
+    from core.inkcore.bulk_capture import BulkCaptureRunner
+
+    cfg = PipelineConfig(detectors=["classic_cv"], labelers=[])
+    runner = BulkCaptureRunner(cfg, cancel_event=cancel)
+    session = runner.run_pdf("fake.pdf")
+
+    assert session.is_pdf
+    assert len(session.candidates) == 0
+
+
 def test_bulk_commit_preserves_metadata(tmp_path, monkeypatch):
     """Aprobados al banco guardan predicted_char y demás metadatos."""
     import config

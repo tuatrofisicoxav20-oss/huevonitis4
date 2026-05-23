@@ -37,14 +37,15 @@ class BulkCaptureTabMixin:
         btn_row.pack(side="right", padx=8)
 
         self._bulk_progress_bar = ctk.CTkProgressBar(
-            header, mode="indeterminate", width=120,
+            header, width=160,
             progress_color=theme.ACCENT_ORANGE,
         )
+        self._bulk_progress_bar.set(0)
 
-        self.primary_button(btn_row, "📂 Cargar archivos", self._bulk_load_files, 150).pack(
-            side="left", padx=4)
-        self.secondary_button(btn_row, "📁 Cargar carpeta", self._bulk_load_folder, 140).pack(
-            side="left", padx=4)
+        self.primary_button(btn_row, "📄 Cargar PDF de plantilla escaneada",
+                            self._bulk_load_pdf, 250).pack(side="left", padx=4)
+        self.secondary_button(btn_row, "🖼 Imágenes sueltas",
+                              self._bulk_load_images, 150).pack(side="left", padx=4)
         self._bulk_cancel_btn = ctk.CTkButton(
             btn_row, text="✕ Cancelar", width=90, height=30,
             fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
@@ -102,8 +103,11 @@ class BulkCaptureTabMixin:
 
         self._bulk_placeholder = ctk.CTkLabel(
             self._bulk_grid_scroll,
-            text="Sin candidatos. Carga archivos para extraer glifos.",
+            text="↑ Carga un PDF de plantilla escaneada para empezar.\n\n"
+                 "Escribe en la plantilla con tu letra, escanéala con Adobe Scan\n"
+                 "y cárgala aquí para extraer 400–700 glifos en una sesión.",
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
+            justify="center",
         )
         self._bulk_placeholder.pack(pady=80)
 
@@ -141,31 +145,152 @@ class BulkCaptureTabMixin:
 
     # ── Logic ──────────────────────────────────────────────────────
 
-    def _bulk_load_files(self):
+    def _bulk_load_pdf(self):
+        path = filedialog.askopenfilename(
+            title="Seleccionar PDF escaneado",
+            filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            from pdf2image import convert_from_path, pdfinfo_from_path
+        except ImportError:
+            self.toast(
+                "pdf2image no instalado. Ejecuta: pip install pdf2image", "error",
+            )
+            return
+        try:
+            info = pdfinfo_from_path(path)
+            total_pages = int(info["Pages"])
+            preview_imgs = convert_from_path(path, dpi=100, first_page=1, last_page=1)
+            preview_img = preview_imgs[0]
+        except Exception as exc:
+            self.toast(f"Error al leer el PDF: {exc}", "error")
+            return
+        self._show_pdf_preview_modal(path, total_pages, preview_img)
+
+    def _show_pdf_preview_modal(self, pdf_path: str, total_pages: int, preview_img):
+        win = ctk.CTkToplevel(self)
+        win.title("Confirmar PDF")
+        win.geometry("520x640")
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+
+        ctk.CTkLabel(
+            win,
+            text=f"📄 PDF con {total_pages} página{'s' if total_pages != 1 else ''}",
+            font=theme.FONT_TITLE,
+        ).pack(pady=(20, 4))
+
+        est_min = total_pages * 30
+        est_max = total_pages * 90
+        ctk.CTkLabel(
+            win,
+            text=f"Tiempo estimado: {est_min}–{est_max} segundos",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+        ).pack(pady=(0, 10))
+
+        preview_img.thumbnail((400, 380))
+        ctkimg = ctk.CTkImage(
+            light_image=preview_img, dark_image=preview_img, size=preview_img.size,
+        )
+        img_lbl = ctk.CTkLabel(win, image=ctkimg, text="")
+        img_lbl.image = ctkimg  # keep ref
+        img_lbl.pack(pady=6)
+
+        ctk.CTkLabel(
+            win,
+            text="Verifica que la primera página se ve bien:\n"
+                 "✓ Página derecha (no rotada 90°)\n"
+                 "✓ Texto legible, sin borrosidad\n"
+                 "✓ Sin sombras grandes ni partes cortadas",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY, justify="left",
+        ).pack(pady=8, padx=24)
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(pady=14)
+
+        ctk.CTkButton(
+            btn_row, text="Procesar PDF", width=160,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            command=lambda: (win.destroy(), self._bulk_run_pdf(pdf_path)),
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row, text="Cargar otro", width=110,
+            command=lambda: (win.destroy(), self._bulk_load_pdf()),
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row, text="Cancelar", width=90,
+            fg_color=theme.BG_TERTIARY,
+            command=win.destroy,
+        ).pack(side="left", padx=4)
+
+    def _bulk_run_pdf(self, pdf_path: str):
+        cfg = self._get_pipeline_config() if self._use_pipeline_var.get() else None
+        if cfg is None:
+            from core.inkcore.extraction_pipeline import PipelineConfig
+            cfg = PipelineConfig(
+                detectors=["classic_cv"],
+                labelers=[],
+                detector_fusion="union",
+                labeler_voting="highest_conf",
+                min_quality=0.15,
+            )
+
+        import threading as _threading
+        self._bulk_cancel_event = _threading.Event()
+        self._bulk_progress_bar.pack(side="left", padx=(8, 0))
+        self._bulk_progress_bar.set(0)
+        self._bulk_cancel_btn.configure(state="normal")
+        self._bulk_status.configure(text="Iniciando…", text_color=theme.ACCENT_ORANGE)
+        self._bulk_approve_all_btn.configure(state="disabled")
+        self._bulk_commit_btn.configure(state="disabled")
+        try:
+            self.app.begin_background_work()
+        except Exception:
+            pass
+
+        cancel_event = self._bulk_cancel_event
+
+        def cb(frac: float, msg: str):
+            def _update():
+                self._bulk_progress_bar.set(frac)
+                self._bulk_status.configure(text=msg, text_color=theme.ACCENT_ORANGE)
+            if self.winfo_exists():
+                self.after(0, _update)
+
+        def worker():
+            try:
+                from core.inkcore.bulk_capture import BulkCaptureRunner
+                runner = BulkCaptureRunner(
+                    cfg, progress_cb=cb, cancel_event=cancel_event, pdf_dpi=300,
+                )
+                session = runner.run_pdf(pdf_path)
+                if self.winfo_exists():
+                    self.after(0, lambda s=session: self._bulk_on_session_ready(s))
+            except Exception as exc:
+                logger.error("_bulk_run_pdf worker: %s", exc, exc_info=True)
+                if self.winfo_exists():
+                    self.after(0, lambda e=exc: (
+                        self.toast(f"Error al procesar PDF: {e}", "error"),
+                        self._bulk_reset_ui(),
+                    ))
+
+        _threading.Thread(target=worker, daemon=True).start()
+
+    def _bulk_load_images(self):
         paths = filedialog.askopenfilenames(
-            title="Seleccionar imágenes o PDFs",
+            title="Seleccionar imágenes",
             filetypes=[
-                ("Soportados", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp *.pdf"),
                 ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
-                ("PDF", "*.pdf"),
+                ("Todos", "*.*"),
             ],
         )
         if not paths:
             return
         self._bulk_run(list(paths))
-
-    def _bulk_load_folder(self):
-        folder = filedialog.askdirectory(title="Carpeta con imágenes")
-        if not folder:
-            return
-        exts = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp", ".pdf"}
-        paths = sorted(
-            str(p) for p in Path(folder).iterdir() if p.suffix.lower() in exts
-        )
-        if not paths:
-            self.toast("Carpeta sin imágenes soportadas", "warning")
-            return
-        self._bulk_run(paths)
 
     def _bulk_run(self, paths: list[str]):
         cfg = self._get_pipeline_config() if self._use_pipeline_var.get() else None
@@ -181,11 +306,18 @@ class BulkCaptureTabMixin:
         import threading as _threading
         self._bulk_cancel_event = _threading.Event()
         self._bulk_progress_bar.pack(side="left", padx=(8, 0))
-        self._bulk_progress_bar.start()
+        self._bulk_progress_bar.set(0)
         self._bulk_cancel_btn.configure(state="normal")
-        self._bulk_status.configure(text="Procesando…", text_color=theme.ACCENT_ORANGE)
+        self._bulk_status.configure(
+            text=f"Procesando {len(paths)} imagen{'es' if len(paths) != 1 else ''}…",
+            text_color=theme.ACCENT_ORANGE,
+        )
         self._bulk_approve_all_btn.configure(state="disabled")
         self._bulk_commit_btn.configure(state="disabled")
+        try:
+            self.app.begin_background_work()
+        except Exception:
+            pass
 
         cancel_event = self._bulk_cancel_event
 
@@ -193,10 +325,12 @@ class BulkCaptureTabMixin:
             try:
                 from core.inkcore.bulk_capture import BulkCaptureRunner
 
-                def cb(frac, msg):
+                def cb(frac: float, msg: str):
+                    def _update():
+                        self._bulk_progress_bar.set(frac)
+                        self._bulk_status.configure(text=msg, text_color=theme.ACCENT_ORANGE)
                     if self.winfo_exists():
-                        self.after(0, lambda m=msg: self._bulk_status.configure(
-                            text=m, text_color=theme.ACCENT_ORANGE))
+                        self.after(0, _update)
                 runner = BulkCaptureRunner(cfg, progress_cb=cb, cancel_event=cancel_event)
                 session = runner.run(paths)
                 if self.winfo_exists():
@@ -218,9 +352,17 @@ class BulkCaptureTabMixin:
         self._bulk_cancel_btn.configure(state="disabled")
 
     def _bulk_reset_ui(self):
-        self._bulk_progress_bar.stop()
         self._bulk_progress_bar.pack_forget()
+        self._bulk_progress_bar.set(0)
         self._bulk_cancel_btn.configure(state="disabled")
+        self._bulk_status.configure(
+            text="Sin sesión activa. Carga un PDF o imágenes para empezar.",
+            text_color=theme.TEXT_MUTED,
+        )
+        try:
+            self.app.end_background_work()
+        except Exception:
+            pass
 
     def _bulk_on_session_ready(self, session):
         self._bulk_session = session
@@ -234,9 +376,20 @@ class BulkCaptureTabMixin:
         self._bulk_update_char_filter()
         self._bulk_render_grid()
         self._bulk_update_stats()
+
         s = session.stats()
+        # Construir línea de status informativa
+        timing = f" · {session.elapsed_s:.1f}s" if session.elapsed_s > 0 else ""
+        source = (f"{session.total_pages} págs · " if session.is_pdf else "")
+        self._bulk_status.configure(
+            text=f"Sesión activa — {source}{s['total']} glifos{timing}  ·  "
+                 f"⚠️ {s['needs_review']} revisión  ·  "
+                 f"Aprueba con A / rechaza con R",
+            text_color=theme.ACCENT_GREEN,
+        )
+
         review_note = f" ({s['needs_review']} necesitan revisión)" if s["needs_review"] else ""
-        self.toast(f"Captura: {s['total']} glifos extraídos{review_note}", "success")
+        self.toast(f"✓ {s['total']} glifos extraídos{review_note}", "success")
 
     def _bulk_update_char_filter(self):
         if not self._bulk_session:
@@ -325,8 +478,9 @@ class BulkCaptureTabMixin:
         bg = DECISION_COLORS.get(cand.decision, theme.BG_TERTIARY)
         border = border_colors.get(cand.decision, theme.BORDER)
 
+        extra_h = 14 if cand.source_label else 0
         card = ctk.CTkFrame(parent, fg_color=bg, corner_radius=8,
-                            width=88, height=110,
+                            width=88, height=110 + extra_h,
                             border_width=2, border_color=border)
         card.pack_propagate(False)
 
@@ -366,6 +520,12 @@ class BulkCaptureTabMixin:
         state_icons = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
         ctk.CTkLabel(card, text=state_icons.get(cand.decision, ""),
                      font=("Segoe UI", 10)).pack()
+
+        if cand.source_label:
+            ctk.CTkLabel(
+                card, text=cand.source_label,
+                font=("Segoe UI", 7), text_color=theme.TEXT_MUTED,
+            ).pack(pady=(0, 2))
 
         def on_click(e, c=cand, i=idx):
             self._bulk_select(i)
@@ -555,14 +715,16 @@ class BulkCaptureTabMixin:
             w.destroy()
         ctk.CTkLabel(
             self._bulk_grid_scroll,
-            text="Sesión completada. Carga más archivos para continuar.",
+            text="✓ Sesión completada y guardada al banco.\n\n"
+                 "Carga un nuevo PDF para continuar capturando glifos.",
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
+            justify="center",
         ).pack(pady=80)
         self._bulk_stats_lbl.configure(text="")
         self._bulk_approve_all_btn.configure(state="disabled")
         self._bulk_commit_btn.configure(state="disabled")
         self._bulk_status.configure(
-            text="Sin sesión activa. Carga imágenes o un PDF para empezar.",
+            text="Sin sesión activa. Carga un PDF o imágenes para empezar.",
             text_color=theme.TEXT_MUTED,
         )
         self._reload_and_refresh_all()
