@@ -1,6 +1,41 @@
 # Changelog — Huevonitis 4
 
-## [4.1.0] — 2026-05-22 (integración end-to-end + limpieza)
+## [4.0.1] — 2026-05-23 (higiene del repo + fixes prioridad máxima)
+
+### Infraestructura
+- Versión sincronizada a `4.0.1` en `VERSION`, `config.py`, `pyproject.toml` e `install.sh`
+- 53 archivos `__pycache__/*.pyc` eliminados del tracking de git (ya en `.gitignore`)
+- `LICENSE MIT` añadida al repositorio
+- `install.sh`: añadidas `tqdm`, `pdf2image`, `pdfplumber` a las dependencias instaladas
+- `pyproject.toml`: añadidas `pdf2image~=1.17`, `pdfplumber~=0.11` a `[project.dependencies]`
+- README: contador de tests actualizado de 63 → 121
+- `tests/test_e2e_extraction.py`: `pytest.skip` con `allow_module_level=True` (colección limpia)
+
+### Fixes funcionales
+- `config.py`: nueva constante `MIN_GLYPH_QUALITY = 0.18` cargada desde `settings.json`
+- `settings_view.py`: `_apply_settings_to_config` ahora escribe `config.MIN_GLYPH_QUALITY`
+- `extractor_tab.py`: usa `config.MIN_GLYPH_QUALITY` (antes hardcodeado a `0.18` ignorando Settings)
+- `ingestion.py`: `.doc` antiguo devuelve mensaje claro en vez de fallar con excepción críptica
+- `study_view.py`: filetypes de diálogos ya no anuncian `.doc`; preview muestra advertencia
+- `project_manager.delete()`: solo borra imágenes dentro de `DATA_DIR`; rutas externas no se tocan
+
+### Nuevas herramientas
+- `tools/doctor.py` — verifica Python, deps requeridas/opcionales, tesseract, poppler,
+  directorios, `settings.json` y GlyphBank; salida con colores, exit 1 en errores críticos
+- `tools/clean.py` — limpia temporales (`temp_bulk_capture`, debug overlays, caché OCR opcional,
+  autosaves huérfanos); soporta `--dry-run`
+
+### Captura masiva (Fase 2 — integrado en este release)
+- `BulkGlyphCandidate`: campo `source_label` (nombre legible de la fuente)
+- `BulkCaptureSession`: campos `is_pdf`, `total_pages`, `elapsed_s`
+- `BulkCaptureRunner.run_pdf()`: procesamiento de PDF escaneado en lotes de 2 páginas (≤60 MB RAM)
+- `BulkCaptureRunner.run_images()`: alias de `run()` para imágenes sueltas
+- UI: barra de progreso determinista (0→1.0), botón "📄 Cargar PDF", modal de previsualización
+- 3 tests nuevos: `source_label`, `session fields`, `run_pdf cancellation`
+
+---
+
+## [4.1.0-dev] — 2026-05-22 (integración end-to-end + limpieza)
 
 ### Bugs de integración corregidos
 - **A1**: UI "Pipeline avanzada" ahora propaga `use_pipeline`, `pipeline_config`
