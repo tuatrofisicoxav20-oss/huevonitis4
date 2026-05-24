@@ -1,5 +1,55 @@
 # Known Issues — Huevonitis 4
 
+## Resueltos en 4.1.1
+
+### ✅ `min_glyph_quality` desconectado del extractor
+`config.MIN_GLYPH_QUALITY` ahora se carga desde `settings.json` y se propaga
+al `ExtractionOptions` cuando el pipeline ensemble está apagado. Antes el valor
+se guardaba en Settings pero el extractor usaba `0.18` hardcodeado siempre.
+
+### ✅ `ProjectManager.delete()` podía borrar archivos externos
+La rutina de borrado de imágenes referenciadas por `ImageElement` ahora
+verifica con `Path.resolve().relative_to(config.DATA_DIR)` antes de hacer
+`unlink()`. Rutas fuera de `DATA_DIR` se loggean y se omiten.
+
+### ✅ `GlyphBank.remove_glyph()` sin verificación de ruta
+Defense in depth: ahora también verifica que la imagen esté dentro de
+`bank_dir` antes de borrarla. Aunque `add_glyph()` siempre copia a `bank_dir`,
+un manifest manipulado ya no puede usarse para borrar archivos arbitrarios.
+
+### ✅ Soporte falso para `.doc` (Word 97-2003)
+`python-docx` solo soporta `.docx`; al recibir un `.doc` se pasaba a
+`read_docx_document()` que fallaba con excepción críptica. Ahora `ingest()`
+devuelve un `Document` con mensaje explicativo y los diálogos de archivo en
+`study_view.py` ya no anuncian `.doc` como compatible.
+
+### ✅ `__pycache__/*.pyc` trackeados en git
+53 archivos `.pyc` removidos del índice. Estaban en `.gitignore` pero habían
+sido añadidos antes. `git rm -r --cached` aplicado, futuros `pyc` ignorados.
+
+### ✅ Dependencias inconsistentes entre `install.sh`, `requirements.txt` y `pyproject.toml`
+Las tres fuentes ahora listan: customtkinter, Pillow, opencv-python, pytesseract,
+python-docx, reportlab, numpy, lxml, tqdm, pdf2image, pdfplumber.
+
+### ✅ Versión desincronizada (4.0.0 / 4.1.0 / 4.0.1 según el archivo)
+Todos los archivos (`VERSION`, `config.py`, `pyproject.toml`, `install.sh`)
+sincronizados a `4.1.1`.
+
+### ✅ `tests/test_e2e_extraction.py` fallaba la colección
+`pytest.skip()` a nivel de módulo ahora usa `allow_module_level=True`.
+La suite completa pasa con 127 tests, 1 skipped (e2e sin fixtures reales).
+
+### ✅ Sin `LICENSE`
+Añadido `LICENSE` MIT en la raíz del repo.
+
+### ✅ Sin scripts de diagnóstico/limpieza
+- `tools/doctor.py` — verifica Python, deps requeridas/opcionales, tesseract,
+  poppler, directorios y `settings.json`. Exit 1 en errores críticos.
+- `tools/clean.py` — limpia `temp_bulk_capture`, debug overlays, autosaves
+  huérfanos y caché OCR opcional. Soporta `--dry-run`.
+
+---
+
 ## Resueltos en 4.1.0
 
 ### ✅ Pipeline UI desconectada de `GlyphExtractor`

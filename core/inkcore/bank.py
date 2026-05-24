@@ -197,11 +197,21 @@ class GlyphBank:
 
     def remove_glyph(self, entry: GlyphEntry):
         p = Path(entry.image_path)
-        if p.exists():
+        # Defense in depth: only delete files under bank_dir.
+        # Bank images are always copied into bank_dir by add_glyph(), so any
+        # external path here means corruption or tampering — skip the unlink.
+        try:
+            p.resolve().relative_to(self.bank_dir.resolve())
+            _safe = True
+        except ValueError:
+            _safe = False
+        if _safe and p.exists():
             try:
                 p.unlink()
             except OSError as e:
                 logger.warning(f"Could not remove glyph image {p}: {e}")
+        elif not _safe:
+            logger.warning(f"remove_glyph: image_path '{p}' outside bank_dir — not deleting")
         with _bank_lock:
             self._entries = [e for e in self._entries if e.image_path != entry.image_path]
         self.save()

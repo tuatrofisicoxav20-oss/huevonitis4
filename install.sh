@@ -6,7 +6,7 @@ set -euo pipefail
 
 APP_NAME="Huevonitis 4"
 APP_ID="huevonitis4"
-VERSION="4.0.1"
+VERSION="4.1.1"
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/$APP_ID"

@@ -145,14 +145,74 @@ class SettingsView(BaseView):
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, justify="left",
         ).pack(anchor="w", padx=16, pady=(0, 8))
 
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(anchor="w", padx=16, pady=(0, 12), fill="x")
+
         ctk.CTkButton(
-            card, text="📊 Ver reporte de diagnóstico",
+            btn_row, text="📊 Ver reporte de diagnóstico",
             command=self._show_diagnostics_report,
             fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
             font=theme.FONT_BODY, height=32,
-        ).pack(anchor="w", padx=16, pady=(0, 12))
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_row, text="🩺 Ejecutar Doctor",
+            command=self._show_doctor_report,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            font=theme.FONT_BODY, height=32,
+        ).pack(side="left", padx=8)
 
         ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(0, 0))
+
+    def _show_doctor_report(self):
+        """Lanza tools/doctor.py en un subproceso y muestra la salida."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        win = ctk.CTkToplevel(self)
+        win.title("🩺 Doctor — Huevonitis 4")
+        win.geometry("760x600")
+        win.grab_set()
+
+        txt = ctk.CTkTextbox(win, font=theme.FONT_MONO, fg_color=theme.BG_TERTIARY,
+                              text_color=theme.TEXT_PRIMARY)
+        txt.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        txt.insert("0.0", "Ejecutando doctor…\n")
+        txt.configure(state="disabled")
+
+        def _run():
+            doctor = Path(__file__).resolve().parent.parent.parent / "tools" / "doctor.py"
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(doctor)],
+                    capture_output=True, text=True, timeout=30,
+                    env={**os.environ, "NO_COLOR": "1"},
+                )
+                output = result.stdout
+                if result.stderr:
+                    output += "\n--- stderr ---\n" + result.stderr
+            except subprocess.TimeoutExpired:
+                output = "⚠ Timeout — doctor tardó más de 30s en responder."
+            except Exception as exc:
+                output = f"⚠ No se pudo ejecutar doctor.py: {exc}"
+
+            def _update():
+                txt.configure(state="normal")
+                txt.delete("0.0", "end")
+                # Strip ANSI color codes for readability in Tk
+                import re
+                clean = re.sub(r"\x1b\[[0-9;]*m", "", output)
+                txt.insert("0.0", clean)
+                txt.configure(state="disabled")
+            self.after(0, _update)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+        ctk.CTkButton(win, text="Cerrar", command=win.destroy,
+                      fg_color=theme.BG_SECONDARY, hover_color=theme.BORDER,
+                      font=theme.FONT_BODY, width=120).pack(pady=(0, 12))
 
     def _show_diagnostics_report(self):
         from core.diagnostics import diagnostics as _diag

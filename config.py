@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-VERSION = "4.0.1"
+VERSION = "4.1.1"
 APP_NAME = "Huevonitis 4"
 
 DATA_DIR = Path.home() / ".local" / "share" / "huevonitis4"
