@@ -44,6 +44,34 @@ python3 -c "import tkinter" 2>/dev/null || {
 }
 success "tkinter OK"
 
+# ── 1b. Tesseract + Poppler (requeridos por OCR y pdf2image) ─────────────────
+
+info "Verificando Tesseract..."
+if ! command -v tesseract >/dev/null; then
+    warn "tesseract no encontrado. Instalando..."
+    if command -v dnf >/dev/null; then
+        sudo dnf install -y tesseract tesseract-langpack-spa
+    elif command -v apt >/dev/null; then
+        sudo apt install -y tesseract-ocr tesseract-ocr-spa
+    elif command -v pacman >/dev/null; then
+        sudo pacman -S --noconfirm tesseract tesseract-data-spa
+    fi
+fi
+command -v tesseract >/dev/null && success "tesseract OK" || warn "tesseract no instalado — OCR de imágenes no funcionará"
+
+info "Verificando Poppler (pdftoppm para pdf2image)..."
+if ! command -v pdftoppm >/dev/null; then
+    warn "poppler-utils no encontrado. Instalando..."
+    if command -v dnf >/dev/null; then
+        sudo dnf install -y poppler-utils
+    elif command -v apt >/dev/null; then
+        sudo apt install -y poppler-utils
+    elif command -v pacman >/dev/null; then
+        sudo pacman -S --noconfirm poppler
+    fi
+fi
+command -v pdftoppm >/dev/null && success "poppler OK" || warn "poppler no instalado — PDFs escaneados pueden fallar"
+
 # ── 2. Crear entorno virtual ─────────────────────────────────
 
 info "Creando entorno virtual en $INSTALL_DIR/env ..."
@@ -54,20 +82,26 @@ pip install --upgrade pip -q
 
 # ── 3. Instalar dependencias ─────────────────────────────────
 
-info "Instalando dependencias Python..."
-pip install -q \
-    "customtkinter>=5.2.0" \
-    "Pillow>=11.0" \
-    "opencv-python>=4.10" \
-    "pytesseract>=0.3.13" \
-    "python-docx>=1.2" \
-    "reportlab>=4.4" \
-    "numpy>=2.0" \
-    "lxml>=6.0" \
-    "tqdm>=4.66" \
-    "pdf2image>=1.17" \
-    "pdfplumber>=0.11"
-success "Dependencias instaladas"
+info "Instalando dependencias Python desde requirements.txt..."
+REQ_FILE="$SRC_DIR/requirements.txt"
+if [ -f "$REQ_FILE" ]; then
+    pip install -q -r "$REQ_FILE"
+    success "Dependencias instaladas desde requirements.txt"
+else
+    warn "requirements.txt no encontrado, instalando lista hardcoded..."
+    pip install -q \
+        "customtkinter>=5.2.0" \
+        "Pillow>=11.0" \
+        "opencv-python>=4.10" \
+        "pytesseract>=0.3.13" \
+        "python-docx>=1.2" \
+        "reportlab>=4.4" \
+        "numpy>=2.0" \
+        "lxml>=6.0" \
+        "tqdm>=4.66" \
+        "pdf2image>=1.17" \
+        "pdfplumber>=0.11"
+fi
 deactivate
 
 # ── 4. Copiar archivos de la app ─────────────────────────────
