@@ -54,30 +54,63 @@ huevonitis 4/
 │   │   └── toast.py          # ToastManager
 │   └── views/                # Una vista por sección de la app
 ├── tools/
-│   └── compare_strategies.py # Herramienta CLI para comparar estrategias de segmentación
+│   ├── compare_strategies.py # CLI para comparar estrategias de segmentación
+│   ├── doctor.py             # Diagnóstico de entorno (deps, dirs, settings)
+│   ├── clean.py              # Limpieza de temporales (--dry-run disponible)
+│   └── measure_fixture.py    # Genera expectations.json desde una imagen real
 ├── docs/
-│   ├── ai-integration-notes.md  # Guía para integrar clasificador ONNX real
+│   ├── ARCHITECTURE.md       # Arquitectura, módulos y flujos clave
+│   ├── ROADMAP.md            # Releases planeados (4.1.1 → 5.0)
+│   ├── RELEASE_CHECKLIST.md  # Lista a recorrer antes de publicar
 │   ├── CHANGELOG.md
-│   └── KNOWN_ISSUES.md
-├── tests/                    # pytest — 121 tests
+│   ├── KNOWN_ISSUES.md
+│   └── ai-integration-notes.md  # Guía para integrar clasificador ONNX real
+├── tests/                    # pytest — 127 tests
 ├── requirements.txt
-└── pyproject.toml            # ruff + pytest config
+├── requirements-optional.txt # Backends extras (PaddleOCR, TrOCR, EasyOCR)
+├── pyproject.toml            # ruff + pytest config
+├── install.sh                # Instalador para Fedora/Ubuntu/Arch
+├── uninstall.sh
+└── LICENSE                   # MIT
 ```
 
 ## Instalación
 
+### Fedora / Ubuntu / Arch (recomendado)
+
+```bash
+bash install.sh
+```
+
+Crea un entorno virtual en `~/.local/share/huevonitis4/env`, instala todas las
+dependencias y registra la app en el menú del sistema.
+
+### Manual
+
 ```bash
 pip install -r requirements.txt
-# Instalar Tesseract (Linux):
-sudo apt install tesseract-ocr tesseract-ocr-spa
+# Tesseract + Poppler
+sudo dnf install tesseract tesseract-langpack-spa poppler-utils   # Fedora
+sudo apt install tesseract-ocr tesseract-ocr-spa poppler-utils    # Ubuntu
 python3 main.py
 ```
+
+### Verificar el entorno
+
+```bash
+python tools/doctor.py
+```
+
+Muestra qué dependencias faltan, si tesseract/poppler están en el PATH, y el
+estado de los directorios de datos.
 
 ## Tests
 
 ```bash
 pytest -q
 ```
+
+127 tests, ~2 segundos. Solo tests de lógica core — UI no incluida.
 
 ## Datos de usuario
 
@@ -87,3 +120,8 @@ Guardados en `~/.local/share/huevonitis4/`:
 - `business/` — trabajos y pagos (`jobs.json`, `payments.json`)
 - `settings.json` — configuración persistente
 - `app.log` — log de la aplicación
+- `temp_bulk_capture/`, `debug_extractions/` — limpiables con `python tools/clean.py`
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
