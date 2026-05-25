@@ -183,7 +183,7 @@ class WriterTabMixin:
                 self.after(0, lambda: self.toast(msg, kind))
             except Exception as exc:
                 logger.error("export_writer_pdf: %s", exc, exc_info=True)
-                self.after(0, lambda: self.toast(f"Error: {exc}", "error"))
+                self.after(0, lambda exc=exc: self.toast(f"Error: {exc}", "error"))
 
         threading.Thread(target=worker, daemon=True).start()
         self.toast("Generando PDF...", "info")

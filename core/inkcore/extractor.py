@@ -95,7 +95,8 @@ _BBox = BBox  # backward compat alias
 # ── Hash perceptual ────────────────────────────────────────────────
 def avg_hash(img: "Image.Image", size: int = 16) -> str:
     gray = img.convert("L").resize((size, size), Image.Resampling.LANCZOS)
-    px = list(gray.getdata())
+    import numpy as _np
+    px = _np.asarray(gray).flatten().tolist()
     avg = sum(px) / max(1, len(px))
     return "".join("1" if p >= avg else "0" for p in px)
 

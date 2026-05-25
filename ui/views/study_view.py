@@ -602,7 +602,7 @@ class StudyView(BaseView):
 
                 self.after(0, _done)
             except Exception as exc:
-                self.after(0, lambda: self._on_import_error(str(exc)))
+                self.after(0, lambda exc=exc: self._on_import_error(str(exc)))
 
         threading.Thread(target=_read, daemon=True).start()
 
