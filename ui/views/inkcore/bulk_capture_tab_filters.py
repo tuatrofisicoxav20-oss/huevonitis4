@@ -125,6 +125,26 @@ class BulkCaptureFiltersMixin:
             msg += f" ({failed} fallaron o duplicados)"
         self.toast(msg, "success" if not failed else "warning")
 
+        # Limpiar directorio temporal del bulk capture (análogo a _cleanup_temp_dir
+        # del flujo de extractor individual). Sin esto los PNGs de cada sesión
+        # se acumulan en temp_bulk_capture/ indefinidamente.
+        try:
+            import config as _cfg
+            temp_bulk = _cfg.DATA_DIR / "temp_bulk_capture"
+            if temp_bulk.exists():
+                removed = 0
+                for png in temp_bulk.glob("*.png"):
+                    try:
+                        png.unlink()
+                        removed += 1
+                    except OSError as _e:
+                        logger.warning("bulk_commit: no se pudo borrar %s: %s", png, _e)
+                if removed:
+                    logger.debug("bulk_commit: eliminados %d PNGs temporales de %s",
+                                 removed, temp_bulk)
+        except Exception as _e:
+            logger.warning("bulk_commit: limpieza de temporales falló: %s", _e)
+
         self._bulk_session = None
         self._bulk_card_widgets = []
         self._bulk_selected_idx = None

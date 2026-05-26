@@ -110,47 +110,95 @@ class BankTabMixin:
             ).pack(pady=30)
             return
 
+        # Orden canónico: a-z con ñ en su posición (índice 14), luego 0-9, luego resto
+        _ALPHA_ORDER = list("abcdefghijklmnñopqrstuvwxyz")
+
+        def _char_sort_key(ch: str) -> tuple:
+            ch_l = ch.lower()
+            if ch_l in _ALPHA_ORDER:
+                return (0, _ALPHA_ORDER.index(ch_l), ch)
+            if ch.isdigit():
+                return (1, int(ch), ch)
+            return (2, ord(ch), ch)
+
+        # Agrupar por carácter
+        by_char: dict[str, list] = {}
+        for g in glyphs:
+            by_char.setdefault(g.char, []).append(g)
+
+        # Si hay filtro de un solo char, mostrar flat (sin cabecera redundante)
+        use_groups = len(by_char) > 1
+
         cols = 6
-        current_row = None
-        for i, g in enumerate(glyphs):
-            if i % cols == 0:
-                current_row = ctk.CTkFrame(self._bank_scroll, fg_color="transparent")
-                current_row.pack(fill="x", pady=3)
-            tc = self._tier_text_color(g.tier)
-            tier_bg = theme.TIER_BG.get(g.tier, theme.CARD_BG)
-            cell = ctk.CTkFrame(
-                current_row,
-                fg_color=tier_bg,
-                corner_radius=8,
-                width=70, height=82,
-                border_width=1,
-                border_color=self._tier_border(g.tier),
-            )
-            cell.pack(side="left", padx=4)
-            cell.pack_propagate(False)
-
-            def _bh(c=cell, tb=tier_bg):
-                c.bind("<Enter>", lambda e: c.configure(fg_color=theme.CARD_BG_HOVER), add="+")
-                c.bind("<Leave>", lambda e: c.configure(fg_color=tb), add="+")
-            _bh()
-
-            photo = self._get_thumb(g.image_path, 50, 52)
-            if photo is not None:
-                ctk.CTkLabel(cell, image=photo, text="").pack(pady=(4, 0))
-            else:
+        for char in sorted(by_char.keys(), key=_char_sort_key):
+            char_glyphs = by_char[char]
+            if use_groups:
+                # Cabecera de grupo con calidad promedio
+                avg_q = sum(g.quality_score for g in char_glyphs) / len(char_glyphs)
+                q_color = (theme.ACCENT_GREEN if avg_q >= 0.75
+                           else theme.ACCENT_ORANGE if avg_q >= 0.50
+                           else theme.ACCENT_RED)
+                hdr = ctk.CTkFrame(
+                    self._bank_scroll,
+                    fg_color=theme.BG_SECONDARY, corner_radius=6,
+                )
+                hdr.pack(fill="x", pady=(10, 2), padx=4)
                 ctk.CTkLabel(
-                    cell, text=g.char, font=("Segoe UI", 20),
-                    text_color=theme.TEXT_PRIMARY,
-                ).pack(pady=8)
+                    hdr,
+                    text=f"  {char.upper()}",
+                    font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
+                ).pack(side="left", padx=10, pady=4)
+                ctk.CTkLabel(
+                    hdr,
+                    text=f"{len(char_glyphs)} muestra{'s' if len(char_glyphs) != 1 else ''}",
+                    font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+                ).pack(side="left", padx=4)
+                ctk.CTkLabel(
+                    hdr,
+                    text=f"prom {avg_q:.0%}",
+                    font=theme.FONT_SMALL, text_color=q_color,
+                ).pack(side="right", padx=10, pady=4)
 
-            ctk.CTkLabel(
-                cell, text=f"{g.char}  {g.tier[0]}",
-                font=theme.FONT_SMALL, text_color=tc,
-            ).pack()
-            ctk.CTkLabel(
-                cell, text=f"{g.quality_score:.0%}",
-                font=("", 8), text_color=theme.TEXT_MUTED,
-            ).pack()
+            current_row = None
+            for i, g in enumerate(char_glyphs):
+                if i % cols == 0:
+                    current_row = ctk.CTkFrame(self._bank_scroll, fg_color="transparent")
+                    current_row.pack(fill="x", pady=2, padx=4)
+                tc = self._tier_text_color(g.tier)
+                tier_bg = theme.TIER_BG.get(g.tier, theme.CARD_BG)
+                cell = ctk.CTkFrame(
+                    current_row,
+                    fg_color=tier_bg,
+                    corner_radius=8,
+                    width=70, height=82,
+                    border_width=1,
+                    border_color=self._tier_border(g.tier),
+                )
+                cell.pack(side="left", padx=4)
+                cell.pack_propagate(False)
+
+                def _bh(c=cell, tb=tier_bg):
+                    c.bind("<Enter>", lambda e: c.configure(fg_color=theme.CARD_BG_HOVER), add="+")
+                    c.bind("<Leave>", lambda e: c.configure(fg_color=tb), add="+")
+                _bh()
+
+                photo = self._get_thumb(g.image_path, 50, 52)
+                if photo is not None:
+                    ctk.CTkLabel(cell, image=photo, text="").pack(pady=(4, 0))
+                else:
+                    ctk.CTkLabel(
+                        cell, text=g.char, font=("Segoe UI", 20),
+                        text_color=theme.TEXT_PRIMARY,
+                    ).pack(pady=8)
+
+                ctk.CTkLabel(
+                    cell, text=f"{g.char}  {g.tier[0]}",
+                    font=theme.FONT_SMALL, text_color=tc,
+                ).pack()
+                ctk.CTkLabel(
+                    cell, text=f"{g.quality_score:.0%}",
+                    font=("", 8), text_color=theme.TEXT_MUTED,
+                ).pack()
 
     def _reload_and_refresh_all(self):
         """Recarga el banco una sola vez y actualiza banco + revisión."""

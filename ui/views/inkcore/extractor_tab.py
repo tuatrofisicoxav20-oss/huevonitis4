@@ -483,10 +483,44 @@ class ExtractorTabMixin:
             if extras:
                 msg += f"  ({', '.join(extras)})"
             self.toast(msg, "success")
+            # save_glyphs_to_bank llama _cleanup_temp_dir() internamente, así
+            # que los PNG temporales ya no existen. Reemplazamos las rutas en
+            # self._extracted con las entradas permanentes del banco para que
+            # un segundo clic en "Guardar en banco" detecte correctamente los
+            # glifos como "ya en el banco" (duplicados) en vez de "archivo no existe".
+            self._update_extracted_to_bank_paths()
         try:
             self._refresh_bank()
         except Exception as exc:
             logger.exception("_save_to_bank: _refresh_bank falló: %s", exc)
+
+    def _update_extracted_to_bank_paths(self) -> None:
+        """Reemplaza rutas temporales de self._extracted con rutas permanentes del banco.
+
+        Después de save_glyphs_to_bank + _cleanup_temp_dir los PNGs en _temp_extract
+        ya no existen. Busca las entradas correspondientes en el banco (por char,
+        índice más reciente) y actualiza self._extracted para que apunten a archivos
+        válidos. Evita el bug de "segundo clic falla con archivo no existe".
+        """
+        bank_all = self._pipeline.bank.get_all()
+        bank_by_char: dict[str, list] = {}
+        for e in bank_all:
+            bank_by_char.setdefault(e.char, []).append(e)
+
+        assigned: set[str] = set()
+        new_extracted = []
+        for g in self._extracted:
+            cands = sorted(
+                bank_by_char.get(g.char, []),
+                key=lambda e: e.index,
+                reverse=True,
+            )
+            best = next((e for e in cands if e.image_path not in assigned), None)
+            if best:
+                assigned.add(best.image_path)
+                new_extracted.append(best)
+        self._extracted = new_extracted
+        self._show_extracted_grid()
 
     # ── Preprocess preview ─────────────────────────────────────────
 
