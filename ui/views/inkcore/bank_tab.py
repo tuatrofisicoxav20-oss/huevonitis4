@@ -541,3 +541,8 @@ class BankTabMixin:
             self._do_refresh_review_ui()
         except Exception as exc:
             logger.error("_do_refresh_review_ui failed: %s", exc, exc_info=True)
+        # Profile bar counter (v4.2) — actualizar si el método existe
+        try:
+            self._update_profile_count()
+        except (AttributeError, Exception):
+            pass

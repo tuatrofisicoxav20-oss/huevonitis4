@@ -20,6 +20,8 @@ class AppState:
     study_document: Any | None = None  # Document estructurado del último import en Study
     inkcore_image_path: str | None = None
     inkcore_extracted_glyphs: list = field(default_factory=list)
+    # v4.2: perfil de letra activo. Se persiste a settings.json desde main_view.
+    active_profile_id: str = "default"
 
     def __post_init__(self):
         # Lock for thread-safe access when background workers read/write state.

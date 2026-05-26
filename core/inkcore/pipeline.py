@@ -34,9 +34,35 @@ def _cleanup_temp_dir() -> None:
 
 
 class InkCorePipeline:
-    def __init__(self):
+    def __init__(self, profile_id: str | None = None):
         try:
-            self.bank = GlyphBank()
+            from core.inkcore.profile_manager import (
+                ProfileManager,
+                migrate_legacy_to_default,
+                needs_legacy_migration,
+            )
+            # Defensa en profundidad: si llegamos acá con banco legacy sin migrar
+            # (puede pasar al correr desde scripts/tests que no pasan por main.py),
+            # migrar ahora. main.py también ejecuta esto al arranque.
+            if needs_legacy_migration():
+                try:
+                    migrate_legacy_to_default(backup=True)
+                    logger.info("Pipeline: migración legacy completada en init")
+                except Exception as exc:
+                    logger.error("Pipeline: migración legacy falló: %s", exc, exc_info=True)
+            self.profile_manager = ProfileManager()
+            # Asegurar que existe al menos un perfil. Si el usuario tiene un
+            # banco legacy (sin _profiles.json) se debió migrar ANTES de llegar
+            # acá (main.py lo hace al arranque). Si no, creamos default vacío.
+            self.profile_manager.ensure_default_profile()
+            self.active_profile_id = profile_id or config.DEFAULT_PROFILE_ID
+            if not self.profile_manager.exists(self.active_profile_id):
+                logger.warning(
+                    "InkCorePipeline: perfil %r no existe, cayendo a default",
+                    self.active_profile_id,
+                )
+                self.active_profile_id = config.DEFAULT_PROFILE_ID
+            self.bank = GlyphBank(profile_id=self.active_profile_id)
             self.extractor = GlyphExtractor()
             self.renderer = HandwritingRenderer(self.bank)
             # Lock guards concurrent access to the bank from the extraction
@@ -53,6 +79,49 @@ class InkCorePipeline:
         except Exception as exc:
             logger.error("InkCorePipeline failed to initialise: %s", exc, exc_info=True)
             raise
+
+    def switch_profile(self, profile_id: str) -> bool:
+        """Cambia el perfil activo. Reinstancia el banco apuntando al nuevo dir.
+
+        Devuelve False si el perfil no existe (no cambia nada en ese caso).
+        """
+        if not self.profile_manager.exists(profile_id):
+            logger.warning("switch_profile: %r no existe en el índice", profile_id)
+            return False
+        if profile_id == self.active_profile_id:
+            return True
+        with self._bank_lock:
+            try:
+                self.active_profile_id = profile_id
+                self.bank = GlyphBank(profile_id=profile_id)
+                if self.renderer is None:
+                    self.renderer = HandwritingRenderer(self.bank)
+                else:
+                    self.renderer.bank = self.bank
+                logger.info("switch_profile: ahora activo %r", profile_id)
+                return True
+            except Exception as exc:
+                logger.error("switch_profile: error: %s", exc, exc_info=True)
+                return False
+
+    def list_profiles(self) -> list:
+        return self.profile_manager.list_profiles()
+
+    def create_profile(self, name: str, notes: str = ""):
+        return self.profile_manager.create_profile(name, notes)
+
+    def rename_profile(self, profile_id: str, new_name: str) -> bool:
+        return self.profile_manager.rename_profile(profile_id, new_name)
+
+    def delete_profile(self, profile_id: str, *, delete_data: bool = False) -> bool:
+        # Si borramos el perfil activo, cambiar a default primero.
+        if profile_id == self.active_profile_id:
+            default_id = config.DEFAULT_PROFILE_ID
+            if profile_id == default_id:
+                logger.warning("delete_profile: no se puede borrar el perfil default")
+                return False
+            self.switch_profile(default_id)
+        return self.profile_manager.delete_profile(profile_id, delete_data=delete_data)
 
     @staticmethod
     def _preload_ocr() -> None:

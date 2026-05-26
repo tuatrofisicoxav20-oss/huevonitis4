@@ -50,8 +50,16 @@ def _dup_thresholds(ch: str) -> tuple[int, int]:
 
 
 class GlyphBank:
-    def __init__(self):
-        self.bank_dir = config.TIPOGRAFIA_DIR
+    def __init__(self, profile_id: str | None = None):
+        """Banco de glifos asociado a un perfil de letra (v4.2).
+
+        Si profile_id es None, usa config.DEFAULT_PROFILE_ID para mantener
+        compat con callers legacy que no conocen perfiles.
+
+        El path resuelve a TIPOGRAFIA_DIR/{profile_id}/_manifest.json.
+        """
+        self.profile_id = profile_id or config.DEFAULT_PROFILE_ID
+        self.bank_dir = config.TIPOGRAFIA_DIR / self.profile_id
         self.manifest_file = self.bank_dir / "_manifest.json"
         self._entries: list[GlyphEntry] = []
         self.load()
@@ -195,12 +203,13 @@ class GlyphBank:
                 predicted_char=predicted_char,
                 label_confidence=label_confidence,
                 detector_sources=list(detector_sources or []),
+                profile_id=self.profile_id,
             )
             self._entries.append(entry)
         self.save()
         logger.info(
-            "add_glyph: OK char=%r dest=%s tier=%s score=%.3f",
-            char, dest, entry.tier, entry.quality_score,
+            "add_glyph: OK char=%r dest=%s tier=%s score=%.3f profile=%s",
+            char, dest, entry.tier, entry.quality_score, self.profile_id,
         )
         return entry
 

@@ -95,5 +95,6 @@ def test_coverage_empty(bank):
 
 def test_bank_manifest_written(bank, tmp_path):
     import config
-    manifest = config.TIPOGRAFIA_DIR / "_manifest.json"
+    # v4.2: el manifest vive en tipografia/{profile_id}/_manifest.json
+    manifest = config.TIPOGRAFIA_DIR / config.DEFAULT_PROFILE_ID / "_manifest.json"
     assert manifest.exists()

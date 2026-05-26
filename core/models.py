@@ -149,6 +149,22 @@ class GlyphEntry:
     predicted_char: str | None = None
     label_confidence: float | None = None
     detector_sources: list = field(default_factory=list)
+    # Perfil de letra al que pertenece (v4.2). Default mantiene compat hacia
+    # atrás con bancos pre-perfiles que se migran a "default".
+    profile_id: str = "default"
+
+
+@dataclass
+class HandwritingProfile:
+    """Perfil de letra de una persona — agrupa glifos por escribiente.
+
+    Cada perfil tiene su propia carpeta y manifest bajo TIPOGRAFIA_DIR/{id}/.
+    El id es un slug lowercase sin espacios; el name es para mostrar al usuario.
+    """
+    id: str = ""
+    name: str = ""
+    created_at: str = ""
+    notes: str = ""
 
 
 @dataclass

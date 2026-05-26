@@ -22,6 +22,10 @@ APP_NAME = "Huevonitis 4"
 DATA_DIR = Path.home() / ".local" / "share" / "huevonitis4"
 PROJECTS_DIR = DATA_DIR / "projects"
 TIPOGRAFIA_DIR = DATA_DIR / "tipografia"
+# v4.2: el banco se divide por perfil de letra. Default mantiene compat
+# con bancos pre-v4.2 que se migran automáticamente a "default/".
+PROFILES_FILE = TIPOGRAFIA_DIR / "_profiles.json"
+DEFAULT_PROFILE_ID = "default"
 BUSINESS_DIR = DATA_DIR / "business"
 AUTOSAVE_DIR = DATA_DIR / "autosave"
 EXPORTS_DIR = DATA_DIR / "exports"

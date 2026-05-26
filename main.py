@@ -40,6 +40,26 @@ def main():
     from core.project_manager import ProjectManager
     from ui.app import HuevonitisApp
 
+    # v4.2: migración automática del banco legacy a estructura de perfiles.
+    # Si detectamos un manifest en la raíz de tipografia/ y no hay _profiles.json,
+    # movemos todo a tipografia/default/. Backup en _backup_pre_profiles/.
+    try:
+        from core.inkcore.profile_manager import (
+            migrate_legacy_to_default,
+            needs_legacy_migration,
+        )
+        if needs_legacy_migration():
+            logger.info("Banco legacy detectado — migrando a perfiles…")
+            res = migrate_legacy_to_default(backup=True)
+            logger.info("Migración OK: %s", res)
+    except Exception as e:
+        logger.critical("Migración legacy falló: %s", e, exc_info=True)
+        _show_fatal(
+            f"La migración a perfiles falló.\n"
+            f"Tu banco anterior está intacto en backup.\n\n{e}",
+        )
+        return
+
     try:
         pm = ProjectManager()
     except Exception as e:
@@ -47,8 +67,19 @@ def main():
         _show_fatal(f"Error al cargar proyectos:\n{e}")
         return
 
+    # Cargar el perfil activo desde settings (default "default")
+    active_profile = "default"
     try:
-        inkcore = InkCorePipeline()
+        import json
+        if config.SETTINGS_FILE.exists():
+            with open(config.SETTINGS_FILE, encoding="utf-8") as f:
+                _s = json.load(f)
+            active_profile = _s.get("active_profile_id", "default") or "default"
+    except Exception:
+        pass
+
+    try:
+        inkcore = InkCorePipeline(profile_id=active_profile)
     except Exception as e:
         logger.critical(f"No se pudo inicializar InkCorePipeline: {e}", exc_info=True)
         _show_fatal(f"Error al cargar el módulo de escritura (InkCore):\n{e}")
