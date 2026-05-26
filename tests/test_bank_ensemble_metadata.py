@@ -1,5 +1,4 @@
 """D1: bank preserva metadatos del pipeline ensemble."""
-import pytest
 from PIL import Image
 
 

@@ -207,7 +207,6 @@ def run_comparison(image_path: str, ref_text: str = "") -> None:
 def run_ocr_comparison(image_path: str) -> None:
     """Compara todos los backends OCR disponibles sobre la misma imagen."""
     import time
-    import config  # noqa: E402
 
     print(f"\n{'='*70}")
     print("  COMPARACIÓN DE BACKENDS OCR")
@@ -278,8 +277,6 @@ def run_ensemble_comparison(
 ) -> None:
     """Compara estrategias del pipeline ensemble y genera informe HTML opcional."""
     import time
-    import base64
-    import io
 
     print(f"\n{'='*70}")
     print("  COMPARACIÓN DE ESTRATEGIAS ENSEMBLE")
@@ -377,7 +374,7 @@ def run_ensemble_comparison(
 
 
 def _write_html_report(image_path: str, results: dict, overlays: dict, out: str) -> None:
-    import base64, io
+    import base64
     from pathlib import Path
 
     def img_to_b64(path: str) -> str:

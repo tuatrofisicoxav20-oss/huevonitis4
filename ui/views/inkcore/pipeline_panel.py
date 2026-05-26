@@ -53,8 +53,9 @@ class PipelinePanelMixin:
         det_row.pack(fill="x", padx=10, pady=(0, 4))
         self._detector_vars: dict[str, ctk.BooleanVar] = {}
         avail_dets = glyph_detectors.get_available()
+        # Default: TODOS los detectores disponibles. Fusión union → más cobertura.
         for det_name, is_avail in sorted(avail_dets.items()):
-            var = ctk.BooleanVar(value=(det_name == "classic_cv"))
+            var = ctk.BooleanVar(value=is_avail)
             self._detector_vars[det_name] = var
             color = theme.TEXT_PRIMARY if is_avail else theme.TEXT_MUTED
             chip = ctk.CTkCheckBox(
@@ -88,8 +89,9 @@ class PipelinePanelMixin:
         lab_row.pack(fill="x", padx=10, pady=(0, 4))
         self._labeler_vars: dict[str, ctk.BooleanVar] = {}
         avail_labs = glyph_labelers.get_available()
+        # Default: TODOS los labelers disponibles. El voting elige el ganador.
         for lab_name, is_avail in sorted(avail_labs.items()):
-            var = ctk.BooleanVar(value=False)
+            var = ctk.BooleanVar(value=is_avail)
             self._labeler_vars[lab_name] = var
             color = theme.TEXT_PRIMARY if is_avail else theme.TEXT_MUTED
             chip = ctk.CTkCheckBox(
@@ -149,6 +151,22 @@ class PipelinePanelMixin:
                       button_color=theme.ACCENT_BLUE_HOVER, width=40).pack(side="right")
 
         ctk.CTkButton(
+            inner, text="✨ Auto-config (activar todo lo disponible)",
+            command=self._on_auto_config,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            text_color="white", font=theme.FONT_SMALL, height=28,
+            corner_radius=6,
+        ).pack(fill="x", padx=10, pady=(0, 4))
+
+        ctk.CTkButton(
+            inner, text="🔬 Comparar estrategias de segmentación",
+            command=self._on_compare_strategies,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+            text_color="white", font=theme.FONT_SMALL, height=28,
+            corner_radius=6,
+        ).pack(fill="x", padx=10, pady=(0, 4))
+
+        ctk.CTkButton(
             inner, text="🧹 Liberar modelos de memoria",
             command=self._on_clear_models,
             fg_color=theme.BG_SECONDARY, hover_color=theme.BORDER,
@@ -164,6 +182,143 @@ class PipelinePanelMixin:
         else:
             self._pipeline_frame.pack(fill="x", padx=12, pady=(0, 6))
             self._pipeline_toggle_btn.configure(text="▼")
+
+    def _on_auto_config(self) -> None:
+        """Activa pipeline + todos los detectores y labelers disponibles, fusion=union."""
+        from core.inkcore import glyph_detectors, glyph_labelers
+        avail_dets = glyph_detectors.get_available()
+        avail_labs = glyph_labelers.get_available()
+        try:
+            self._use_pipeline_var.set(True)
+        except Exception:
+            pass
+        for name, is_avail in avail_dets.items():
+            var = self._detector_vars.get(name)
+            if var is not None and is_avail:
+                var.set(True)
+        for name, is_avail in avail_labs.items():
+            var = self._labeler_vars.get(name)
+            if var is not None and is_avail:
+                var.set(True)
+        try:
+            self._fusion_var.set("union")
+            self._vote_var.set("highest_conf")
+        except Exception:
+            pass
+        try:
+            self._refresh_pipeline_chip()
+        except Exception:
+            pass
+        n_d = sum(1 for v in avail_dets.values() if v)
+        n_l = sum(1 for v in avail_labs.values() if v)
+        self.toast(f"Auto-config: {n_d} detector(es) + {n_l} labeler(s) activos", "success")
+
+    def _on_compare_strategies(self) -> None:
+        import threading
+
+        from core.inkcore.extractor import ExtractionOptions
+
+        if not getattr(self, "_image_path", None):
+            self.toast("Carga una imagen primero", "warning")
+            return
+        ref = self._ref_text.get("1.0", "end").strip()
+        if not ref:
+            self.toast("Escribe el texto de referencia", "warning")
+            return
+
+        opts = ExtractionOptions(
+            remove_lines=self._remove_lines_var.get(),
+            brightness=float(self._brightness_slider.get()),
+            contrast=float(self._contrast_slider.get()),
+            rotation_deg=float(self._rotation_slider.get()),
+        )
+        self.toast("Comparando estrategias…", "info")
+        image_path = self._image_path
+
+        def worker():
+            try:
+                results = self._pipeline.extractor.compare_strategies(
+                    image_path, ref, opts,
+                )
+            except Exception as exc:
+                logger.error("compare_strategies error: %s", exc, exc_info=True)
+                results = {"_meta": {"error": str(exc)}}
+            try:
+                self.after(0, lambda: self._show_strategy_results(results))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_strategy_results(self, results: dict) -> None:
+        if not self.winfo_exists():
+            return
+        meta = results.pop("_meta", {}) if isinstance(results, dict) else {}
+        if "error" in meta:
+            self.toast(f"Comparación falló: {meta['error']}", "error")
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title("Comparación de estrategias de segmentación")
+        win.configure(fg_color=theme.BG_PRIMARY)
+        win.geometry("720x460")
+
+        header = (f"Línea {meta.get('line_index', 0) + 1}/{meta.get('line_count', '?')} "
+                  f"({meta.get('line_w', 0)}×{meta.get('line_h', 0)}px · "
+                  f"{meta.get('n_chars', 0)} chars)  ref: \"{meta.get('ref_line', '')[:60]}\"")
+        ctk.CTkLabel(
+            win, text=header, font=theme.FONT_SMALL,
+            text_color=theme.TEXT_SECONDARY, justify="left",
+        ).pack(anchor="w", padx=14, pady=(10, 6))
+
+        table = ctk.CTkScrollableFrame(win, fg_color=theme.BG_SECONDARY)
+        table.pack(fill="both", expand=True, padx=12, pady=4)
+
+        # Cabecera de tabla
+        hdr = ctk.CTkFrame(table, fg_color=theme.BG_TERTIARY)
+        hdr.pack(fill="x", padx=2, pady=(2, 4))
+        for col, w in [("Estrategia", 200), ("Avg", 70), ("Min", 70),
+                       ("Max", 70), ("# glifos", 70), ("Nota", 200)]:
+            ctk.CTkLabel(
+                hdr, text=col, font=theme.FONT_SMALL,
+                text_color=theme.TEXT_PRIMARY, width=w, anchor="w",
+            ).pack(side="left", padx=4, pady=4)
+
+        # Ordenar por avg_quality desc
+        rows = sorted(
+            results.items(),
+            key=lambda kv: kv[1].get("avg_quality", 0.0),
+            reverse=True,
+        )
+        best_name = rows[0][0] if rows else None
+        for name, data in rows:
+            row = ctk.CTkFrame(
+                table,
+                fg_color=theme.ACCENT_GREEN if name == best_name else "transparent",
+            )
+            row.pack(fill="x", padx=2, pady=1)
+            avg = data.get("avg_quality", 0.0)
+            mn = data.get("min_quality", 0.0)
+            mx = data.get("max_quality", 0.0)
+            cnt = data.get("glyph_count", 0)
+            note = data.get("note", "") or data.get("error", "")
+            txt_color = "white" if name == best_name else theme.TEXT_PRIMARY
+            for val, w in [(name, 200), (f"{avg:.3f}", 70), (f"{mn:.3f}", 70),
+                           (f"{mx:.3f}", 70), (str(cnt), 70), (note[:30], 200)]:
+                ctk.CTkLabel(
+                    row, text=val, font=theme.FONT_SMALL,
+                    text_color=txt_color, width=w, anchor="w",
+                ).pack(side="left", padx=4, pady=3)
+
+        ctk.CTkLabel(
+            win,
+            text="La fila resaltada es la estrategia con mejor calidad promedio.",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+        ).pack(pady=(4, 2))
+        ctk.CTkButton(
+            win, text="Cerrar", command=win.destroy,
+            fg_color=theme.BG_TERTIARY, text_color=theme.TEXT_PRIMARY, width=100,
+        ).pack(pady=(0, 12))
 
     def _on_clear_models(self) -> None:
         from core.inkcore.model_cache import ModelCache

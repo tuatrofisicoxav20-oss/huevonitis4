@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -101,6 +103,17 @@ class BulkCaptureRunner:
         self._progress = progress_cb or (lambda f, m: None)
         self._cancel_event = cancel_event
         self._dpi = pdf_dpi
+        # Pipeline lazy-init: lo creamos UNA vez y reusamos en todas las
+        # imágenes (antes se re-creaba por iteración → recargaba modelos).
+        self._pipeline = None
+        # Lock para proteger appends a `session.candidates` desde varios threads.
+        self._results_lock = threading.Lock()
+
+    def _get_pipeline(self):
+        if self._pipeline is None:
+            from core.inkcore.extraction_pipeline import GlyphExtractionPipeline
+            self._pipeline = GlyphExtractionPipeline(self._cfg)
+        return self._pipeline
 
     def run(self, sources: list[str]) -> BulkCaptureSession:
         session = BulkCaptureSession(sources=list(sources), pipeline_config=self._cfg)
@@ -119,23 +132,37 @@ class BulkCaptureRunner:
         if not image_pages:
             return session
 
-        # Paso 2: extraer glifos por imagen
-        from core.inkcore.extraction_pipeline import GlyphExtractionPipeline
+        # Paso 2: extraer glifos por imagen — paralelizado.
+        # cv2 libera el GIL en las operaciones pesadas, así que ThreadPool
+        # da speed-up real (3-6× en máquinas multi-core). Reusamos el mismo
+        # GlyphExtractionPipeline en todos los threads (sus métodos son
+        # idempotentes para una misma config).
         extracted_per_page: list[tuple[str, int, list[GlyphEntry]]] = []
         total = len(image_pages)
-        for i, (img, label, pnum) in enumerate(image_pages):
+        done_counter = {"n": 0}
+        counter_lock = threading.Lock()
+
+        def _work(idx_img_label_pnum):
+            i, (img, label, pnum) = idx_img_label_pnum
             if self._cancel_event and self._cancel_event.is_set():
-                logger.info("BulkCaptureRunner: cancelado en imagen %d/%d", i + 1, total)
-                break
-            self._progress(i / total, f"Extrayendo {label} pág {pnum}…")
+                return (img, pnum, [])
             try:
-                pipeline = GlyphExtractionPipeline(self._cfg)
-                result = pipeline.extract(img)
-                extracted_per_page.append((img, pnum, result.glyphs))
-                logger.debug("bulk: %s pág %d → %d glifos", label, pnum, len(result.glyphs))
+                result = self._get_pipeline().extract(img)
+                glyphs = result.glyphs
             except Exception as exc:
                 logger.error("bulk_runner: error en '%s' pág %d: %s", label, pnum, exc)
-                extracted_per_page.append((img, pnum, []))
+                glyphs = []
+            with counter_lock:
+                done_counter["n"] += 1
+                self._progress(done_counter["n"] / total,
+                               f"Extrayendo {label} pág {pnum}…")
+            return (img, pnum, glyphs)
+
+        max_workers = min(4, max(1, total))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(_work, enumerate(image_pages)):
+                extracted_per_page.append(result)
+                logger.debug("bulk: %s → %d glifos", result[0], len(result[2]))
 
         # Paso 3: TrOCR post-labeling si el pipeline no lo usó ya
         _pipeline_already_labeled = bool(
@@ -315,15 +342,9 @@ class BulkCaptureRunner:
         )
         return session
 
-    def run_images(self, image_paths: list[str]) -> BulkCaptureSession:
-        """Procesa una lista de imágenes (caso sin PDF)."""
-        return self.run(image_paths)
-
     def _extract_from_image(self, img_path: str) -> list[GlyphEntry]:
-        from core.inkcore.extraction_pipeline import GlyphExtractionPipeline
         try:
-            pipeline = GlyphExtractionPipeline(self._cfg)
-            result = pipeline.extract(img_path)
+            result = self._get_pipeline().extract(img_path)
             return result.glyphs
         except Exception as exc:
             logger.error("_extract_from_image '%s': %s", img_path, exc)

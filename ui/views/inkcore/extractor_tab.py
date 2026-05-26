@@ -22,226 +22,150 @@ except ImportError:
 class ExtractorTabMixin:
     """Tab de extracción individual de glifos; mezclado en InkCoreView."""
 
-    # ── Build ──────────────────────────────────────────────────────
+    def _on_auto_mode_toggle(self):
+        """Modo auto OCR-first: TrOCR/Tesseract leen la imagen y dan el texto guía."""
+        auto = bool(self._auto_mode_var.get())
+        if auto:
+            self._ref_text.configure(state="disabled", fg_color=theme.BG_SECONDARY)
+            self._adj_ref_label.configure(text_color=theme.TEXT_MUTED)
+            # Indicar qué motor OCR se usará
+            try:
+                import transformers  # noqa: F401
+                ocr_name = "TrOCR (handwriting)"
+                color = theme.ACCENT_GREEN
+            except ImportError:
+                ocr_name = "Tesseract PSM 6 (texto continuo)"
+                color = theme.ACCENT_ORANGE
+            self._ref_example_label.configure(
+                text=f"Modo automático: OCR leerá la imagen con {ocr_name}.",
+                text_color=color,
+            )
+        else:
+            self._ref_text.configure(state="normal", fg_color=theme.BG_TERTIARY)
+            self._adj_ref_label.configure(text_color=theme.TEXT_SECONDARY)
+            self._ref_example_label.configure(
+                text="Ejemplo: hola mundo abcdefg  /  segunda línea: ñoño piña",
+                text_color=theme.TEXT_MUTED,
+            )
 
-    def _build_extractor(self, parent):
-        main = ctk.CTkFrame(parent, fg_color="transparent")
-        main.pack(fill="both", expand=True)
-        main.columnconfigure(0, weight=42)
-        main.columnconfigure(1, weight=58)
-        main.rowconfigure(0, weight=1)
+    # ── Modo auto: heurísticas + diálogo de confirmación ──────────
 
-        left = self.card_frame(main)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        self._build_extractor_left(left)
+    @staticmethod
+    def _looks_suspect(text: str) -> bool:
+        """Detecta si el OCR devolvió algo que probablemente sea un error.
 
-        right = self.card_frame(main)
-        right.grid(row=0, column=1, sticky="nsew")
-        self._build_extractor_right(right)
+        Casos típicos:
+          • Texto muy corto (1-2 chars) → probable basura
+          • Palabras improbables tipo "humanization" en una imagen del alfabeto
+          • Solo 1 "palabra" larga (sin espacios) y > 10 chars: muy raro
+        """
+        if not text:
+            return True
+        clean = text.strip()
+        if len(clean) < 2:
+            return True
+        # Una palabra continua muy larga (>15 chars) sin espacios suele ser
+        # alucinación del modelo TrOCR (intentando "leer" un grid de letras).
+        if " " not in clean and len(clean) > 15:
+            return True
+        # Si ningún char es alfanumérico → basura
+        if not any(c.isalnum() for c in clean):
+            return True
+        return False
 
-    def _build_extractor_left(self, parent):
+    _QUICK_TEMPLATES = [
+        ("a-z", "a b c d e f g h i j k l m n ñ o p q r s t u v w x y z"),
+        ("A-Z", "A B C D E F G H I J K L M N Ñ O P Q R S T U V W X Y Z"),
+        ("0-9", "0 1 2 3 4 5 6 7 8 9"),
+        ("a-z + 0-9", "a b c d e f g h i j k l m n ñ o p q r s t u v w x y z\n0 1 2 3 4 5 6 7 8 9"),
+    ]
+
+    def _ask_user_ref_text(self, predicted: str, conf: float) -> str:
+        """Modal: muestra el OCR sugerido + plantillas rápidas; usuario edita y confirma."""
+        win = ctk.CTkToplevel(self)
+        win.title("Confirmar texto de la imagen")
+        win.configure(fg_color=theme.BG_PRIMARY)
+        win.geometry("520x460")
+        win.grab_set()
+
         ctk.CTkLabel(
-            parent, text="Imagen de apunte",
+            win, text="📝 Confirma el texto de tu imagen",
             font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
-        ).pack(padx=14, pady=(14, 4), anchor="w")
+        ).pack(pady=(16, 4))
 
-        self._img_preview = ctk.CTkLabel(
-            parent,
-            text="Sin imagen\n\nPresiona 'Cargar imagen'",
-            fg_color=theme.BG_TERTIARY,
-            corner_radius=8,
-            text_color=theme.TEXT_MUTED,
-            height=200,
-        )
-        self._img_preview.pack(fill="x", padx=12, pady=4)
-
-        btn_row0 = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row0.pack(fill="x", padx=12, pady=(4, 2))
-        self.primary_button(btn_row0, "📷 Cargar imagen", self._load_image).pack(side="left")
-        self._img_name_label = ctk.CTkLabel(
-            btn_row0, text="Sin imagen cargada",
-            font=theme.FONT_SMALL, text_color=theme.ACCENT_RED,
-        )
-        self._img_name_label.pack(side="left", padx=8)
-
-        adj_header = ctk.CTkFrame(parent, fg_color="transparent")
-        adj_header.pack(fill="x", padx=12, pady=(8, 0))
-        ctk.CTkLabel(
-            adj_header, text="Ajustes de imagen",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-        ).pack(side="left")
-        self._adj_toggle_btn = ctk.CTkButton(
-            adj_header, text="▼", width=28, height=22,
-            fg_color="transparent", hover_color=theme.BG_TERTIARY,
-            text_color=theme.TEXT_MUTED, font=("Segoe UI", 10),
-            command=self._toggle_adjustments,
-        )
-        self._adj_toggle_btn.pack(side="right")
-
-        self._adj_frame = ctk.CTkFrame(
-            parent, fg_color=theme.BG_TERTIARY, corner_radius=8,
-            border_width=1, border_color=theme.BORDER,
-        )
-        self._adj_frame.pack(fill="x", padx=12, pady=(0, 6))
-        adj_frame = self._adj_frame
-
-        sliders_grid = ctk.CTkFrame(adj_frame, fg_color="transparent")
-        sliders_grid.pack(fill="x", padx=8, pady=(4, 8))
-        sliders_grid.columnconfigure(1, weight=1)
-
-        def make_slider(row, label, from_, to, default, callback=None):
+        if conf > 0:
+            color = theme.ACCENT_ORANGE if conf < 0.75 else theme.ACCENT_GREEN
             ctk.CTkLabel(
-                sliders_grid, text=label, font=theme.FONT_SMALL,
-                text_color=theme.TEXT_SECONDARY, width=70, anchor="w",
-            ).grid(row=row, column=0, sticky="w", pady=2)
-            val_lbl = ctk.CTkLabel(
-                sliders_grid, text=str(default),
-                font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED, width=32,
-            )
-            val_lbl.grid(row=row, column=2, padx=(4, 0))
-            slider = ctk.CTkSlider(
-                sliders_grid, from_=from_, to=to,
-                number_of_steps=int(to - from_),
-                progress_color=theme.ACCENT_ORANGE,
-                button_color=theme.ACCENT_ORANGE,
-                button_hover_color=theme.ACCENT_ORANGE_HOVER,
-            )
-            slider.set(default)
-            slider.grid(row=row, column=1, sticky="ew", padx=4)
+                win,
+                text=f"OCR detectó (confianza {conf:.0%}). Edita si no es correcto:",
+                font=theme.FONT_SMALL, text_color=color,
+            ).pack(pady=(0, 4))
+        else:
+            ctk.CTkLabel(
+                win, text="OCR no pudo leer la imagen. Escribe el texto manualmente:",
+                font=theme.FONT_SMALL, text_color=theme.ACCENT_RED,
+            ).pack(pady=(0, 4))
 
-            def on_change(v, lbl=val_lbl, cb=callback):
-                lbl.configure(text=f"{float(v):+.0f}" if float(v) != 0 else "0")
-                if cb:
-                    cb()
-
-            slider.configure(command=on_change)
-            return slider
-
-        self._brightness_slider = make_slider(0, "Brillo", -80, 80, 0, self._apply_preview)
-        self._contrast_slider   = make_slider(1, "Contraste", -80, 80, 0, self._apply_preview)
-        self._rotation_slider   = make_slider(2, "Rotación", -15, 15, 0, self._apply_preview)
-
-        remove_lines_row = ctk.CTkFrame(adj_frame, fg_color="transparent")
-        remove_lines_row.pack(fill="x", padx=10, pady=(0, 8))
-        ctk.CTkLabel(
-            remove_lines_row, text="Quitar líneas de cuaderno",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-        ).pack(side="left")
-        self._remove_lines_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(
-            remove_lines_row, text="", variable=self._remove_lines_var,
-            onvalue=True, offvalue=False,
-            progress_color=theme.ACCENT_GREEN,
-            button_color=theme.ACCENT_GREEN_LIGHT,
-            width=40,
-        ).pack(side="right")
-
-        self._adj_ref_label = ctk.CTkLabel(
-            parent,
-            text="Texto de referencia — una línea por renglón, sin comas entre letras:",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-        )
-        self._adj_ref_label.pack(anchor="w", padx=12, pady=(8, 2))
-        self._ref_text = ctk.CTkTextbox(
-            parent, font=theme.FONT_BODY,
+        textbox = ctk.CTkTextbox(
+            win, font=theme.FONT_BODY,
             fg_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_PRIMARY,
-            height=80,
-            border_color=theme.BORDER, border_width=1,
+            border_color=theme.ACCENT_BLUE, border_width=1,
+            height=120,
         )
-        self._ref_text.pack(fill="x", padx=12, pady=(0, 4))
-        ctk.CTkLabel(
-            parent,
-            text="Ejemplo: abcdefghijklmnñ  /  segunda línea: opqrstuvwxyz",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
-        ).pack(anchor="w", padx=14, pady=(0, 4))
-
-        self._build_pipeline_panel(parent)
-
-        action_row = ctk.CTkFrame(parent, fg_color="transparent")
-        action_row.pack(fill="x", padx=12, pady=4)
-        self._extract_btn = ctk.CTkButton(
-            action_row,
-            text="⚙️  Procesar y extraer",
-            command=self._extract,
-            height=38,
-            fg_color=theme.ACCENT_ORANGE,
-            hover_color=theme.ACCENT_ORANGE_HOVER,
-            font=("Segoe UI", 12, "bold"),
-            corner_radius=9,
-        )
-        self._extract_btn.pack(side="left", padx=(0, 6))
-        self.secondary_button(action_row, "🔍 Ver preprocesamiento",
-                              self._show_preprocess_preview, width=160).pack(side="left")
-
-        self._extract_error = ctk.CTkLabel(
-            parent, text="",
-            font=theme.FONT_SMALL, text_color=theme.ACCENT_RED,
-        )
-        self._extract_error.pack(anchor="w", padx=14)
-
-        self._extract_status = ctk.CTkLabel(
-            parent, text="", font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
-        )
-        self._extract_status.pack(anchor="w", padx=14)
-
-        self._extract_progress = ctk.CTkProgressBar(
-            parent, mode="indeterminate",
-            fg_color=theme.BG_TERTIARY,
-            progress_color=theme.ACCENT_GREEN,
-            height=6,
-            corner_radius=3,
-        )
-        self._extract_progress.pack(fill="x", padx=12, pady=2)
-        self._extract_progress.pack_forget()
-
-    def _toggle_adjustments(self):
-        self._adj_collapsed = not self._adj_collapsed
-        if self._adj_collapsed:
-            self._adj_frame.pack_forget()
-            self._adj_toggle_btn.configure(text="▶")
-        else:
-            self._adj_frame.pack(fill="x", padx=12, pady=(0, 6),
-                                 before=self._adj_ref_label)
-            self._adj_toggle_btn.configure(text="▼")
-
-    def _build_extractor_right(self, parent):
-        header = ctk.CTkFrame(parent, fg_color="transparent")
-        header.pack(fill="x", padx=14, pady=(12, 4))
+        textbox.pack(fill="x", padx=20, pady=8)
+        if predicted:
+            textbox.insert("1.0", predicted)
+        textbox.focus_set()
 
         ctk.CTkLabel(
-            header, text="Glifos extraídos",
-            font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
-        ).pack(side="left")
-
-        self._glyph_count_label = ctk.CTkLabel(
-            header, text="0 glifos",
+            win, text="💡 Plantillas rápidas:",
             font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-        )
-        self._glyph_count_label.pack(side="right")
+        ).pack(anchor="w", padx=20, pady=(8, 4))
 
-        self._glyphs_scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        self._glyphs_scroll.pack(fill="both", expand=True, padx=8, pady=4)
+        tpl_frame = ctk.CTkFrame(win, fg_color="transparent")
+        tpl_frame.pack(fill="x", padx=20)
 
-        footer = ctk.CTkFrame(parent, fg_color="transparent")
-        footer.pack(fill="x", padx=12, pady=8)
+        def _fill(template):
+            textbox.delete("1.0", "end")
+            textbox.insert("1.0", template)
+            textbox.focus_set()
 
-        self._quality_summary = ctk.CTkLabel(
-            footer, text="",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-        )
-        self._quality_summary.pack(side="left")
+        for label, content in self._QUICK_TEMPLATES:
+            ctk.CTkButton(
+                tpl_frame, text=label, width=88, height=28,
+                fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+                font=theme.FONT_SMALL,
+                command=lambda c=content: _fill(c),
+            ).pack(side="left", padx=4, pady=4)
 
+        result = {"text": None}
+
+        def _confirm():
+            result["text"] = textbox.get("1.0", "end").strip()
+            win.destroy()
+
+        def _cancel():
+            result["text"] = None
+            win.destroy()
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(12, 16))
         ctk.CTkButton(
-            footer,
-            text="💾  Guardar en banco",
-            command=self._save_to_bank,
-            height=34,
-            fg_color=theme.ACCENT_GREEN,
-            hover_color=theme.ACCENT_GREEN_HOVER,
+            btn_row, text="Cancelar", command=_cancel,
+            fg_color=theme.BG_TERTIARY, text_color=theme.TEXT_PRIMARY,
+            width=110, height=36,
+        ).pack(side="left")
+        ctk.CTkButton(
+            btn_row, text="✓ Procesar con este texto", command=_confirm,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
             font=("Segoe UI", 11, "bold"),
-            corner_radius=8,
+            width=240, height=36,
         ).pack(side="right")
+
+        textbox.bind("<Control-Return>", lambda e: _confirm())
+        win.wait_window()
+        return result["text"] or ""
 
     # ── Image loading ──────────────────────────────────────────────
 
@@ -299,17 +223,64 @@ class ExtractorTabMixin:
             self.toast("Carga una imagen primero", "warning")
             return
 
+        auto_mode = bool(getattr(self, "_auto_mode_var", None) and self._auto_mode_var.get())
         ref = self._ref_text.get("1.0", "end").strip()
-        logger.info("_extract: texto de referencia = %r", ref[:80])
-        if not ref:
-            logger.warning("_extract: texto de referencia vacío")
+        logger.info("_extract: auto=%s, texto de referencia = %r", auto_mode, ref[:80])
+        if not auto_mode and not ref:
+            logger.warning("_extract: texto de referencia vacío y modo manual")
             self._extract_error.configure(
-                text="⚠ Escribe el texto de referencia en el cuadro de texto de arriba"
+                text="⚠ Activa 'Modo automático' o escribe el texto de referencia"
             )
-            self.toast("Escribe el texto de referencia", "warning")
+            self.toast("Activa modo automático o escribe el texto", "warning")
             return
 
         self._extract_error.configure(text="")
+
+        # MODO AUTOMÁTICO MEJORADO: OCR-first.
+        # 1) Predecimos el texto sobre la imagen COMPLETA con TrOCR (o Tesseract
+        #    PSM 6 como fallback). Esto es muchísimo más preciso que clasificar
+        #    cada glifo aislado con tesseract single-char.
+        # 2) Usamos ese texto como reference_text para el flujo legacy, que ya
+        #    está optimizado para alinear bboxes a chars conocidos.
+        if auto_mode:
+            from core.inkcore.auto_text import predict_text_from_image
+            self._extract_status.configure(
+                text="🔎 Detectando texto en la imagen…",
+                text_color=theme.ACCENT_BLUE,
+            )
+            self.update_idletasks()
+            try:
+                predicted, source, conf = predict_text_from_image(self._image_path)
+            except Exception as exc:
+                logger.error("predict_text_from_image error: %s", exc, exc_info=True)
+                predicted, source, conf = "", "", 0.0
+            logger.info("auto-mode OCR (%s) conf=%.2f → %r",
+                        source, conf, predicted[:80])
+
+            # Si la confidence es baja o el resultado parece raro,
+            # abrimos un diálogo editable con plantillas rápidas.
+            # TrOCR falla en letras aisladas (alfabeto manuscrito en grid):
+            # devuelve "a p.a.d gr. Fig. humanization" en lugar de "a b c d…".
+            need_confirm = (
+                conf < 0.75
+                or not predicted
+                or self._looks_suspect(predicted)
+            )
+            if need_confirm:
+                self._extract_status.configure(text="", text_color=theme.TEXT_MUTED)
+                ref = self._ask_user_ref_text(predicted, conf)
+                if not ref:
+                    self._extract_error.configure(
+                        text="⚠ Extracción cancelada — sin texto de referencia"
+                    )
+                    self.toast("Cancelado", "info")
+                    return
+            else:
+                ref = predicted
+                self.toast(f"OCR ({source}) detectó: {ref[:40]}…", "info")
+
+        # Pipeline ensemble es opcional incluso en modo auto (el OCR-first ya
+        # garantiza el texto). Lo respetamos si el usuario lo activó manualmente.
         use_p = bool(self._use_pipeline_var.get())
         cfg = self._get_pipeline_config() if use_p else None
         opts = ExtractionOptions(
@@ -322,6 +293,12 @@ class ExtractorTabMixin:
             min_quality=float(self._min_quality_slider.get()) if use_p else config.MIN_GLYPH_QUALITY,
         )
         logger.info("_extract: opts=%s, iniciando hilo", opts)
+
+        # Refresca el chip para que refleje exactamente la corrida en curso
+        try:
+            self._refresh_pipeline_chip()
+        except Exception:
+            pass
 
         self._extract_progress.pack(fill="x", padx=12, pady=2)
         self._extract_progress.start()
@@ -361,12 +338,33 @@ class ExtractorTabMixin:
             gold   = sum(1 for g in glyphs if g.tier == "Gold")
             silver = sum(1 for g in glyphs if g.tier == "Silver")
             bronze = sum(1 for g in glyphs if g.tier == "Bronze")
+            line1 = (f"✓ {len(glyphs)} glifos  —  "
+                     f"🥇 Gold: {gold}  🥈 Silver: {silver}  🥉 Bronze: {bronze}")
+
+            ensemble = getattr(self._pipeline.extractor, "_last_ensemble_result", None)
+            extra = ""
+            if ensemble is not None:
+                stats = getattr(ensemble, "stats", {}) or {}
+                timings = getattr(ensemble, "timings_ms", {}) or {}
+                det_counts = stats.get("detector_counts", {})
+                det_str = ", ".join(f"{k}:{v}" for k, v in det_counts.items()) or "—"
+                discarded = stats.get("glyphs_discarded", 0)
+                total_ms = timings.get("total_ms", 0)
+                extra = (f"\nEnsemble · detectores [{det_str}] · "
+                         f"fusionados {stats.get('fused_count', 0)} · "
+                         f"descartados {discarded} · {total_ms} ms")
             self._extract_status.configure(
-                text=(f"✓ {len(glyphs)} glifos  —  "
-                      f"🥇 Gold: {gold}  🥈 Silver: {silver}  🥉 Bronze: {bronze}"),
+                text=line1 + extra,
                 text_color=theme.ACCENT_GREEN,
             )
             self.toast(f"{len(glyphs)} glifos extraídos", "success")
+
+            # Auto-abrir debug overlay si el pipeline lo generó
+            if ensemble is not None and getattr(ensemble, "debug_image_path", None):
+                try:
+                    self._open_debug_overlay(ensemble.debug_image_path)
+                except Exception as _e:
+                    logger.warning("No se pudo abrir debug overlay: %s", _e)
         else:
             self._extract_status.configure(
                 text="Sin glifos — sube brillo/contraste, o prueba sin 'Quitar líneas'",
@@ -374,99 +372,58 @@ class ExtractorTabMixin:
             )
             self.toast("Sin glifos. Revisa el log: ~/.local/share/huevonitis4/app.log", "warning")
 
-    def _show_extracted_grid(self):
-        for w in self._glyphs_scroll.winfo_children():
-            w.destroy()
-        self._glyph_photos.clear()
-        self._glyph_count_label.configure(text=f"{len(self._extracted)} glifos")
-
-        if not self._extracted:
-            ctk.CTkLabel(
-                self._glyphs_scroll, text="Sin glifos",
-                text_color=theme.TEXT_MUTED, font=theme.FONT_BODY,
-            ).pack(pady=20)
-            self._quality_summary.configure(text="")
+    def _open_debug_overlay(self, path: str):
+        if not _PIL_OK or not Path(path).exists():
             return
+        win = ctk.CTkToplevel(self)
+        win.title("Debug overlay — pipeline ensemble")
+        win.configure(fg_color=theme.BG_PRIMARY)
+        ctk.CTkLabel(
+            win, text="Verde: todos los detectores · Amarillo: parcial · Rojo: descartado",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(pady=(10, 4))
+        img = Image.open(path)
+        max_w = 1000
+        if img.width > max_w:
+            ratio = max_w / img.width
+            img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+        lbl = ctk.CTkLabel(win, image=photo, text="")
+        lbl.pack(padx=12, pady=8)
+        lbl._photo_ref = photo
+        ctk.CTkButton(
+            win, text="Cerrar", command=win.destroy,
+            fg_color=theme.BG_TERTIARY, text_color=theme.TEXT_PRIMARY, width=100,
+        ).pack(pady=(0, 12))
+        win.geometry(f"{img.width + 32}x{img.height + 100}")
 
-        avg_q = sum(g.quality_score for g in self._extracted) / len(self._extracted)
+    def _refresh_detector_chip(self) -> None:
+        """Alias retrocompatible — delega al nuevo _refresh_pipeline_chip."""
+        self._refresh_pipeline_chip()
 
-        if avg_q >= 0.75:
-            q_color = theme.ACCENT_GREEN
-            q_label = "Excelente"
-        elif avg_q >= 0.5:
-            q_color = theme.ACCENT_ORANGE
-            q_label = "Buena"
-        else:
-            q_color = theme.ACCENT_RED
-            q_label = "Baja"
-
-        self._quality_summary.configure(
-            text=f"Calidad promedio: {avg_q:.0%} ({q_label})",
-            text_color=q_color,
-        )
-
-        LOW_QUALITY = 0.4
-        cols = 8
-        current_row = None
-        for i, g in enumerate(self._extracted):
-            if i % cols == 0:
-                current_row = ctk.CTkFrame(self._glyphs_scroll, fg_color="transparent")
-                current_row.pack(fill="x", pady=2)
-            tc = self._tier_text_color(g.tier)
-            low_q = g.quality_score < LOW_QUALITY
-            cell = ctk.CTkFrame(
-                current_row,
-                fg_color=theme.CARD_BG,
-                corner_radius=6,
-                width=54, height=68,
-                border_width=1,
-                border_color=theme.ACCENT_RED if low_q else self._tier_border(g.tier),
-            )
-            cell.pack(side="left", padx=3)
-            cell.pack_propagate(False)
-
-            del_btn = ctk.CTkButton(
-                cell, text="×", width=16, height=16,
-                font=("Segoe UI", 10, "bold"),
-                fg_color="#3a1a1a", hover_color=theme.ACCENT_RED,
-                text_color=theme.ACCENT_RED, corner_radius=8,
-                command=lambda idx=i: self._delete_extracted_glyph(idx),
-            )
-            del_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-1, y=1)
-
-            photo = self._get_thumb(g.image_path, 42, 46)
-            if photo is not None:
-                ctk.CTkLabel(cell, image=photo, text="").pack(pady=(4, 0))
-            else:
-                ctk.CTkLabel(
-                    cell, text="?", font=("Segoe UI", 16),
-                    text_color=theme.TEXT_MUTED,
-                ).pack(pady=(8, 0))
-
-            ctk.CTkLabel(cell, text=g.char or "?", font=theme.FONT_SMALL, text_color=tc).pack()
-            ctk.CTkLabel(cell, text=f"{g.quality_score:.0%}",
-                         font=("", 8), text_color=theme.TEXT_MUTED).pack()
-
-    @staticmethod
-    def _tier_text_color(tier: str) -> str:
-        return {
-            "Gold":   theme.ACCENT_YELLOW,
-            "Silver": "#C0C0C0",
-            "Bronze": "#CD7F32",
-        }.get(tier, "#888")
-
-    @staticmethod
-    def _tier_border(tier: str) -> str:
-        return {
-            "Gold":   theme.ACCENT_GREEN,
-            "Silver": theme.ACCENT_ORANGE,
-            "Bronze": theme.BORDER,
-        }.get(tier, theme.BORDER)
-
-    def _delete_extracted_glyph(self, idx: int):
-        if 0 <= idx < len(self._extracted):
-            self._extracted.pop(idx)
-            self._show_extracted_grid()
+    def _refresh_pipeline_chip(self) -> None:
+        """Muestra qué detectores + labelers están activos en el ensemble."""
+        chip = getattr(self, "_detector_chip", None)
+        if chip is None:
+            return
+        try:
+            det_vars = getattr(self, "_detector_vars", {}) or {}
+            lab_vars = getattr(self, "_labeler_vars", {}) or {}
+            dets = [name for name, var in det_vars.items() if var.get()]
+            labs = [name for name, var in lab_vars.items() if var.get()]
+            if not dets and not labs:
+                # Fallback al detector configurado (compat flow legacy)
+                det_name = getattr(config, "GLYPH_DETECTOR", "classic_cv")
+                chip.configure(text=f"  ⚙ {det_name}  ")
+                return
+            parts = []
+            if dets:
+                parts.append("D:" + "+".join(d.replace("_labeler", "").replace("_det", "") for d in dets))
+            if labs:
+                parts.append("L:" + "+".join(l.replace("_labeler", "") for l in labs))
+            chip.configure(text="  ⚙ " + "  ".join(parts) + "  ")
+        except Exception:
+            pass
 
     def _save_to_bank(self):
         if not self._extracted:

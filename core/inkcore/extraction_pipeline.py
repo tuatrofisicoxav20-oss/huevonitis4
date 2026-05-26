@@ -6,10 +6,8 @@ Configurable por PipelineConfig; no rompe el flujo legacy si use_pipeline=False.
 from __future__ import annotations
 
 import logging
-import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
 
 import config as _config
@@ -34,6 +32,20 @@ class PipelineConfig:
 
     labeler_batch_size: int = 32
     debug_overlay: bool = False
+
+    # Modo automático: si auto_label=True y labelers está vacío, inyecta
+    # los labelers disponibles (trocr si está, si no tesseract). Cuando se usa
+    # sin reference_text esto es lo que clasifica cada glifo extraído.
+    auto_label: bool = False
+    # Si True, descarta glifos cuyo predicted_char no sea letra/dígito
+    # (filtra ruido: líneas, manchas, puntuación que el detector recoja).
+    letters_only: bool = False
+    # Aspect ratio (w/h) admitido para considerar un blob "glifo".
+    # Por debajo del mínimo es línea vertical; por arriba del máximo es línea horizontal.
+    min_aspect_ratio: float = 0.12
+    max_aspect_ratio: float = 6.0
+    # Cobertura mínima de tinta dentro del bbox detectado (descarta manchas huecas).
+    min_ink_coverage: float = 0.02
 
 
 @dataclass
@@ -69,7 +81,21 @@ class GlyphExtractionPipeline:
 
     def _load_labelers(self) -> None:
         from core.inkcore import glyph_labelers
-        for name in self.config.labelers:
+        names = list(self.config.labelers)
+        # Modo automático: si no hay labelers explícitos, inyectar los que existan.
+        # Preferimos TrOCR (handwriting-aware); caemos a tesseract si no está.
+        if self.config.auto_label and not names:
+            avail = glyph_labelers.get_available()
+            if avail.get("trocr_labeler"):
+                names.append("trocr_labeler")
+            if avail.get("tesseract_labeler"):
+                names.append("tesseract_labeler")
+            if not names:
+                logger.warning(
+                    "auto_label=True pero no hay labelers instalados; "
+                    "los glifos saldrán sin clasificar."
+                )
+        for name in names:
             l = glyph_labelers.get_labeler(name)
             if l.available:
                 self.labelers.append(l)
@@ -124,7 +150,50 @@ class GlyphExtractionPipeline:
                      iou_threshold=self.config.iou_dedup_threshold)
         stats["fused_count"] = len(fused)
 
-        # 4. Recortar crops PIL de cada bbox fusionado
+        # 3.5. Filtrar bboxes que claramente NO son letras (líneas, manchas)
+        min_ar = self.config.min_aspect_ratio
+        max_ar = self.config.max_aspect_ratio
+        min_cov = self.config.min_ink_coverage
+        kept: list[FusedBBox] = []
+        dropped_shape = 0
+        dropped_cov = 0
+        for fb in fused:
+            if fb.h <= 0 or fb.w <= 0:
+                dropped_shape += 1
+                continue
+            ar = fb.w / fb.h
+            if ar < min_ar or ar > max_ar:
+                # Línea vertical/horizontal o blob aberrante
+                dropped_shape += 1
+                continue
+            y1 = max(0, fb.y)
+            y2 = min(h_img, fb.y + fb.h)
+            x1 = max(0, fb.x)
+            x2 = min(w_img, fb.x + fb.w)
+            if x2 <= x1 or y2 <= y1:
+                dropped_shape += 1
+                continue
+            sub_mask = clean[y1:y2, x1:x2]
+            cov = float(np.sum(sub_mask > 0)) / max(1, sub_mask.size)
+            if cov < min_cov:
+                dropped_cov += 1
+                continue
+            kept.append(fb)
+        if dropped_shape or dropped_cov:
+            logger.info(
+                "Pre-label filter: %d/%d kept (descartados shape=%d, cov=%d)",
+                len(kept), len(fused), dropped_shape, dropped_cov,
+            )
+        stats["dropped_shape"] = dropped_shape
+        stats["dropped_coverage"] = dropped_cov
+        stats["kept_after_filter"] = len(kept)
+        fused = kept
+
+        # 4. Recortar crops PIL de cada bbox fusionado.
+        # Mejorado: usamos la máscara limpia (sin líneas/fondo), refinamos
+        # la región para capturar diacríticos (puntos de i, acentos, ñ) y
+        # descenders (g, p, q, y, j), aplicamos tight_crop y convertimos
+        # a RGBA con anti-aliasing — todo del extractor legacy.
         try:
             from PIL import Image as _PIL
         except ImportError:
@@ -134,25 +203,67 @@ class GlyphExtractionPipeline:
         crops: list["_PIL.Image"] = []
         valid_fused: list[FusedBBox] = []
         for fb in fused:
-            x1 = max(0, fb.x - PAD)
-            y1 = max(0, fb.y - PAD)
-            x2 = min(w_img, fb.x + fb.w + PAD)
-            y2 = min(h_img, fb.y + fb.h + PAD)
-            crop_bgr = img[y1:y2, x1:x2]
-            if crop_bgr.size == 0:
+            # Banda horizontal con margen vertical extra para que
+            # _refine_char_region pueda detectar diacríticos arriba y
+            # descenders abajo del bbox crudo del detector.
+            band_top = max(0, fb.y - int(fb.h * 0.45))
+            band_bot = min(h_img, fb.y + fb.h + int(fb.h * 0.30))
+            if band_bot <= band_top:
                 continue
-            crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-            crops.append(_PIL.fromarray(crop_rgb).convert("RGBA"))
+            line_mask = clean[band_top:band_bot, :]
+
+            # Refinar incluyendo diacríticos/descenders (coords dentro de line_mask)
+            gx1, gy1, gx2, gy2 = _ext._refine_char_region(
+                line_mask, fb.x, fb.x + fb.w,
+            )
+
+            y1 = max(0, band_top + gy1 - PAD)
+            y2 = min(h_img, band_top + gy2 + PAD)
+            x1 = max(0, gx1 - PAD)
+            x2 = min(w_img, gx2 + PAD)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            mask_crop = clean[y1:y2, x1:x2]
+            if mask_crop.size == 0:
+                continue
+
+            tight = _ext._tight_crop(mask_crop, padding=3)
+            if tight is None:
+                continue
+
+            pil_img = _ext._to_rgba_smooth(tight)
+            crops.append(pil_img)
             valid_fused.append(fb)
 
-        # 5. Etiquetar en batch
+        # 5. Etiquetar en batch.
+        # Los crops guardados son RGBA con tinta blanca (para mostrarse sobre
+        # tema oscuro). Tesseract y TrOCR esperan tinta NEGRA sobre fondo
+        # BLANCO con contexto blanco alrededor (Tesseract descarta chars en
+        # el borde). Convertimos antes de etiquetar.
+        def _rgba_to_label_rgb(pil_rgba, border: int = 8):
+            arr = np.array(pil_rgba.convert("RGBA"))
+            alpha = arr[..., 3].astype(np.float32) / 255.0
+            # alpha alto = tinta densa → píxel oscuro
+            intensity = ((1.0 - alpha) * 255.0).astype(np.uint8)
+            rgb_arr = np.stack([intensity, intensity, intensity], axis=-1)
+            pil = _PIL.fromarray(rgb_arr, mode="RGB")
+            # Margen blanco — clave para que Tesseract no descarte el char.
+            new_w = pil.width + border * 2
+            new_h = pil.height + border * 2
+            bg = _PIL.new("RGB", (new_w, new_h), (255, 255, 255))
+            bg.paste(pil, (border, border))
+            return bg
+
+        label_crops = [_rgba_to_label_rgb(c) for c in crops]
+
         t_label = time.perf_counter()
         all_preds: dict[str, list[tuple[str, float]]] = {}
         for labeler in self.labelers:
             preds: list[tuple[str, float]] = []
             bs = self.config.labeler_batch_size
-            for i in range(0, len(crops), bs):
-                batch = crops[i:i + bs]
+            for i in range(0, len(label_crops), bs):
+                batch = label_crops[i:i + bs]
                 try:
                     preds.extend(labeler.label_batch(batch))
                 except Exception as exc:
@@ -161,9 +272,11 @@ class GlyphExtractionPipeline:
             all_preds[labeler.name] = preds
         timings["label_ms"] = int((time.perf_counter() - t_label) * 1000)
 
-        # 6. Votar + quality scoring
+        # 6. Votar + quality scoring (usa la versión rica _assess_quality
+        # del extractor, que pondera cobertura asimétrica, ancho de trazo
+        # por distance transform, borde, alineación e ink absoluto).
         from core.inkcore.glyph_labelers.voting import vote
-        from core.inkcore.quality import assess_glyph, compute_final_quality
+        from core.inkcore.quality import compute_final_quality
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -184,10 +297,28 @@ class GlyphExtractionPipeline:
             else:
                 char, label_conf = "?", None
 
+            # Tesseract puede devolver "" o "ab" — normalizamos a 1 char.
+            char = (char or "?").strip()
+            if not char:
+                char = "?"
+            char = char[0]
+
             if (label_conf is not None
                     and label_conf < self.config.min_label_confidence):
                 debug_discarded.append((fb, crop, char, label_conf))
                 continue
+
+            # letters_only: descarta cualquier predicción que no sea letra del
+            # alfabeto español (incluye á é í ó ú ñ y dígitos 0-9). Útil cuando
+            # el detector recoge basura no-textual y el labeler la confirma como
+            # punctuación/símbolo.
+            if self.config.letters_only:
+                allowed = "abcdefghijklmnñopqrstuvwxyzáéíóúABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚ0123456789"
+                # Si no hay labeler, char puede ser "?" → conservar (tratar como
+                # candidato sin clasificar, no como ruido)
+                if char and char != "?" and char not in allowed:
+                    debug_discarded.append((fb, crop, char, label_conf))
+                    continue
 
             safe = char if (char.isalnum() or char == "?") else f"punct_{ord(char)}"
             out_path = temp_dir / f"{safe}_{i:04d}.png"
@@ -196,8 +327,11 @@ class GlyphExtractionPipeline:
             except Exception:
                 continue
 
-            quality = assess_glyph(str(out_path))
-            base_q = quality.get("score", 0.0)
+            # Quality rica del extractor (sobre el PIL en memoria, sin re-leer disco).
+            # align_score=agreement_score → glifos vistos por más detectores
+            # ganan un pequeño boost al ponderar la alineación interna.
+            quality = _ext._assess_quality(crop, align_score=fb.agreement_score)
+            base_q = quality.get("quality_score", 0.0)
             final_q = compute_final_quality(
                 base_quality=base_q,
                 label_confidence=label_conf,
@@ -215,7 +349,7 @@ class GlyphExtractionPipeline:
                 image_path=str(out_path),
                 quality_score=round(final_q, 3),
                 tier=tier,
-                ink_coverage=round(quality.get("ink_coverage", 0.0), 3),
+                ink_coverage=round(quality.get("coverage", 0.0), 3),
                 index=i,
                 predicted_char=char if self.labelers else None,
                 label_confidence=label_conf,
@@ -257,7 +391,6 @@ def _generate_debug_overlay(
     """Genera PNG con overlay de cajas aceptadas y descartadas."""
     try:
         import cv2
-        import numpy as np
     except ImportError:
         return None
 

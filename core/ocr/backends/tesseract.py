@@ -19,7 +19,6 @@ try:
 except ImportError:
     _CV2_OK = False
 
-import config
 from core.ocr.base import OCRBackend
 
 

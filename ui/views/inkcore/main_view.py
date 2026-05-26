@@ -20,9 +20,14 @@ from ui import theme
 from ui.views.base_view import BaseView
 from ui.views.inkcore.bank_tab import BankTabMixin
 from ui.views.inkcore.bulk_capture_tab import BulkCaptureTabMixin
+from ui.views.inkcore.bulk_capture_tab_filters import BulkCaptureFiltersMixin
+from ui.views.inkcore.bulk_capture_tab_grid import BulkCaptureGridMixin
 from ui.views.inkcore.extractor_tab import ExtractorTabMixin
+from ui.views.inkcore.extractor_tab_build import ExtractorTabBuildMixin
+from ui.views.inkcore.extractor_tab_grid import ExtractorTabGridMixin
 from ui.views.inkcore.pipeline_panel import PipelinePanelMixin
 from ui.views.inkcore.review_tab import ReviewTabMixin
+from ui.views.inkcore.review_tab_row import ReviewTabRowMixin
 from ui.views.inkcore.writer_tab import WriterTabMixin
 
 logger = logging.getLogger(__name__)
@@ -36,11 +41,16 @@ except ImportError:
 
 class InkCoreView(
     PipelinePanelMixin,
+    ExtractorTabBuildMixin,
     ExtractorTabMixin,
+    ExtractorTabGridMixin,
     BulkCaptureTabMixin,
+    BulkCaptureGridMixin,
+    BulkCaptureFiltersMixin,
     BankTabMixin,
     WriterTabMixin,
     ReviewTabMixin,
+    ReviewTabRowMixin,
     BaseView,
 ):
     def __init__(self, parent, app, **kwargs):
@@ -116,6 +126,7 @@ class InkCoreView(
 
     def on_show(self):
         self._reload_and_refresh_all()
+        self._refresh_detector_chip()
         self._maybe_load_pending_text()
 
     def _maybe_load_pending_text(self) -> None:

@@ -1,9 +1,6 @@
 """A10: tests de regresión para el cache key con backend + opciones."""
-import os
 import pickle
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 def _make_fake_doc(text: str = "hello"):
@@ -16,7 +13,7 @@ def _make_fake_doc(text: str = "hello"):
 def test_cache_key_diferente_por_backend(tmp_path):
     """Documentos procesados con distinto backend NO comparten entrada de caché."""
     with patch("config.OCR_CACHE_DIR", tmp_path):
-        from core.ocr.result_cache import OCRResultCache, _cache_key
+        from core.ocr.result_cache import _cache_key
 
         # Mismo archivo, misma firma de opciones, backends distintos
         src = tmp_path / "fake.png"

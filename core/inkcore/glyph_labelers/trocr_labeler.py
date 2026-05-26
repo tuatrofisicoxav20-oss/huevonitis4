@@ -85,6 +85,9 @@ class TrOCRLabeler(GlyphLabeler):
                 return_dict_in_generate=True,
                 output_scores=True,
                 max_new_tokens=8,
+                num_beams=1,
+                do_sample=False,
+                early_stopping=True,
             )
         text = self._processor.batch_decode(
             out.sequences, skip_special_tokens=True

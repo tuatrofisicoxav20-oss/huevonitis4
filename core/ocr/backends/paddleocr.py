@@ -88,7 +88,6 @@ class PaddleOCRBackend(OCRBackend):
         if not path.exists():
             return []
         try:
-            import numpy as np
             result = self._call_ocr(str(path))
             if not result or not result[0]:
                 return []

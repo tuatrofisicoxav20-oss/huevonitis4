@@ -5,7 +5,6 @@ Estrategias: majority, highest_conf, consensus.
 from __future__ import annotations
 
 import logging
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 

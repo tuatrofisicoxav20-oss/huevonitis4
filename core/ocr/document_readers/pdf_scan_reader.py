@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
@@ -108,41 +109,57 @@ def read_pdf_scan(
                         processed += len(batch)
                         continue
 
-                    # Los índices en imgs corresponden a páginas first..last
+                    # Guardar todas las páginas del batch a disco primero,
+                    # luego correr OCR en paralelo (4 threads, tantos como
+                    # páginas hay en el batch). El backend OCR libera el GIL
+                    # en sus llamadas C, así que la paralelización es real.
                     page_set = set(batch)
+                    saved_pages: list[tuple[int, str]] = []  # (real_page_1b, path)
                     for local_i, img in enumerate(imgs):
                         real_page_1b = first + local_i
                         if real_page_1b not in page_set:
                             img.close()
-                            del img
                             continue
                         if cancel_event and cancel_event.is_set():
                             img.close()
-                            del img
                             break
-
-                        processed += 1
-                        if progress_cb:
-                            progress_cb(
-                                processed / total,
-                                f"OCR página {real_page_1b}…"
-                            )
-
                         img_path_str = str(
                             Path(tmpdir) / f"page_{real_page_1b:04d}.png"
                         )
                         img.save(img_path_str, "PNG")
                         img.close()
-                        del img
+                        saved_pages.append((real_page_1b, img_path_str))
+                    del imgs
 
+                    if not saved_pages:
+                        continue
+
+                    progress_lock = threading.Lock()
+                    page_results: list[DocumentPage] = [None] * len(saved_pages)
+
+                    def _ocr_one(idx_page):
+                        idx, (real_page_1b, img_path_str) = idx_page
+                        if cancel_event and cancel_event.is_set():
+                            return
                         page_doc = DocumentPage(
-                            page_number=real_page_1b, source_path=str(path)
+                            page_number=real_page_1b, source_path=str(path),
                         )
                         _ocr_page(page_doc, img_path_str, ocr_backend, lang,
                                   detect_handwriting)
-                        doc.pages.append(page_doc)
+                        page_results[idx] = page_doc
+                        if progress_cb:
+                            with progress_lock:
+                                nonlocal processed
+                                processed += 1
+                                progress_cb(processed / total,
+                                            f"OCR página {real_page_1b}…")
 
-                    del imgs
+                    with ThreadPoolExecutor(max_workers=len(saved_pages)) as ex:
+                        list(ex.map(_ocr_one, enumerate(saved_pages)))
+
+                    for page_doc in page_results:
+                        if page_doc is not None:
+                            doc.pages.append(page_doc)
 
     except Exception as exc:
         logger.error("pdf_scan_reader: error en '%s': %s", pdf_path, exc,

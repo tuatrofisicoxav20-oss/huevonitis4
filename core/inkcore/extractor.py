@@ -68,7 +68,7 @@ class ExtractionOptions:
     max_per_char: int = 10
     # Pipeline ensemble (B8) — False por defecto para mantener backward compat
     use_pipeline: bool = False
-    pipeline_config: "object | None" = None  # type: PipelineConfig | None
+    pipeline_config: "object | None" = None
 
 
 class BBox:
@@ -92,27 +92,12 @@ class BBox:
 
 _BBox = BBox  # backward compat alias
 
-# ── Hash perceptual ────────────────────────────────────────────────
-def avg_hash(img: "Image.Image", size: int = 16) -> str:
-    gray = img.convert("L").resize((size, size), Image.Resampling.LANCZOS)
-    import numpy as _np
-    px = _np.asarray(gray).flatten().tolist()
-    avg = sum(px) / max(1, len(px))
-    return "".join("1" if p >= avg else "0" for p in px)
-
-
-def hamming(a: str, b: str) -> int:
-    return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
-
-
-def _dual_hash(img: "Image.Image") -> tuple[str, str]:
-    return avg_hash(img, 8), avg_hash(img, 16)
-
-
-def _dual_dist(a: tuple[str, str], b: tuple[str, str]) -> float:
-    h8 = hamming(a[0], b[0])          # 0-64
-    h16 = hamming(a[1], b[1]) / 4.0   # 0-64 normalizado
-    return h8 * 0.6 + h16 * 0.4
+# ── Hash perceptual (delegado a extractor_hashing) ─────────────────
+from core.inkcore.extractor_hashing import (
+    avg_hash, hamming,
+    dual_hash as _dual_hash,
+    dual_dist as _dual_dist,
+)
 
 
 # ── Extractor principal ────────────────────────────────────────────
@@ -124,6 +109,9 @@ class GlyphExtractor:
         from core.inkcore.extractor_segments import SegmentDetector
         self._preprocessor = ImagePreprocessor()
         self._seg_detector = SegmentDetector()
+        # Última corrida del pipeline ensemble (None si solo se usó legacy).
+        # Permite a la UI leer stats, timings y debug_image_path tras extraer.
+        self._last_ensemble_result: "object | None" = None
         # Detector de glifos opcional — se inicializa desde config.GLYPH_DETECTOR.
         self._detector = None
         try:
@@ -149,6 +137,8 @@ class GlyphExtractor:
         options: ExtractionOptions | None = None,
     ) -> list[GlyphEntry]:
         opts = options or ExtractionOptions()
+        # Reiniciar metadata del ensemble en cada extracción nueva.
+        self._last_ensemble_result = None
         if opts.use_pipeline:
             try:
                 from core.inkcore.extraction_pipeline import (
@@ -157,6 +147,7 @@ class GlyphExtractor:
                 cfg = opts.pipeline_config or PipelineConfig()
                 pipeline = GlyphExtractionPipeline(cfg)
                 result = pipeline.extract(image_path, reference_text)
+                self._last_ensemble_result = result
                 return result.glyphs
             except Exception as exc:
                 logger.error("Pipeline ensemble falló, cayendo a legacy: %s", exc,
@@ -174,6 +165,81 @@ class GlyphExtractor:
         except Exception as exc:
             logger.error(f"Error en extracción: {exc}", exc_info=True)
             return []
+
+    def compare_strategies(
+        self,
+        image_path: str,
+        reference_text: str,
+        options: ExtractionOptions | None = None,
+    ) -> dict:
+        """Ejecuta las 5 estrategias de segmentación sobre la primera línea detectada.
+
+        Útil para tuning/debug desde la UI: la respuesta es el dict crudo de
+        `_test_all_strategies` con un campo extra `_meta` describiendo qué
+        línea se usó (índice, ancho, ref) y cualquier error fatal.
+
+        Devuelve {} si no se pudo preprocesar o no hay línea/ref aprovechable.
+        """
+        meta: dict = {}
+        if not CV2_OK or not PIL_OK or not Path(image_path).exists():
+            return {"_meta": {"error": "cv2/Pillow no disponibles o imagen inexistente"}}
+        try:
+            opts = options or ExtractionOptions()
+            img = cv2.imread(image_path)
+            if img is None:
+                return {"_meta": {"error": "no se pudo leer la imagen"}}
+            img = self._apply_manual(img, opts)
+            img = self._scale(img)
+            img = self._autocrop(img)
+            img, _ = self._deskew(img)
+            gray, _, clean = self._full_preprocess(img, opts)
+            line_boxes = self._find_line_boxes(clean)
+            if not line_boxes:
+                return {"_meta": {"error": "no se detectaron líneas en la imagen"}}
+
+            ref_lines = self._prepare_ref_lines(reference_text, line_boxes)
+            best_idx = 0
+            for i, ln in enumerate(ref_lines):
+                if ln and len(ln.replace(" ", "")) >= 2:
+                    best_idx = i
+                    break
+            if best_idx >= len(ref_lines):
+                return {"_meta": {"error": "ninguna línea de referencia válida"}}
+
+            lb = line_boxes[best_idx]
+            ref_line = ref_lines[best_idx]
+            chars = [ch for ch in ref_line if ch != " "]
+            if len(chars) < 2:
+                return {"_meta": {"error": f"línea {best_idx} con muy pocos chars"}}
+
+            line_mask = clean[lb.y:lb.y + lb.h, lb.x:lb.x + lb.w]
+            band_binary = line_mask
+            band_img = img[lb.y:lb.y + lb.h, lb.x:lb.x + lb.w]
+
+            vpp = np.sum(band_binary > 0, axis=0).astype(np.float32)
+            ink_cols = np.where(vpp > 0)[0]
+            if len(ink_cols) == 0:
+                return {"_meta": {"error": "banda sin tinta"}}
+            x_min = int(ink_cols[0])
+            x_max = int(ink_cols[-1]) + 1
+
+            results = self._test_all_strategies(
+                band_img, band_binary, x_min, x_max,
+                len(chars), chars, line_mask,
+            )
+            meta = {
+                "line_index": best_idx,
+                "line_count": len(line_boxes),
+                "line_w": int(lb.w),
+                "line_h": int(lb.h),
+                "ref_line": ref_line,
+                "n_chars": len(chars),
+            }
+            results["_meta"] = meta
+            return results
+        except Exception as exc:
+            logger.error("compare_strategies error: %s", exc, exc_info=True)
+            return {"_meta": {"error": str(exc)}}
 
     def get_preprocessed_preview(
         self,
@@ -487,626 +553,50 @@ class GlyphExtractor:
     def _find_line_boxes(self, mask: np.ndarray) -> list[BBox]:
         return self._seg_detector.find_line_boxes(mask)
 
-    @staticmethod
-    def _split_tall_band(
-        band: list[int], proj: np.ndarray, img_h: int
-    ) -> list[list[int]]:
-        from core.inkcore.extractor_segments import SegmentDetector
-        return SegmentDetector.split_tall_band(band, proj, img_h)
-
-    # ── Detección asistida por detector alternativo ───────────────
+    # ── Hints OCR delegados a extractor_ocr_hints ────────────────
 
     def _get_detector_boundaries(self, line_mask: np.ndarray) -> list[int]:
-        """Fronteras X de caracteres via el detector alternativo (CRAFT / Paddle).
-
-        Convierte la máscara binaria a BGR, llama al detector y extrae los
-        bordes izquierdo/derecho de cada bbox como hints para _align_pos.
-        Devuelve lista vacía si el detector no está activo o falla.
-        """
-        if self._detector is None or not CV2_OK:
-            return []
-        try:
-            line_bgr = cv2.cvtColor(line_mask, cv2.COLOR_GRAY2BGR)
-            boxes = self._detector.detect(line_bgr)
-            if not boxes:
-                return []
-            boundaries: set[int] = set()
-            w = line_mask.shape[1]
-            for b in boxes:
-                if 0 <= b.x < w:
-                    boundaries.add(b.x)
-                if 0 < b.x2 <= w:
-                    boundaries.add(b.x2)
-            result = sorted(boundaries)
-            if result:
-                logger.debug(
-                    f"Detector '{self._detector.name}': "
-                    f"{len(result)} fronteras en línea de {w}px"
-                )
-            return result
-        except Exception as exc:
-            logger.debug(f"_get_detector_boundaries error: {exc}")
-            return []
-
-    # ── Detección asistida por IA (Tesseract) ─────────────────────
+        from core.inkcore.extractor_ocr_hints import get_detector_boundaries
+        return get_detector_boundaries(self._detector, line_mask)
 
     def _tesseract_boundaries(self, line_mask: np.ndarray) -> list[int]:
-        """Fronteras X de caracteres via Tesseract (varias estrategias).
+        from core.inkcore.extractor_ocr_hints import tesseract_boundaries
+        return tesseract_boundaries(line_mask)
 
-        • Escala a 3x la altura original (mín. 200 px) — Tesseract necesita
-          texto grande para operar con fiabilidad en escritura manual.
-        • Añade borde blanco amplio — Tesseract descarta caracteres en los
-          bordes; el borde evita esto.
-        • Prueba PSM 7 (línea de texto) y PSM 13 (línea cruda, sin léxico).
-        • Toma la UNIÓN de todas las fronteras detectadas por ambos modos.
-        • No nos interesa QUÉ letra detectó Tesseract, solo DÓNDE están
-          los bordes derecho/izquierdo de cada carácter detectado.
-        """
-        if not TESSERACT_OK or not CV2_OK or not PIL_OK:
-            return []
-        try:
-            h, w = line_mask.shape[:2]
-
-            # Escalar agresivamente: mínimo 200 px de altura, máximo 3x
-            target_h = max(200, h * 3)
-            scale = target_h / max(1, h)
-            scaled_w = int(w * scale)
-            lm = cv2.resize(
-                line_mask, (scaled_w, target_h),
-                interpolation=cv2.INTER_LINEAR,
-            )
-            # Binarizar limpiamente para Tesseract
-            _, lm = cv2.threshold(lm, 127, 255, cv2.THRESH_BINARY)
-
-            # Borde blanco amplio — Tesseract necesita contexto alrededor del texto
-            border = 50
-            lm = cv2.copyMakeBorder(
-                lm, border, border, border, border,
-                cv2.BORDER_CONSTANT, value=0,
-            )
-
-            # Invertir: Tesseract espera tinta oscura sobre fondo claro
-            tess_in = 255 - lm
-            pil_in = Image.fromarray(tess_in, mode="L")
-
-            all_boundaries: set[int] = set()
-
-            # Probar múltiples modos de segmentación
-            import io as _io
-            import sys as _sys
-            for psm in [7, 13]:
-                try:
-                    # Bug fix #5: suppress Tesseract stderr warnings
-                    _old_stderr = _sys.stderr
-                    _sys.stderr = _io.StringIO()
-                    try:
-                        raw = pytesseract.image_to_boxes(
-                            pil_in,
-                            lang="spa",
-                            config=f"--psm {psm} --oem 3",
-                        )
-                    finally:
-                        _sys.stderr = _old_stderr
-                    for ln in raw.strip().split("\n"):
-                        parts = ln.split()
-                        if len(parts) < 5:
-                            continue
-                        try:
-                            bx1 = int(parts[1])
-                            bx2 = int(parts[3])
-                        except ValueError:
-                            continue
-                        # Convertir coordenadas escaladas+bordeadas a originales
-                        orig_x1 = max(0, int((bx1 - border) / scale))
-                        orig_x2 = max(0, int((bx2 - border) / scale))
-                        if orig_x2 > orig_x1 and orig_x1 < w:
-                            all_boundaries.add(min(orig_x1, w))
-                            all_boundaries.add(min(orig_x2, w))
-                except Exception:
-                    continue
-
-            result = sorted(all_boundaries)
-            if result:
-                logger.info(
-                    f"Tesseract: {len(result)} fronteras "
-                    f"(PSM 7+13, escala\u00d7{scale:.1f})"
-                )
-            return result
-        except Exception as e:
-            logger.debug(f"Tesseract boundary error: {e}")
-            return []
-
-    # ── Alineación por masa de tinta + VPP + IA ───────────────────
-
-    def _align_inkflow(
-        self, vpp: np.ndarray, x_min: int, x_max: int, chars: list[str]
-    ) -> list[int]:
-        """Fronteras por masa de tinta acumulada.
-
-        Principio: los caracteres más anchos y con trazos más gruesos generan
-        más píxeles de tinta. Sumando la tinta de izquierda a derecha y
-        dividiendo proporcionalmente a los factores _wf(), obtenemos fronteras
-        que se auto-calibran a la escritura real del usuario, sin asumir
-        espaciados fijos.
-
-        Devuelve N+1 posiciones (primera = x_min, última = x_max).
-        """
-        n = len(chars)
-        span = vpp[x_min:x_max].astype(np.float64)
-        total_ink = max(1e-6, float(np.sum(span)))
-        cumink = np.cumsum(span)
-
-        total_wf = max(0.01, sum(self._wf(c) for c in chars))
-        # Mínimo ancho por región: 15 % del ancho promedio
-        min_cw = max(1, int((x_max - x_min) / n * 0.15))
-
-        bounds: list[int] = [x_min]
-        cum_wf = 0.0
-        for i, ch in enumerate(chars[:-1]):
-            cum_wf += self._wf(ch)
-            target = cum_wf / total_wf * total_ink
-            prev = bounds[-1]
-
-            # Buscar índice donde la tinta acumulada alcanza el objetivo
-            lo_idx = max(0, prev + min_cw - x_min)
-            if lo_idx >= len(cumink):
-                # Fallback: distribuir el espacio restante proporcionalmente
-                # entre los caracteres que quedan (incluido el actual)
-                remaining_chars = chars[i:]
-                remaining_wf = sum(self._wf(c) for c in remaining_chars)
-                remaining_wf = max(0.01, remaining_wf)
-                space_left = max(0, x_max - prev)
-                frac = self._wf(ch) / remaining_wf
-                step = max(min_cw, int(space_left * frac))
-                bounds.append(min(prev + step, x_max - (n - 1 - i)))
-                continue
-            idx = int(np.searchsorted(cumink[lo_idx:], target)) + lo_idx
-            idx = min(idx, len(span) - max(1, n - 1 - i))
-            x = x_min + idx
-            x = max(prev + min_cw, min(x, x_max - (n - 1 - i)))
-            bounds.append(x)
-
-        bounds.append(x_max)
-        # Garantizar orden estrictamente creciente
-        for i in range(1, len(bounds)):
-            if bounds[i] <= bounds[i - 1]:
-                bounds[i] = bounds[i - 1] + 1
-        return bounds
+    # ── Alineación delegada a extractor_alignment ────────────────
 
     @staticmethod
-    def _wf(ch: str) -> float:
-        """Factor de ancho esperado por carácter.
-
-        Tabla calibrada para escritura manual española.
-        Valores más específicos → mejor distribución de fronteras.
-        """
-        if ch in ".,;:!¡|`'\"":
-            return 0.28
-        if ch in "iltI1íì":
-            return 0.40
-        if ch in "jr":
-            return 0.50
-        if ch in "fFtT":
-            return 0.60
-        if ch in "scCeéèêëS":
-            return 0.63
-        if ch in "nuvbpkxyzñhúùü":
-            return 0.72
-        if ch in "adgqáàâ":
-            return 0.80
-        if ch in "oóòôöO":
-            return 0.85
-        if ch in "mwMW":
-            return 1.30
-        if ch.isupper():
-            return 0.92
-        if ch.isdigit():
-            return 0.73
-        return 0.78
-
-    # [testing] ── Estrategias alternativas de segmentación ──────────
-
-    def _align_vpp_only(
-        self, vpp: np.ndarray, x_min: int, x_max: int, n: int
-    ) -> list[int]:
-        """A. VPP puro con selección por prominencia.
-
-        Normaliza el VPP, detecta todos los valles (mínimos locales por debajo
-        de un umbral), y selecciona los n-1 mejores valles como fronteras.
-        La puntuación de un valle = profundidad relativa al máximo (prominencia).
-        """
-        if n <= 1:
-            return [x_min, x_max]
-
-        span = vpp[x_min:x_max].astype(np.float64)
-        if len(span) == 0:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        # Suavizar para estabilizar mínimos
-        ks = max(3, int((x_max - x_min) / max(1, n) * 0.15))
-        ks = ks if ks % 2 == 1 else ks + 1
-        smoothed = cv2.GaussianBlur(
-            span.astype(np.float32).reshape(1, -1), (1, ks), 0
-        ).flatten().astype(np.float64)
-
-        vmax = float(np.max(smoothed)) if len(smoothed) > 0 else 1.0
-        vmax = max(vmax, 1.0)
-
-        # Encontrar todos los mínimos locales
-        valleys: list[tuple[float, int]] = []  # (score, abs_x)
-        L = len(smoothed)
-        for i in range(1, L - 1):
-            if smoothed[i] <= smoothed[i - 1] and smoothed[i] <= smoothed[i + 1]:
-                left_peak = float(np.max(smoothed[:i])) if i > 0 else smoothed[i]
-                right_peak = float(np.max(smoothed[i + 1:])) if i < L - 1 else smoothed[i]
-                depth = min(left_peak - smoothed[i], right_peak - smoothed[i])
-                prominence = depth / vmax
-                if prominence > 0.05:  # filtrar ruido
-                    valleys.append((prominence, x_min + i))
-
-        if not valleys:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        # Seleccionar los n-1 mejores valles por prominencia
-        valleys.sort(key=lambda v: -v[0])
-        chosen = sorted([v[1] for v in valleys[:n - 1]])
-
-        bounds = [x_min, *chosen, x_max]
-        for i in range(1, len(bounds)):
-            if bounds[i] <= bounds[i - 1]:
-                bounds[i] = bounds[i - 1] + 1
-        return bounds
-
-    def _align_uniform(self, x_min: int, x_max: int, n: int) -> list[int]:
-        """B. División uniforme de ancho igual. Línea base de comparación."""
-        if n <= 0:
-            return [x_min, x_max]
-        return [int(x_min + (x_max - x_min) * i / n) for i in range(n + 1)]
-
-    def _align_dp_energy(
-        self, vpp: np.ndarray, x_min: int, x_max: int, n: int
-    ) -> list[int]:
-        """C. Minimización de energía por programación dinámica O(L·k).
-
-        Usa backpointers enteros (en vez de copiar listas) → memoria O(L·k)
-        y running-minimum → tiempo O(L·k) en vez de O(L²·k).
-        """
-        if n <= 1:
-            return [x_min, x_max]
-
-        span = vpp[x_min:x_max].astype(np.float64)
-        L = len(span)
-        if L == 0:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        ks = max(3, int(L / max(1, n) * 0.15))
-        ks = ks if ks % 2 == 1 else ks + 1
-        cost = cv2.GaussianBlur(
-            span.astype(np.float32).reshape(1, -1), (1, ks), 0
-        ).flatten().astype(np.float64)
-
-        min_gap = max(1, int(L / n * 0.15))
-        num_cuts = n - 1
-        INF = float("inf")
-
-        # dp[i] = costo mínimo para colocar el corte actual en posición i
-        # ptr[k, i] = posición del corte (k-1) en el camino óptimo que termina en i
-        dp = np.full(L, INF, dtype=np.float64)
-        ptr = np.full((num_cuts, L), -1, dtype=np.int32)
-
-        # k=1: primer corte — sin backpointer necesario
-        i_lo = min_gap
-        i_hi = L - (num_cuts - 1) * min_gap
-        for i in range(i_lo, i_hi):
-            dp[i] = cost[i]
-
-        # k=2..num_cuts: running minimum para O(L) amortizado por corte
-        for k in range(2, num_cuts + 1):
-            new_dp = np.full(L, INF, dtype=np.float64)
-            run_min_val = INF
-            run_min_pos = -1
-            j_cursor = (k - 1) * min_gap          # primer j válido para este k
-
-            i_lo = k * min_gap
-            i_hi = L - (num_cuts - k) * min_gap
-            for i in range(i_lo, i_hi):
-                # Expandir la ventana de j hasta i-min_gap
-                j_max = i - min_gap
-                while j_cursor <= j_max:
-                    if dp[j_cursor] < run_min_val:
-                        run_min_val = dp[j_cursor]
-                        run_min_pos = j_cursor
-                    j_cursor += 1
-                if run_min_pos >= 0 and run_min_val < INF:
-                    new_val = run_min_val + cost[i]
-                    if new_val < new_dp[i]:
-                        new_dp[i] = new_val
-                        ptr[k - 1, i] = run_min_pos
-            dp = new_dp
-
-        # Encontrar el último corte óptimo
-        best_last = -1
-        best_cost = INF
-        for i in range(num_cuts * min_gap, L):
-            if dp[i] < best_cost:
-                best_cost = dp[i]
-                best_last = i
-
-        if best_last < 0:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        # Reconstruir camino por backpointers
-        cut_positions: list[int] = [best_last]
-        pos = best_last
-        for k in range(num_cuts - 1, 0, -1):
-            prev = int(ptr[k, pos])
-            if prev < 0:
-                return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-            cut_positions.append(prev)
-            pos = prev
-        cut_positions = sorted(cut_positions)
-
-        while len(cut_positions) < num_cuts:
-            cut_positions.append(cut_positions[-1] + min_gap if cut_positions else min_gap)
-        cut_positions = cut_positions[:num_cuts]
-
-        bounds = [x_min] + [x_min + p for p in sorted(cut_positions)] + [x_max]
-        for i in range(1, len(bounds)):
-            if bounds[i] <= bounds[i - 1]:
-                bounds[i] = bounds[i - 1] + 1
-        return bounds
-
-    def _align_cc_first(
-        self, binary_band: np.ndarray, x_min: int, x_max: int, n: int
-    ) -> list[int]:
-        """D. Componentes conectados primero.
-
-        Encuentra todos los CCs en la banda, los ordena por centroide X,
-        fusiona los que se tocan/solapan, y mapea los n slots de carácter
-        a los n grupos CC más grandes.
-        """
-        if n <= 1:
-            return [x_min, x_max]
-
-        num, _, stats, centroids = cv2.connectedComponentsWithStats(
-            binary_band, connectivity=8
-        )
-
-        blobs = []
-        for i in range(1, num):
-            area = int(stats[i, cv2.CC_STAT_AREA])
-            if area < MIN_COMP_AREA:
-                continue
-            bx = int(stats[i, cv2.CC_STAT_LEFT])
-            bw_ = int(stats[i, cv2.CC_STAT_WIDTH])
-            cx = float(centroids[i][0])
-            blobs.append({"area": area, "x1": bx, "x2": bx + bw_, "cx": cx})
-
-        if not blobs:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        blobs.sort(key=lambda b: b["x1"])
-
-        merge_gap = 3
-        groups: list[dict] = []
-        for b in blobs:
-            if groups and b["x1"] <= groups[-1]["x2"] + merge_gap:
-                g = groups[-1]
-                g["x2"] = max(g["x2"], b["x2"])
-                g["area"] += b["area"]
-                g["cx"] = (g["cx"] + b["cx"]) / 2
-            else:
-                groups.append({"x1": b["x1"], "x2": b["x2"],
-                                "area": b["area"], "cx": b["cx"]})
-
-        if not groups:
-            return list(np.linspace(x_min, x_max, n + 1, dtype=int))
-
-        # Fusionar grupos más próximos hasta llegar a exactamente n grupos.
-        # Esto preserva chars pequeños ('i', 'l', '1') en vez de descartarlos
-        # por área (problema del método anterior: top-n por área los perdía).
-        while len(groups) > n:
-            # Encontrar el gap más pequeño entre grupos consecutivos y fusionar
-            min_gap_val = float("inf")
-            min_gap_idx = 0
-            for gi in range(len(groups) - 1):
-                gap = groups[gi + 1]["x1"] - groups[gi]["x2"]
-                if gap < min_gap_val:
-                    min_gap_val = gap
-                    min_gap_idx = gi
-            g1, g2 = groups[min_gap_idx], groups[min_gap_idx + 1]
-            merged = {
-                "x1": g1["x1"], "x2": g2["x2"],
-                "area": g1["area"] + g2["area"],
-                "cx": (g1["cx"] * g1["area"] + g2["cx"] * g2["area"])
-                       / max(1, g1["area"] + g2["area"]),
-            }
-            groups = [*groups[:min_gap_idx], merged, *groups[min_gap_idx + 2:]]
-
-        top_n = groups
-
-        bounds: list[int] = [x_min]
-        for i in range(len(top_n) - 1):
-            g1 = top_n[i]
-            g2 = top_n[i + 1]
-            gap_center = (g1["x2"] + g2["x1"]) // 2
-            bounds.append(max(bounds[-1] + 1, gap_center))
-        bounds.append(x_max)
-
-        while len(bounds) < n + 1:
-            bounds.append(bounds[-1] + 1)
-        bounds = bounds[:n + 1]
-
-        for i in range(1, len(bounds)):
-            if bounds[i] <= bounds[i - 1]:
-                bounds[i] = bounds[i - 1] + 1
-        return bounds
-
-    def _align_hybrid_v2(
-        self,
-        vpp: np.ndarray,
-        binary_band: np.ndarray,
-        x_min: int,
-        x_max: int,
-        n: int,
-        chars: list[str],
-    ) -> list[int]:
-        """E. Híbrido mejorado: InkFlow → columna de mínima tinta → verificación CC.
-
-        1. Parte de las fronteras de InkFlow.
-        2. Para cada frontera, busca en ±40 % del ancho promedio la COLUMNA CON
-           MENOS TINTA (no solo un valle con umbral).
-        3. Si el corte parte un CC, desplaza ±5 px buscando un gap real.
-        """
-        if n <= 1:
-            return [x_min, x_max]
-
-        base_bounds = self._align_inkflow(vpp, x_min, x_max, chars)
-
-        h, w_full = binary_band.shape[:2]
-        char_w_avg = max(1, (x_max - x_min) / n)
-        search_half = int(char_w_avg * 0.40)
-
-        _, labels, _, _ = cv2.connectedComponentsWithStats(
-            binary_band, connectivity=8
-        )
-
-        ks = max(3, int(char_w_avg * 0.12))
-        ks = ks if ks % 2 == 1 else ks + 1
-        vpp_s = cv2.GaussianBlur(
-            vpp.astype(np.float32).reshape(1, -1), (1, ks), 0
-        ).flatten()
-
-        min_cw = max(1, int(char_w_avg * 0.20))
-        refined: list[int] = [base_bounds[0]]
-
-        for i in range(1, n):
-            eb = base_bounds[i]
-            prev = refined[-1]
-            lo = max(prev + min_cw, eb - search_half)
-            hi = min(w_full, eb + search_half + 1)
-
-            if lo < hi:
-                seg = vpp_s[lo:hi]
-                best_x = lo + int(np.argmin(seg))
-                best_x = max(prev + 1, best_x)
-            else:
-                best_x = max(prev + 1, eb)
-
-            # Verificar si el corte parte un CC; si sí, buscar gap real ±5 px
-            shift_range = 5
-            if 0 <= best_x < w_full:
-                col_labels = set(int(labels[r, best_x]) for r in range(h)
-                                 if labels[r, best_x] > 0)
-                if col_labels:
-                    found_gap = False
-                    for delta in range(1, shift_range + 1):
-                        for candidate in [best_x - delta, best_x + delta]:
-                            if candidate <= prev or candidate >= w_full:
-                                continue
-                            cand_labels = set(
-                                int(labels[r, candidate]) for r in range(h)
-                                if labels[r, candidate] > 0
-                            )
-                            if not cand_labels:
-                                best_x = max(prev + 1, candidate)
-                                found_gap = True
-                                break
-                        if found_gap:
-                            break
-
-            refined.append(max(prev + 1, best_x))
-
-        refined.append(base_bounds[-1])
-        for i in range(1, len(refined)):
-            if refined[i] <= refined[i - 1]:
-                refined[i] = refined[i - 1] + 1
-        return refined
-
-    # ── Pre-alineación por palabras ───────────────────────────────────
-
-    def _find_word_gaps(
-        self,
-        vpp: np.ndarray,
-        x_min: int,
-        x_max: int,
-        words: list[str],
-    ) -> list[int]:
-        """Devuelve len(words)+1 posiciones [x_min, gap1, gap2, ..., x_max].
-
-        Detecta gaps de palabra (columnas con poca tinta) y asigna cada
-        boundary esperado al gap más cercano. Si no hay suficientes gaps
-        claros, devuelve lista vacía para señalizar "usar segmentación completa".
-        """
-        n_words = len(words)
-        if n_words <= 1:
-            return [x_min, x_max]
-
-        span_len = x_max - x_min
-        if span_len < 4:
-            return []
-
-        n_chars = max(1, sum(len(w) for w in words))
-        char_w_est = span_len / n_chars
-
-        # Suavizar VPP
-        ks = max(3, int(char_w_est * 0.12))
-        ks = ks if ks % 2 == 1 else ks + 1
-        vpp_s = cv2.GaussianBlur(
-            vpp.astype(np.float32).reshape(1, -1), (1, ks), 0
-        ).flatten()
-
-        vpp_max = float(np.max(vpp_s[x_min:x_max])) if x_max > x_min else 1.0
-        # Gap de palabra: < 15 % de la tinta pico Y anchura ≥ 35 % del char_w
-        gap_thr = vpp_max * 0.15
-        min_gap_w = max(2, int(char_w_est * 0.35))
-
-        # Detectar zonas de gap
-        in_gap = False
-        gap_zones: list[tuple[int, int]] = []
-        gs = x_min
-        for x in range(x_min, x_max):
-            below = float(vpp_s[x]) <= gap_thr
-            if below and not in_gap:
-                gs = x
-                in_gap = True
-            elif not below and in_gap:
-                if x - gs >= min_gap_w:
-                    gap_zones.append((gs, x))
-                in_gap = False
-        if in_gap and x_max - gs >= min_gap_w:
-            gap_zones.append((gs, x_max))
-
-        if len(gap_zones) < n_words - 1:
-            return []  # insuficientes gaps → usar segmentación completa
-
-        gap_centers = [int((g[0] + g[1]) / 2) for g in gap_zones]
-
-        # Posiciones esperadas de frontera proporcionales a la longitud de cada palabra
-        word_lens = [max(1, len(w)) for w in words]
-        total_chars = sum(word_lens)
-        expected: list[int] = []
-        cum = 0
-        for wl in word_lens[:-1]:
-            cum += wl
-            expected.append(int(x_min + span_len * cum / total_chars))
-
-        # Asignar cada boundary esperado al gap más cercano (sin repetir)
-        chosen: list[int] = []
-        used: set[int] = set()
-        for ex in expected:
-            candidates = [i for i in range(len(gap_centers)) if i not in used]
-            if not candidates:
-                return []
-            best_i = min(candidates, key=lambda i: abs(gap_centers[i] - ex))
-            used.add(best_i)
-            chosen.append(gap_centers[best_i])
-
-        bounds = [x_min, *sorted(chosen), x_max]
-        for i in range(1, len(bounds)):
-            if bounds[i] <= bounds[i - 1]:
-                bounds[i] = bounds[i - 1] + 1
-        return bounds
+    def _wf(ch):
+        from core.inkcore.extractor_alignment import wf
+        return wf(ch)
+
+    def _align_inkflow(self, vpp, x_min, x_max, chars):
+        from core.inkcore.extractor_alignment import align_inkflow
+        return align_inkflow(vpp, x_min, x_max, chars)
+
+    def _align_vpp_only(self, vpp, x_min, x_max, n):
+        from core.inkcore.extractor_alignment import align_vpp_only
+        return align_vpp_only(vpp, x_min, x_max, n)
+
+    def _align_uniform(self, x_min, x_max, n):
+        from core.inkcore.extractor_alignment import align_uniform
+        return align_uniform(x_min, x_max, n)
+
+    def _align_dp_energy(self, vpp, x_min, x_max, n):
+        from core.inkcore.extractor_alignment import align_dp_energy
+        return align_dp_energy(vpp, x_min, x_max, n)
+
+    def _align_cc_first(self, binary_band, x_min, x_max, n):
+        from core.inkcore.extractor_alignment import align_cc_first
+        return align_cc_first(binary_band, x_min, x_max, n)
+
+    def _align_hybrid_v2(self, vpp, binary_band, x_min, x_max, n, chars):
+        from core.inkcore.extractor_alignment import align_hybrid_v2
+        return align_hybrid_v2(vpp, binary_band, x_min, x_max, n, chars)
+
+    def _find_word_gaps(self, vpp, x_min, x_max, words):
+        from core.inkcore.extractor_alignment import find_word_gaps
+        return find_word_gaps(vpp, x_min, x_max, words)
 
     def _segment_words(
         self,
@@ -1141,177 +631,11 @@ class GlyphExtractor:
                     result.append((BBox(box.x + wx1, box.y, box.w, box.h), ch, score))
         return result
 
-    # [testing] ── Función de prueba de todas las estrategias ─────────
+    # [testing] ── Benchmark de estrategias delegado ────────────────
 
-    def _test_all_strategies(
-        self,
-        band_img: np.ndarray,
-        band_binary: np.ndarray,
-        x_min: int,
-        x_max: int,
-        n: int,
-        chars: list[str],
-        line_mask: np.ndarray,
-    ) -> dict:
-        """Ejecuta todas las estrategias de segmentación y puntúa sus glifos.
-
-        Retorna dict: {nombre_estrategia: {"boundaries": [...], "avg_quality": float,
-                                            "min_quality": float, "max_quality": float,
-                                            "glyph_count": int}}
-        """
-        if not CV2_OK or not PIL_OK:
-            return {}
-
-        h, w = band_binary.shape[:2]
-        vpp = np.sum(band_binary > 0, axis=0).astype(np.float32)
-
-        def _score_bounds(bounds: list[int]) -> dict:
-            scores: list[float] = []
-            for i in range(len(bounds) - 1):
-                x1 = max(0, bounds[i])
-                x2 = min(w, bounds[i + 1])
-                if x2 <= x1:
-                    continue
-                crop = band_binary[:, x1:x2]
-                crop_tight = self._tight_crop(crop, 3)
-                if crop_tight is None:
-                    continue
-                pil_img = self._to_rgba_smooth(crop_tight)
-                ink = float(np.sum(band_binary[:, x1:x2] > 0))
-                area = max(1, h * (x2 - x1))
-                cov = ink / area
-                align_score = min(1.0, max(0.1, cov / 0.18))
-                q = self._assess_quality(pil_img, align_score)
-                scores.append(q["quality_score"])
-            if not scores:
-                return {"avg_quality": 0.0, "min_quality": 0.0,
-                        "max_quality": 0.0, "glyph_count": 0}
-            return {
-                "avg_quality": float(np.mean(scores)),
-                "min_quality": float(np.min(scores)),
-                "max_quality": float(np.max(scores)),
-                "glyph_count": len(scores),
-            }
-
-        results: dict = {}
-
-        # Estrategia actual de producción (InkFlow + VPP snap + Tesseract)
-        try:
-            prod_bounds = self._align_inkflow(vpp, x_min, x_max, chars)
-            char_w_avg = (x_max - x_min) / max(1, n)
-            ks = max(3, int(w / max(1, n) * 0.12))
-            ks = ks if ks % 2 == 1 else ks + 1
-            vpp_s = cv2.GaussianBlur(vpp.reshape(1, -1), (1, ks), 0).flatten()
-            vpp_max = float(np.max(vpp_s[x_min:x_max])) if x_max > x_min else 1.0
-            gap_thr = vpp_max * 0.12
-            sw = max(2, int(char_w_avg * 0.30))
-            min_cw = max(1, int(char_w_avg * 0.20))
-            refined_prod: list[int] = [prod_bounds[0]]
-            for i in range(1, n):
-                eb = prod_bounds[i]
-                prev = refined_prod[-1]
-                lo = max(prev + min_cw, eb - sw)
-                hi = min(w, eb + sw + 1)
-                if lo < hi:
-                    seg = vpp_s[lo:hi]
-                    min_i = int(np.argmin(seg))
-                    min_v = float(seg[min_i])
-                    best_x = max(prev + 1, lo + min_i) if min_v < gap_thr else max(prev + 1, eb)
-                else:
-                    best_x = max(prev + 1, eb)
-                refined_prod.append(best_x)
-            refined_prod.append(prod_bounds[-1])
-            for i in range(1, len(refined_prod)):
-                if refined_prod[i] <= refined_prod[i - 1]:
-                    refined_prod[i] = refined_prod[i - 1] + 1
-            tess = self._tesseract_boundaries(line_mask)
-            snap_r = max(3, int(char_w_avg * 0.22))
-            if tess:
-                final_prod: list[int] = [refined_prod[0]]
-                prev_p = refined_prod[0]
-                for i in range(1, n):
-                    eb = refined_prod[i]
-                    nearby = [tb for tb in tess
-                               if abs(tb - eb) <= snap_r
-                               and prev_p + min_cw < tb < w
-                               and 0 <= tb < len(vpp_s)
-                               and float(vpp_s[tb]) < vpp_max * 0.35]
-                    if nearby:
-                        eb = max(prev_p + 1, min(nearby, key=lambda tb: abs(tb - eb)))
-                    final_prod.append(eb)
-                    prev_p = eb
-                final_prod.append(refined_prod[-1])
-            else:
-                final_prod = refined_prod
-            r = _score_bounds(final_prod)
-            r["boundaries"] = final_prod
-            results["production (inkflow+vpp+tess)"] = r
-        except Exception as exc:
-            results["production (inkflow+vpp+tess)"] = {
-                "error": str(exc), "avg_quality": 0.0,
-                "min_quality": 0.0, "max_quality": 0.0, "glyph_count": 0}
-
-        # A. VPP puro
-        try:
-            bounds_a = self._align_vpp_only(vpp, x_min, x_max, n)
-            r = _score_bounds(bounds_a)
-            r["boundaries"] = bounds_a
-            results["A: vpp_only"] = r
-        except Exception as exc:
-            results["A: vpp_only"] = {"error": str(exc), "avg_quality": 0.0,
-                                       "min_quality": 0.0, "max_quality": 0.0,
-                                       "glyph_count": 0}
-
-        # B. Uniforme
-        try:
-            bounds_b = self._align_uniform(x_min, x_max, n)
-            r = _score_bounds(bounds_b)
-            r["boundaries"] = bounds_b
-            results["B: uniform"] = r
-        except Exception as exc:
-            results["B: uniform"] = {"error": str(exc), "avg_quality": 0.0,
-                                      "min_quality": 0.0, "max_quality": 0.0,
-                                      "glyph_count": 0}
-
-        # C. DP Energy (solo para n pequeño)
-        if n <= 20:
-            try:
-                bounds_c = self._align_dp_energy(vpp, x_min, x_max, n)
-                r = _score_bounds(bounds_c)
-                r["boundaries"] = bounds_c
-                results["C: dp_energy"] = r
-            except Exception as exc:
-                results["C: dp_energy"] = {"error": str(exc), "avg_quality": 0.0,
-                                            "min_quality": 0.0, "max_quality": 0.0,
-                                            "glyph_count": 0}
-        else:
-            results["C: dp_energy"] = {"avg_quality": 0.0, "min_quality": 0.0,
-                                        "max_quality": 0.0, "glyph_count": 0,
-                                        "note": f"skipped (n={n} > 20)"}
-
-        # D. CC first
-        try:
-            bounds_d = self._align_cc_first(band_binary, x_min, x_max, n)
-            r = _score_bounds(bounds_d)
-            r["boundaries"] = bounds_d
-            results["D: cc_first"] = r
-        except Exception as exc:
-            results["D: cc_first"] = {"error": str(exc), "avg_quality": 0.0,
-                                       "min_quality": 0.0, "max_quality": 0.0,
-                                       "glyph_count": 0}
-
-        # E. Hybrid v2
-        try:
-            bounds_e = self._align_hybrid_v2(vpp, band_binary, x_min, x_max, n, chars)
-            r = _score_bounds(bounds_e)
-            r["boundaries"] = bounds_e
-            results["E: hybrid_v2"] = r
-        except Exception as exc:
-            results["E: hybrid_v2"] = {"error": str(exc), "avg_quality": 0.0,
-                                        "min_quality": 0.0, "max_quality": 0.0,
-                                        "glyph_count": 0}
-
-        return results
+    def _test_all_strategies(self, band_img, band_binary, x_min, x_max, n, chars, line_mask):
+        from core.inkcore.extractor_strategies import benchmark_all
+        return benchmark_all(band_img, band_binary, x_min, x_max, n, chars, line_mask)
 
     def _align_pos(
         self, boxes: list[BBox], text: str, line_h: float = 30.0,
@@ -1436,7 +760,13 @@ class GlyphExtractor:
                 )
 
         # ── Etapa final: Anclaje con Tesseract + detector alternativo ────
-        tess_bdry = self._tesseract_boundaries(line_mask)
+        # Optimización: Tesseract sobre línea corta no aporta y cuesta ~150ms
+        # (escalar + binarizar + 2× PSM). Saltamos para n < 4 (no hay márgenes
+        # útiles para hacer snap) o si la calidad primaria ya es alta (>0.55).
+        if n < 4 or primary_q > 0.55:
+            tess_bdry: list[int] = []
+        else:
+            tess_bdry = self._tesseract_boundaries(line_mask)
         det_bdry = self._get_detector_boundaries(line_mask)
         # Unión de fronteras de ambas fuentes
         all_hints = sorted(set(tess_bdry) | set(det_bdry))
@@ -1488,183 +818,24 @@ class GlyphExtractor:
             logger.debug(f"  '{ch}' x={box.x}-{box.x+box.w}")
         return result
 
-    # ── Refinamiento de región por componentes conectados ─────────
+    # ── Glyph ops delegados a extractor_glyph_ops ─────────────────
 
     @staticmethod
-    def _refine_char_region(
-        line_mask: np.ndarray, x1: int, x2: int
-    ) -> tuple[int, int, int, int]:
-        """Reduce el recorte al blob dominante + diacríticos flotantes.
-
-        Después de que VPP da los bordes aproximados, aquí encontramos el
-        componente conectado más grande (= el carácter principal) y le sumamos
-        los blobs pequeños situados sobre él que corresponden a puntos de i/j,
-        acentos (á é í ó ú) y tildes de ñ.
-
-        Devuelve (bx1, by1, bx2, by2) en coordenadas de line_mask.
-        Si no hay blobs reconocibles, devuelve la región original completa.
-        """
-        h, w = line_mask.shape[:2]
-        # Pequeño margen para no recortar diacríticos al borde de la región
-        pad = 4
-        rx1 = max(0, x1 - pad)
-        rx2 = min(w, x2 + pad)
-        region = line_mask[:, rx1:rx2]
-
-        if not np.any(region > 0):
-            return x1, 0, x2, h
-
-        num, _labels, stats, centroids = cv2.connectedComponentsWithStats(
-            region, connectivity=8
-        )
-        if num < 2:
-            return x1, 0, x2, h
-
-        blobs = []
-        for i in range(1, num):
-            area = int(stats[i, cv2.CC_STAT_AREA])
-            if area < MIN_COMP_AREA:
-                continue
-            bx = int(stats[i, cv2.CC_STAT_LEFT]) + rx1   # coords absolutas
-            by = int(stats[i, cv2.CC_STAT_TOP])
-            bw_ = int(stats[i, cv2.CC_STAT_WIDTH])
-            bh_ = int(stats[i, cv2.CC_STAT_HEIGHT])
-            cx = float(centroids[i][0]) + rx1
-            cy = float(centroids[i][1])
-            blobs.append({"area": area, "x": bx, "y": by, "w": bw_, "h": bh_,
-                          "cx": cx, "cy": cy})
-
-        if not blobs:
-            return x1, 0, x2, h
-
-        blobs.sort(key=lambda b: b["area"], reverse=True)
-        main = blobs[0]
-        char_span = max(1, x2 - x1)
-
-        # Agregar diacríticos flotantes: blobs pequeños SOBRE el cuerpo principal
-        # que estén horizontalmente alineados (punto de i, acento, tilde de ñ)
-        # También adjuntar descenders: blobs de g, p, q, y, j bajo el cuerpo.
-        group = [main]
-        for b in blobs[1:]:
-            is_diacritic = (
-                b["area"] < main["area"] * 0.40
-                and b["cy"] < main["cy"]
-                # Tolerancia X ajustada: 0.55 en vez de 0.90 para no capturar
-                # la tinta del carácter vecino (punto de 'i' nunca está tan lejos)
-                and abs(b["cx"] - main["cx"]) < char_span * 0.55
-            )
-            is_descender = (
-                b["area"] < main["area"] * 0.60
-                and b["cy"] > main["cy"]
-                # Tolerancia X reducida: 0.50 en vez de 0.80
-                and abs(b["cx"] - main["cx"]) < char_span * 0.50
-                and b["y"] > main["y"] + main["h"] * 0.5
-            )
-            if is_diacritic or is_descender:
-                group.append(b)
-
-        gx1 = max(0, min(b["x"] for b in group))
-        gy1 = max(0, min(b["y"] for b in group))
-        gx2 = min(w, max(b["x"] + b["w"] for b in group))
-        gy2 = min(h, max(b["y"] + b["h"] for b in group))
-
-        # No expandir X más allá del ancho del carácter esperado; si se expande
-        # demasiado significa que capturó tinta del carácter vecino y se "fusionarían".
-        expand_max = max(6, int((x2 - x1) * 0.18))
-        gx1 = max(gx1, x1 - expand_max)
-        gx2 = min(gx2, x2 + expand_max)
-        return gx1, gy1, gx2, gy2
-
-    # ── Glifo → RGBA + calidad ─────────────────────────────────────
+    def _refine_char_region(line_mask, x1, x2):
+        from core.inkcore.extractor_glyph_ops import refine_char_region
+        return refine_char_region(line_mask, x1, x2)
 
     @staticmethod
-    def _tight_crop(mask: np.ndarray, padding: int = 3) -> np.ndarray | None:
-        rows = np.any(mask > 0, axis=1)
-        cols = np.any(mask > 0, axis=0)
-        if not rows.any() or not cols.any():
-            return None
-        r0, r1 = int(np.where(rows)[0][0]), int(np.where(rows)[0][-1])
-        c0, c1 = int(np.where(cols)[0][0]), int(np.where(cols)[0][-1])
-        h, w = mask.shape[:2]
-        result = mask[max(0, r0-padding):min(h, r1+1+padding),
-                      max(0, c0-padding):min(w, c1+1+padding)]
-        # Bug fix #4: guard against zero-dimension crops
-        if result.shape[0] < 1 or result.shape[1] < 1:
-            return None
-        return result
+    def _tight_crop(mask, padding: int = 3):
+        from core.inkcore.extractor_glyph_ops import tight_crop
+        return tight_crop(mask, padding)
 
     @staticmethod
-    def _to_rgba_smooth(mask: np.ndarray) -> "Image.Image":
-        """RGBA con bordes anti-aliased. RGB=blanco para que sea visible sobre fondos oscuros."""
-        # Bug fix #4: guard against zero-dimension mask
-        if mask.shape[0] < 1 or mask.shape[1] < 1:
-            return Image.fromarray(np.zeros((1, 1, 4), dtype=np.uint8))
-        alpha = cv2.GaussianBlur(mask.astype(np.float32), (3, 3), 0.9)
-        alpha = np.clip(alpha, 0, 255).astype(np.uint8)
-        h, w = mask.shape[:2]
-        rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[..., :3] = 255   # tinta blanca — visible sobre cualquier fondo oscuro
-        rgba[..., 3] = alpha
-        return Image.fromarray(rgba)
+    def _to_rgba_smooth(mask):
+        from core.inkcore.extractor_glyph_ops import to_rgba_smooth
+        return to_rgba_smooth(mask)
 
     @staticmethod
-    def _assess_quality(img: "Image.Image", align_score: float = 0.5) -> dict:
-        """Calidad integral: cobertura + ancho de trazo + alineación."""
-        alpha = np.array(img.getchannel("A"))
-        ink = int(np.sum(alpha > 50))
-        h, w = alpha.shape[:2]
-        if h == 0 or w == 0:
-            return {"quality_score": 0.0, "coverage": 0.0, "ok": False, "score": 0.0}
-
-        coverage = ink / max(1, w * h)
-        bbox = Image.fromarray(alpha, mode="L").getbbox()
-        tw = (bbox[2] - bbox[0]) if bbox else 0
-        th = (bbox[3] - bbox[1]) if bbox else 0
-
-        # Toque en borde: penalización leve (carácter recortado) pero no severa
-        touches = bool(
-            np.any(alpha[0] > 50) or np.any(alpha[-1] > 50)
-            or np.any(alpha[:, 0] > 50) or np.any(alpha[:, -1] > 50)
-        )
-
-        # Ancho de trazo via distance transform
-        binary = (alpha > 50).astype(np.uint8) * 255
-        dist = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
-        sv = dist[dist > 0]
-        if len(sv) > 4:
-            sw_mean = float(np.mean(sv))
-            sw_std = float(np.std(sv))
-            sw_consistency = max(0.0, 1.0 - sw_std / max(1.0, sw_mean))
-            sw_score = min(1.0, sw_mean / 3.0) * 0.5 + sw_consistency * 0.5
-        else:
-            sw_score = 0.30
-
-        # Fórmula asimétrica: penaliza más la cobertura muy baja (char vacío)
-        # que la muy alta (char estrecho 'i','l','f','1' con buen recorte).
-        if coverage < 0.22:
-            cov_score = max(0.0, 1.0 - (0.22 - coverage) / 0.22)
-        else:
-            cov_score = max(0.0, 1.0 - (coverage - 0.22) / 0.60)
-        ink_score = max(0.0, min(1.0, ink / 40.0))   # más sensible a glifos pequeños
-        size_score = (1.0 if tw >= 4 and th >= 6
-                      else 0.60 if tw >= 2 and th >= 3 else 0.10)
-        border_score = 0.82 if touches else 1.0       # penalización leve
-        align_c = max(0.0, min(1.0, align_score))
-
-        qs = max(0.0, min(1.0,
-            0.10
-            + cov_score   * 0.22
-            + ink_score   * 0.22
-            + size_score  * 0.18
-            + sw_score    * 0.16
-            + border_score * 0.07
-            + align_c     * 0.05
-        ))
-        ok = (ink >= 10 and coverage >= 0.004 and tw >= 2
-              and th >= 3 and qs >= QUALITY_MIN)
-        return {
-            "ink_pixels": ink, "coverage": float(coverage),
-            "tight_w": tw, "tight_h": th,
-            "touches_border": touches, "sw_score": float(sw_score),
-            "quality_score": float(qs), "score": float(qs), "ok": bool(ok),
-        }
+    def _assess_quality(img, align_score: float = 0.5):
+        from core.inkcore.extractor_glyph_ops import assess_quality
+        return assess_quality(img, align_score)

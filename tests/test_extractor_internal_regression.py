@@ -74,7 +74,7 @@ def test_scale_no_upscale(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "TIPOGRAFIA_DIR", tmp_path / "tipo")
     config.ensure_dirs()
 
-    from core.inkcore.extractor import GlyphExtractor, TARGET_LONG
+    from core.inkcore.extractor import GlyphExtractor
     ext = GlyphExtractor()
     small = _gray_image(w=100, h=100)
     result = ext._scale(small)

@@ -15,7 +15,6 @@ def _make_image(path):
 
 def test_project_delete_keeps_external_images(tmp_path, monkeypatch):
     """delete() debe NO borrar imágenes cuya ruta cae fuera de DATA_DIR."""
-    import config
     from core.models import ImageElement, Page, Project
     from core.project_manager import ProjectManager
 

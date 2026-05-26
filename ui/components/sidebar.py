@@ -117,7 +117,7 @@ class CollapsibleSidebar(ctk.CTkFrame):
         btn._row = row
         btn._accent = accent_color
 
-        def on_enter(e, v=view_id, r=row, b=btn, ac=accent_color):
+        def on_enter(e, v=view_id, r=row, b=btn):
             if self._active_view != v:
                 r.configure(fg_color=theme.BG_TERTIARY)
                 b.configure(text_color=theme.TEXT_PRIMARY)

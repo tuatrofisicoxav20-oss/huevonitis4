@@ -80,12 +80,6 @@ class BusinessLedger:
                 return datetime.min
         return sorted(self._jobs, key=_sort_key)
 
-    def get_job(self, job_id: str) -> ClientJob | None:
-        for j in self._jobs:
-            if j.id == job_id:
-                return j
-        return None
-
     def add_payment(self, payment: Payment):
         self._payments.append(payment)
         self.save()
@@ -96,9 +90,6 @@ class BusinessLedger:
             dt = self._parse_payment_date(p.date)
             return dt if dt is not None else datetime.min
         return sorted(self._payments, key=_sort_key)
-
-    def get_payments_for_job(self, job_id: str) -> list[Payment]:
-        return [p for p in self._payments if p.job_id == job_id]
 
     def total_income(self) -> float:
         return round(sum(p.amount for p in self._payments), 2)
