@@ -60,6 +60,25 @@ def main():
         )
         return
 
+    # v4.2: diagnóstico de sesión — detectar inconsistencias antes de arrancar UI.
+    # Skip con H4_SKIP_DIAGNOSTIC=1.
+    try:
+        from core.session_diagnostic import run_diagnostic, should_skip_diagnostic
+        if not should_skip_diagnostic():
+            results = run_diagnostic()
+            issues = [r for r in results if r.severity in ("warning", "error")]
+            if issues:
+                logger.info("Diagnóstico: %d issues — mostrando modal", len(issues))
+                from ui.views.diagnostic_modal import show_diagnostic_modal
+                ok = show_diagnostic_modal(results)
+                if not ok:
+                    logger.info("Usuario eligió salir desde el modal de diagnóstico")
+                    return
+            else:
+                logger.info("Diagnóstico: todo OK")
+    except Exception as e:
+        logger.error("Diagnóstico falló (no crítico): %s", e, exc_info=True)
+
     try:
         pm = ProjectManager()
     except Exception as e:
