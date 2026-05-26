@@ -3,7 +3,20 @@ import json
 import os
 from pathlib import Path
 
-VERSION = "4.1.1"
+
+def _read_version() -> str:
+    """SSOT: el archivo VERSION en la raíz del repo es la fuente única.
+
+    Si por alguna razón no se puede leer (bundle empaquetado raro), caemos
+    a un string seguro en vez de romper el arranque.
+    """
+    try:
+        return (Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0-unknown"
+
+
+VERSION = _read_version()
 APP_NAME = "Huevonitis 4"
 
 DATA_DIR = Path.home() / ".local" / "share" / "huevonitis4"
