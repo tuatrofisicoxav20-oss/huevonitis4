@@ -71,10 +71,10 @@ class TesseractBackend(OCRBackend):
                     return pytesseract.image_to_string(
                         pil_img, lang=lang, config="--oem 3 --psm 6"
                     ).strip()
-            img = Image.open(image_path)
-            return pytesseract.image_to_string(
-                img, lang=lang, config="--oem 3 --psm 6"
-            ).strip()
+            with Image.open(image_path) as img:
+                return pytesseract.image_to_string(
+                    img, lang=lang, config="--oem 3 --psm 6"
+                ).strip()
         except Exception as e:
             logger.error(f"Tesseract OCR error: {e}")
             return f"Error en OCR: {e}"
@@ -99,10 +99,18 @@ class TesseractBackend(OCRBackend):
                 )
             else:
                 pil_img = PILImage.open(image_path)
-            data = pytesseract.image_to_data(
-                pil_img, lang=lang, config="--oem 3 --psm 6",
-                output_type=pytesseract.Output.DICT,
-            )
+            try:
+                data = pytesseract.image_to_data(
+                    pil_img, lang=lang, config="--oem 3 --psm 6",
+                    output_type=pytesseract.Output.DICT,
+                )
+            finally:
+                # PILImage.open mantiene el fd abierto; fromarray no, pero close()
+                # es seguro en ambos casos.
+                try:
+                    pil_img.close()
+                except Exception:
+                    pass
             results = []
             for i in range(len(data["text"])):
                 text = str(data["text"][i]).strip()

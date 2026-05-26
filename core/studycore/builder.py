@@ -13,8 +13,22 @@ logger = logging.getLogger(__name__)
 
 _TTL_SECONDS = 30 * 24 * 3600  # 30 días
 
-# Caché en memoria como fallback y capa rápida
+# Caché en memoria como fallback y capa rápida.
+# Acotado por _MAX_BUNDLE_CACHE para evitar crecimiento ilimitado cuando el
+# usuario procesa muchos documentos distintos en una sola sesión.
+_MAX_BUNDLE_CACHE = 64
 _bundle_cache: dict[str, StudyBundle] = {}
+
+
+def _cache_put(key: str, bundle: StudyBundle) -> None:
+    """Inserta en _bundle_cache con eviction FIFO al alcanzar el tope."""
+    if key in _bundle_cache:
+        _bundle_cache[key] = bundle
+        return
+    if len(_bundle_cache) >= _MAX_BUNDLE_CACHE:
+        oldest = next(iter(_bundle_cache))
+        del _bundle_cache[oldest]
+    _bundle_cache[key] = bundle
 
 
 def _cache_path() -> str:
@@ -180,7 +194,7 @@ def build_study_bundle(text: str) -> StudyBundle:
         return _bundle_cache[key]
     cached = _disk_get(key)
     if cached is not None:
-        _bundle_cache[key] = cached
+        _cache_put(key, cached)
         return cached
     bundle = StudyBundle(
         source_text=text,
@@ -189,7 +203,7 @@ def build_study_bundle(text: str) -> StudyBundle:
         flashcards=extract_flashcards(text),
         quiz_questions=extract_quiz(text),
     )
-    _bundle_cache[key] = bundle
+    _cache_put(key, bundle)
     _disk_put(key, bundle)
     return bundle
 
@@ -213,7 +227,7 @@ def build_study_bundle_from_document(doc: "object") -> StudyBundle:
         return _bundle_cache[key]
     cached = _disk_get(key)
     if cached is not None:
-        _bundle_cache[key] = cached
+        _cache_put(key, cached)
         return cached
 
     all_blocks = [b for p in doc.pages for b in p.blocks]
@@ -274,7 +288,7 @@ def build_study_bundle_from_document(doc: "object") -> StudyBundle:
         flashcards=structured_cards[:12],
         quiz_questions=quiz,
     )
-    _bundle_cache[key] = bundle
+    _cache_put(key, bundle)
     _disk_put(key, bundle)
     return bundle
 

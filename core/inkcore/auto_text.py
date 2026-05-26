@@ -204,12 +204,12 @@ def _try_tesseract(image_path: str) -> tuple[str, float]:
     try:
         from core.ocr._tesseract_setup import apply_tesseract_cmd
         apply_tesseract_cmd()
-        img = Image.open(image_path)
-        # PSM 6 = "Assume a single uniform block of text"
-        data = pytesseract.image_to_data(
-            img, lang="spa", config="--psm 6 --oem 3",
-            output_type=pytesseract.Output.DICT,
-        )
+        with Image.open(image_path) as img:
+            # PSM 6 = "Assume a single uniform block of text"
+            data = pytesseract.image_to_data(
+                img, lang="spa", config="--psm 6 --oem 3",
+                output_type=pytesseract.Output.DICT,
+            )
         words: list[str] = []
         confs: list[float] = []
         for txt, c in zip(data["text"], data["conf"]):
