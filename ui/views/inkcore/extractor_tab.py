@@ -26,7 +26,13 @@ class ExtractorTabMixin:
         """Modo auto OCR-first: TrOCR/Tesseract leen la imagen y dan el texto guía."""
         auto = bool(self._auto_mode_var.get())
         if auto:
-            self._ref_text.configure(state="disabled", fg_color=theme.BG_SECONDARY)
+            # text_color_disabled explícito: sin esto, CTkTextbox pinta el texto
+            # con un gris por defecto que sobre BG_SECONDARY queda casi negro/invisible.
+            self._ref_text.configure(
+                state="disabled",
+                fg_color=theme.BG_SECONDARY,
+                text_color_disabled=theme.TEXT_MUTED,
+            )
             self._adj_ref_label.configure(text_color=theme.TEXT_MUTED)
             # Indicar qué motor OCR se usará
             try:
@@ -429,13 +435,51 @@ class ExtractorTabMixin:
         if not self._extracted:
             self.toast("No hay glifos para guardar", "warning")
             return
-        saved = self._pipeline.save_glyphs_to_bank(self._extracted)
-        dupes = len(self._extracted) - saved
-        msg = f"{saved} glifos guardados"
-        if dupes:
-            msg += f"  ({dupes} duplicados omitidos)"
-        self.toast(msg, "success")
-        self._refresh_bank()
+        total = len(self._extracted)
+        # Pre-chequeo: glifos cuyo PNG temporal ya no existe se descartarían
+        # silenciosamente dentro de bank.add_glyph (devuelve None). Detectarlos
+        # antes nos permite avisarle al usuario en vez de mostrar "0 guardados".
+        missing = [g for g in self._extracted if not Path(g.image_path).exists()]
+        if missing:
+            logger.warning(
+                "_save_to_bank: %d/%d glifos sin PNG temporal (probable cleanup previo)",
+                len(missing), total,
+            )
+        try:
+            saved = self._pipeline.save_glyphs_to_bank(self._extracted)
+        except Exception as exc:
+            logger.exception("_save_to_bank: error guardando glifos: %s", exc)
+            self.toast(f"Error al guardar: {exc}", "error")
+            return
+        dupes = total - saved - len(missing)
+        logger.info(
+            "_save_to_bank: total=%d saved=%d dupes=%d missing=%d",
+            total, saved, dupes, len(missing),
+        )
+        if saved == 0:
+            if missing and not dupes:
+                self.toast(
+                    f"Nada guardado: {len(missing)} PNG temporales ya no existen "
+                    "(re-extrae para reintentar)", "warning",
+                )
+            elif dupes == total:
+                self.toast(f"Nada nuevo: los {total} glifos ya estaban en el banco", "warning")
+            else:
+                self.toast("Nada guardado — revisa el log", "warning")
+        else:
+            msg = f"{saved} glifos guardados"
+            extras = []
+            if dupes:
+                extras.append(f"{dupes} duplicados")
+            if missing:
+                extras.append(f"{len(missing)} sin archivo")
+            if extras:
+                msg += f"  ({', '.join(extras)})"
+            self.toast(msg, "success")
+        try:
+            self._refresh_bank()
+        except Exception as exc:
+            logger.exception("_save_to_bank: _refresh_bank falló: %s", exc)
 
     # ── Preprocess preview ─────────────────────────────────────────
 
