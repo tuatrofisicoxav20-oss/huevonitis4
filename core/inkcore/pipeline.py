@@ -107,7 +107,10 @@ class InkCorePipeline:
             raise
 
     def save_glyphs_to_bank(self, glyphs: list[GlyphEntry]) -> int:
+        logger.info("save_glyphs_to_bank: start, %d glifos a procesar", len(glyphs))
         saved = 0
+        skipped = 0
+        errored = 0
         with self._bank_lock:
             for g in glyphs:
                 try:
@@ -132,11 +135,26 @@ class InkCorePipeline:
                     )
                     if result is not None:
                         saved += 1
+                        logger.info(
+                            "save_glyphs_to_bank: ✓ %r → %s",
+                            g.char, result.image_path,
+                        )
+                    else:
+                        skipped += 1
+                        logger.info(
+                            "save_glyphs_to_bank: ⊘ %r saltado (dedup o source missing) src=%s",
+                            g.char, g.image_path,
+                        )
                 except Exception as exc:
-                    logger.warning(
-                        "Failed to add glyph '%s' (%s) to bank: %s",
-                        g.char, g.image_path, exc,
+                    errored += 1
+                    logger.error(
+                        "save_glyphs_to_bank: ✕ glyph %r (%s) falló: %s",
+                        g.char, g.image_path, exc, exc_info=True,
                     )
+        logger.info(
+            "save_glyphs_to_bank: done saved=%d skipped=%d errored=%d total=%d",
+            saved, skipped, errored, len(glyphs),
+        )
         # reload_bank acquires the lock internally; call outside the block
         self.reload_bank()
         # Bug fix #12: purge temp PNGs now that they have been copied into

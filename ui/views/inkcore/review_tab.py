@@ -148,14 +148,42 @@ class ReviewTabMixin:
         diagnostics.log_event("ui", "refresh_review", f"{len(queue)} pendientes")
 
     def _review_approve(self, glyph):
-        self._pipeline.bank.approve_glyph(glyph, new_tier="Silver")
+        logger.info("_review_approve: char=%r path=%s", glyph.char, glyph.image_path)
+        try:
+            ok = self._pipeline.bank.approve_glyph(glyph, new_tier="Silver")
+        except Exception as exc:
+            logger.error("_review_approve: bank.approve_glyph lanzó: %s", exc, exc_info=True)
+            self.toast(f"Error al aprobar: {exc}", "error")
+            return
+        if not ok:
+            logger.warning("_review_approve: %r no encontrado en banco", glyph.char)
+            self.toast(f"'{glyph.char}' no se encontró en el banco", "warning")
+            return
         self.toast(f"'{glyph.char}' aprobado → Silver", "success")
-        self._reload_and_refresh_all()
+        logger.info("_review_approve: %r promovido a Silver", glyph.char)
+        try:
+            self._reload_and_refresh_all()
+        except Exception as exc:
+            logger.error("_review_approve: refresh lanzó: %s", exc, exc_info=True)
 
     def _review_reject(self, glyph):
-        self._pipeline.bank.reject_glyph(glyph)
+        logger.info("_review_reject: char=%r path=%s", glyph.char, glyph.image_path)
+        try:
+            ok = self._pipeline.bank.reject_glyph(glyph)
+        except Exception as exc:
+            logger.error("_review_reject: bank.reject_glyph lanzó: %s", exc, exc_info=True)
+            self.toast(f"Error al rechazar: {exc}", "error")
+            return
+        if not ok:
+            logger.warning("_review_reject: %r no encontrado en banco", glyph.char)
+            self.toast(f"'{glyph.char}' no se encontró en el banco", "warning")
+            return
         self.toast(f"'{glyph.char}' eliminado del banco", "warning")
-        self._reload_and_refresh_all()
+        logger.info("_review_reject: %r eliminado", glyph.char)
+        try:
+            self._reload_and_refresh_all()
+        except Exception as exc:
+            logger.error("_review_reject: refresh lanzó: %s", exc, exc_info=True)
 
     def _review_select_all(self):
         all_checked = all(v.get() for v in self._review_check_vars)

@@ -149,8 +149,9 @@ class GlyphBank:
                               por el pipeline (evita doble cómputo de quality).
         Callers legacy add_glyph(char, path) siguen funcionando sin cambios.
         """
+        logger.info("add_glyph: start char=%r source=%s", char, source_path)
         if not Path(source_path).exists():
-            logger.warning(f"add_glyph: source image not found: {source_path}")
+            logger.warning("add_glyph: source image not found: %s", source_path)
             return None
 
         if PIL_OK:
@@ -169,10 +170,13 @@ class GlyphBank:
                         best = min(_hamming(new_hash, h) for h in old_hashes)
                         strict, _ = _dup_thresholds(char)
                         if best <= strict:
-                            logger.debug(f"Duplicate glyph for '{char}' (hamming={best}), skipped")
+                            logger.warning(
+                                "add_glyph: %r rechazado por dedup hamming=%d <= %d",
+                                char, best, strict,
+                            )
                             return None
             except Exception as e:
-                logger.warning(f"Hash dedup check failed: {e}")
+                logger.warning("add_glyph: dedup check falló: %s", e, exc_info=True)
 
         with _bank_lock:
             existing = [e for e in self._entries if e.char == char]
@@ -194,6 +198,10 @@ class GlyphBank:
             )
             self._entries.append(entry)
         self.save()
+        logger.info(
+            "add_glyph: OK char=%r dest=%s tier=%s score=%.3f",
+            char, dest, entry.tier, entry.quality_score,
+        )
         return entry
 
     def remove_glyph(self, entry: GlyphEntry):

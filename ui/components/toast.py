@@ -111,10 +111,20 @@ class ToastManager:
         self.parent.update_idletasks()
         pw = self.parent.winfo_width()
         ph = self.parent.winfo_height()
-        if pw < 10:
-            pw = 800
-        if ph < 10:
-            ph = 600
+        # HiDPI guard: customtkinter a veces reporta winfo_width antes de
+        # que la ventana haya medido. Si lo que recibimos no podría caber
+        # un toast, caemos al tamaño de pantalla como mejor aproximación
+        # para no posicionar fuera del área visible.
+        if pw < 320:
+            try:
+                pw = max(800, self.parent.winfo_screenwidth() // 2)
+            except Exception:
+                pw = 800
+        if ph < 200:
+            try:
+                ph = max(600, self.parent.winfo_screenheight() // 2)
+            except Exception:
+                ph = 600
 
         base_x = pw - self.TOAST_WIDTH - self.MARGIN_RIGHT
         base_y = ph - self.MARGIN_BOTTOM
@@ -152,6 +162,9 @@ class ToastManager:
             else:
                 with contextlib.suppress(Exception):
                     toast.place(x=target_x, y=toast.winfo_y(), width=self.TOAST_WIDTH)
+                    # Forzar lift al final: si otro widget se pintó durante
+                    # la animación, el toast podría quedar tapado.
+                    toast.lift()
 
         step(1)
 

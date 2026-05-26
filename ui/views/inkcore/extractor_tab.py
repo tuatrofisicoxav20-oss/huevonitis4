@@ -439,8 +439,11 @@ class ExtractorTabMixin:
             pass
 
     def _save_to_bank(self):
+        logger.info("_save_to_bank: invocado, %d glifos extraídos", len(self._extracted))
         if not self._extracted:
             self.toast("No hay glifos para guardar", "warning")
+            self._set_status("⚠ Sin glifos para guardar — extrae primero", theme.ACCENT_ORANGE)
+            logger.warning("_save_to_bank: lista vacía, abortando")
             return
         total = len(self._extracted)
         # Pre-chequeo: glifos cuyo PNG temporal ya no existe se descartarían
@@ -454,9 +457,11 @@ class ExtractorTabMixin:
             )
         try:
             saved = self._pipeline.save_glyphs_to_bank(self._extracted)
+            logger.info("_save_to_bank: pipeline guardó %d/%d", saved, total)
         except Exception as exc:
-            logger.exception("_save_to_bank: error guardando glifos: %s", exc)
+            logger.error("_save_to_bank: pipeline lanzó: %s", exc, exc_info=True)
             self.toast(f"Error al guardar: {exc}", "error")
+            self._set_status(f"⚠ Error: {exc}", theme.ACCENT_RED)
             return
         dupes = total - saved - len(missing)
         logger.info(
@@ -465,14 +470,16 @@ class ExtractorTabMixin:
         )
         if saved == 0:
             if missing and not dupes:
-                self.toast(
-                    f"Nada guardado: {len(missing)} PNG temporales ya no existen "
-                    "(re-extrae para reintentar)", "warning",
-                )
+                msg = f"Nada guardado: {len(missing)} PNG temporales ya no existen (re-extrae)"
+                self.toast(msg, "warning")
+                self._set_status(f"⚠ {msg}", theme.ACCENT_ORANGE)
             elif dupes == total:
-                self.toast(f"Nada nuevo: los {total} glifos ya estaban en el banco", "warning")
+                msg = f"Nada nuevo: los {total} glifos ya estaban en el banco"
+                self.toast(msg, "warning")
+                self._set_status(f"ℹ {msg}", theme.ACCENT_BLUE)
             else:
                 self.toast("Nada guardado — revisa el log", "warning")
+                self._set_status("⚠ Nada guardado — revisa el log", theme.ACCENT_ORANGE)
         else:
             msg = f"{saved} glifos guardados"
             extras = []
@@ -483,6 +490,8 @@ class ExtractorTabMixin:
             if extras:
                 msg += f"  ({', '.join(extras)})"
             self.toast(msg, "success")
+            # Status label visible como fallback si el toast falla.
+            self._set_status(f"✓ {msg}", theme.ACCENT_GREEN)
             # save_glyphs_to_bank llama _cleanup_temp_dir() internamente, así
             # que los PNG temporales ya no existen. Reemplazamos las rutas en
             # self._extracted con las entradas permanentes del banco para que
@@ -491,8 +500,21 @@ class ExtractorTabMixin:
             self._update_extracted_to_bank_paths()
         try:
             self._refresh_bank()
+            logger.info("_save_to_bank: banco refrescado OK")
         except Exception as exc:
-            logger.exception("_save_to_bank: _refresh_bank falló: %s", exc)
+            logger.error("_save_to_bank: _refresh_bank lanzó: %s", exc, exc_info=True)
+
+    def _set_status(self, text: str, color: str) -> None:
+        """Helper: actualiza el label de status de extracción si existe.
+
+        Existe como fallback visible cuando el toast no aparece (HiDPI, manager
+        no inicializado, etc.). Falla silenciosamente si el widget aún no se
+        creó.
+        """
+        try:
+            self._extract_status.configure(text=text, text_color=color)
+        except (AttributeError, Exception):
+            pass
 
     def _update_extracted_to_bank_paths(self) -> None:
         """Reemplaza rutas temporales de self._extracted con rutas permanentes del banco.

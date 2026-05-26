@@ -1,6 +1,11 @@
+import logging
+import sys
+
 import customtkinter as ctk
 
 from ui import theme
+
+logger = logging.getLogger(__name__)
 
 
 class BaseView(ctk.CTkFrame):
@@ -17,8 +22,23 @@ class BaseView(ctk.CTkFrame):
         pass
 
     def toast(self, message: str, kind: str = "info"):
-        if hasattr(self.app, 'toast_manager'):
-            self.app.toast_manager.show(message, kind)
+        """Mostrar toast. Si el manager falla o no existe, fallback a stderr.
+
+        Sin el fallback, fallos de toast (HiDPI mal calculado, manager
+        no inicializado, excepción interna) hacen que los mensajes
+        desaparezcan en silencio — el usuario percibe que la acción no
+        hizo nada aunque internamente sí se ejecutó.
+        """
+        tm = getattr(self.app, "toast_manager", None)
+        if tm is not None:
+            try:
+                tm.show(message, kind)
+                return
+            except Exception as exc:
+                logger.warning("toast.show falló: %s", exc, exc_info=True)
+        # Fallback visible mínimo: stderr + log
+        print(f"[TOAST/{kind}] {message}", file=sys.stderr, flush=True)
+        logger.info("toast fallback (sin UI): [%s] %s", kind, message)
 
     def section_label(self, parent, text: str) -> ctk.CTkLabel:
         label = ctk.CTkLabel(
