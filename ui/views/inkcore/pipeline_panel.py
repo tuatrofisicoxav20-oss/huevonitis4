@@ -158,13 +158,14 @@ class PipelinePanelMixin:
             corner_radius=6,
         ).pack(fill="x", padx=10, pady=(0, 4))
 
-        ctk.CTkButton(
+        self._compare_btn = ctk.CTkButton(
             inner, text="🔬 Comparar estrategias de segmentación",
             command=self._on_compare_strategies,
             fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
             text_color="white", font=theme.FONT_SMALL, height=28,
             corner_radius=6,
-        ).pack(fill="x", padx=10, pady=(0, 4))
+        )
+        self._compare_btn.pack(fill="x", padx=10, pady=(0, 4))
 
         ctk.CTkButton(
             inner, text="🧹 Liberar modelos de memoria",
@@ -232,8 +233,24 @@ class PipelinePanelMixin:
             contrast=float(self._contrast_slider.get()),
             rotation_deg=float(self._rotation_slider.get()),
         )
+        # Deshabilitar el botón mientras corre el thread (mismo motivo que
+        # _show_preprocess_preview: clicks repetidos lanzan threads paralelos
+        # que sobrescriben results y compiten por la misma ventana modal).
+        try:
+            self._compare_btn.configure(state="disabled", text="Comparando…")
+        except (AttributeError, Exception):
+            pass
         self.toast("Comparando estrategias…", "info")
         image_path = self._image_path
+
+        def _restore():
+            try:
+                self._compare_btn.configure(
+                    state="normal",
+                    text="🔬 Comparar estrategias de segmentación",
+                )
+            except (AttributeError, Exception):
+                pass
 
         def worker():
             try:
@@ -243,8 +260,11 @@ class PipelinePanelMixin:
             except Exception as exc:
                 logger.error("compare_strategies error: %s", exc, exc_info=True)
                 results = {"_meta": {"error": str(exc)}}
+            def _done():
+                _restore()
+                self._show_strategy_results(results)
             try:
-                self.after(0, lambda: self._show_strategy_results(results))
+                self.after(0, _done)
             except Exception:
                 pass
 

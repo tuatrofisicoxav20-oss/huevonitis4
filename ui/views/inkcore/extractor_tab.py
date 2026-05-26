@@ -194,8 +194,15 @@ class ExtractorTabMixin:
             except Exception as e:
                 logger.warning("No se pudo abrir imagen para preview: %s", e)
                 self._img_preview.configure(text=name)
+                # Sin este toast, el usuario veía "✓ cargada" pero el preview
+                # quedaba en blanco sin saber por qué — ahora se le avisa.
+                self.toast(
+                    f"Imagen cargada pero no se pudo generar preview: {e}",
+                    "warning",
+                )
         else:
             self._img_preview.configure(text=name)
+            self.toast("PIL no disponible — no se mostrará preview", "warning")
 
     def _apply_preview(self, *_):
         if not _PIL_OK or self._original_img is None:
@@ -493,11 +500,35 @@ class ExtractorTabMixin:
             contrast=float(self._contrast_slider.get()),
             rotation_deg=float(self._rotation_slider.get()),
         )
+        # Deshabilitar el botón mientras corre el thread: sin esto, clicks
+        # repetidos lanzan threads concurrentes que abren múltiples ventanas
+        # de preview y compiten por los mismos sliders/imagen.
+        try:
+            self._preview_btn.configure(state="disabled", text="Procesando…")
+        except (AttributeError, Exception):
+            pass
         self.toast("Generando preview de preprocesamiento…", "info")
+        image_path = self._image_path
+
+        def _restore():
+            try:
+                self._preview_btn.configure(state="normal", text="🔍 Ver preprocesamiento")
+            except (AttributeError, Exception):
+                pass
 
         def worker():
-            preview = self._pipeline.extractor.get_preprocessed_preview(self._image_path, opts)
-            self.after(0, lambda: self._open_preview_window(preview))
+            try:
+                preview = self._pipeline.extractor.get_preprocessed_preview(image_path, opts)
+            except Exception as exc:
+                logger.exception("get_preprocessed_preview falló: %s", exc)
+                preview = None
+            def _done():
+                _restore()
+                self._open_preview_window(preview)
+            try:
+                self.after(0, _done)
+            except Exception:
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 

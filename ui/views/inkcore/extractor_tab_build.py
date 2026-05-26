@@ -195,8 +195,11 @@ class ExtractorTabBuildMixin:
             corner_radius=9,
         )
         self._extract_btn.pack(side="left", padx=(0, 6))
-        self.secondary_button(action_row, "🔍 Ver preprocesamiento",
-                              self._show_preprocess_preview, width=160).pack(side="left")
+        self._preview_btn = self.secondary_button(
+            action_row, "🔍 Ver preprocesamiento",
+            self._show_preprocess_preview, width=160,
+        )
+        self._preview_btn.pack(side="left")
 
         self._extract_error = ctk.CTkLabel(
             parent, text="",
