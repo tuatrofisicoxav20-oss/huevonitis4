@@ -1,5 +1,88 @@
 # Changelog — Huevonitis 4
 
+## [4.2.0] — 2026-05-26 (bug raíz del banco + perfiles + replicador)
+
+### 🚨 BUG CRÍTICO RAÍZ
+- **BUG-18**: `_avg_hash` rechazaba TODOS los glifos nuevos como duplicados.
+  El extractor produce RGBA con fondo transparente; `Image.convert("L")`
+  ignora alpha y proyectaba todo a un único hash. El "botón Guardar en
+  banco no hace nada" era esto: el primero se guardaba y los siguientes
+  26 se rechazaban silenciosamente.
+  - Fix: `_flatten_rgba` aplana sobre blanco antes de hashear.
+  - Nuevo `_dhash` (difference hash, más estable). Verificación:
+    `python tools/test_dedup_sanity.py`.
+
+### Bugs corregidos
+- BUG-01: undo cross-page corrompía elementos (canvas_editor.load_page limpia stacks)
+- BUG-02: cleanup selectivo de `_temp_extract/` (no borra candidatos pendientes
+  de bulk capture cuando se hace save desde el Extractor)
+- BUG-03: `tests/test_e2e_extraction.py` no rompe la colección del módulo
+- BUG-04: rasters de PDF se limpian en `BulkCaptureRunner._cleanup_raster_tmps`
+- BUG-06: word-wrap propio en `HandwritingRenderer._soft_wrap_text` para
+  que párrafos largos no se trunquen
+- BUG-08: `config.VERSION` se lee del archivo VERSION en runtime (SSOT)
+- BUG-11: `save_glyphs_to_bank` devuelve dict `{saved, duplicates, missing_source, errors}`
+- BUG-22: `Payment.amount` se parsea de forma segura en income calculations
+- BUG-28: payments con fecha inválida van al final (no al inicio)
+- BUG-29: `_from_dict` normaliza tier legacy lowercase + loguea campos faltantes
+
+### Performance
+- **PERF-01**: `begin_batch/end_batch` en `GlyphBank` → 1 write al manifest
+  por sesión en vez de N (50× más rápido en captura masiva).
+- **PERF-02**: `perceptual_hash` cacheado en `GlyphEntry`. Dedup compara
+  hashes en memoria sin re-abrir PNGs (~100× más rápido).
+- **PERF-03**: índices `_by_char`/`_by_tier` para lookups O(1) en
+  `get_best_glyph`, `get_all`, `approve_glyph`, `remove_glyph` (20× más rápido).
+- **PERF-07**: PIL `Image.open` siempre dentro de `with` — handles cerrados.
+
+### Features nuevos (v4.2)
+- **Perfiles de letra por persona** (F1): cada perfil con carpeta y manifest
+  propios bajo `tipografia/{profile_id}/`. Migración automática del banco
+  legacy a `default/` con backup en `_backup_pre_profiles/`.
+  Barra de perfil sobre el tabview con dropdown + crear/renombrar/eliminar.
+- **Reproductor de apuntes MVP** (F2): tab nuevo 🔁 Reproducir. Carga un
+  apunte ajeno → detecta recuadros (cv2 findContours) y bloques de texto
+  (tesseract OCR) → re-renderiza con el `HandwritingRenderer` del perfil
+  activo. Slider de fidelidad 0–100. Toggles por bloque. Limitaciones
+  documentadas en `docs/REPLICATOR_LIMITS.md`.
+- **Diagnóstico de sesión al arrancar** (F3): 6 checks (dependencies,
+  disk space, profile consistency, manifest integrity, orphan PNGs,
+  missing PNGs). Modal con auto-fix individual o "arreglar todos los
+  seguros". Skip con `H4_SKIP_DIAGNOSTIC=1`.
+
+### Mejoras del banco
+- Tab Banco agrupa glifos por letra con cabeceras (carácter, nº muestras,
+  calidad promedio). Orden canónico a-z con ñ en posición 14.
+- Acciones por celda: ✏️ renombrar, ⬆️ ciclar tier, 🗑️ eliminar.
+- "➕ Agregar desde imagen": diálogo para asignar carácter manual a un PNG.
+- Selección múltiple con checkboxes + barra batch (eliminar seleccionados,
+  preparada para "mover a perfil").
+
+### Instrumentación / robustez
+- Logging INFO/WARNING/ERROR end-to-end en el flujo guardar-en-banco
+  (extractor_tab → pipeline → bank.add_glyph).
+- `BaseView.toast` cae a stderr si el toast manager falla.
+- `ToastManager._restack` con HiDPI guard + `lift()` forzado al final del
+  slide-in para evitar toasts tapados.
+- `extractor_tab._save_to_bank` actualiza el status label como fallback
+  visible bajo el botón.
+
+### Herramientas nuevas
+- `tools/diagnose_save.py`: reproduce el flujo de save fuera de la UI.
+- `tools/test_dedup_sanity.py`: verifica que el dedup acepta variantes y
+  rechaza idénticos.
+- `tools/migrate_to_profiles.py`: migración manual a la estructura de perfiles.
+
+### Visual
+- Paleta refinada: negros más profundos en BG_PRIMARY/SECONDARY/TERTIARY.
+- Nuevo helper `theme.get_font(weight, size)` portable cross-platform.
+
+### Cambios en API
+- `save_glyphs_to_bank` ahora devuelve `dict` (antes `int`). Los callers
+  legacy que esperan int siguen funcionando si chequean `truthiness`.
+- `GlyphBank.__init__` acepta `profile_id`. Default mantiene compat hacia atrás.
+- `GlyphEntry` gana campos: `profile_id`, `perceptual_hash`.
+
 ## [4.0.1] — 2026-05-23 (higiene del repo + fixes prioridad máxima)
 
 ### Infraestructura

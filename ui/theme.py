@@ -3,9 +3,10 @@
 # apply_theme() swaps module-level globals to the chosen palette.
 
 _DARK: dict = {
-    "BG_PRIMARY":   "#0D1117",
-    "BG_SECONDARY": "#111827",
-    "BG_TERTIARY":  "#1E2A38",
+    # v4.2: paleta refinada — negros más profundos, mejor jerarquía
+    "BG_PRIMARY":   "#0B0F17",
+    "BG_SECONDARY": "#121826",
+    "BG_TERTIARY":  "#1B2333",
     "CARD_BG":       "#162032",
     "CARD_BG_HOVER": "#1D2D45",
     "GRADIENT_START": "#1C2840",
@@ -141,6 +142,15 @@ _MONO_CANDIDATES = ["Consolas", "Fira Mono", "DejaVu Sans Mono",
 
 UI_FONT = "TkDefaultFont"
 MONO_FONT = "TkFixedFont"
+
+
+def get_font(weight: str = "normal", size: int = 11) -> tuple:
+    """Devuelve una tupla (family, size, weight) usando el mejor UI font disponible.
+
+    weight: "normal" | "bold". UI_FONT debe resolverse con init_fonts() antes
+    de cualquier llamada (típicamente después de crear el Tk root).
+    """
+    return (UI_FONT, size, "bold" if weight == "bold" else "normal")
 
 
 def init_fonts() -> None:

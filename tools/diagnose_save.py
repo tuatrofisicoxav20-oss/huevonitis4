@@ -82,8 +82,14 @@ def main() -> int:
         index=999,
     )
     log.info("Llamando pipeline.save_glyphs_to_bank([%r])...", g.char)
-    saved = pipe.save_glyphs_to_bank([g])
-    log.info("save_glyphs_to_bank devolvió: saved=%d", saved)
+    result = pipe.save_glyphs_to_bank([g])
+    # BUG-11: ahora devuelve dict en lugar de int
+    if isinstance(result, dict):
+        saved = result["saved"]
+        log.info("save_glyphs_to_bank devolvió stats: %s", result)
+    else:
+        saved = result
+        log.info("save_glyphs_to_bank devolvió: saved=%d (legacy int)", saved)
 
     # 4) Verificar estado post
     post_count = len(pipe.bank._entries)
