@@ -27,12 +27,44 @@ except ImportError:
     PIL_OK = False
 
 
+def _flatten_rgba(img: "Image.Image") -> "Image.Image":
+    """BUG-18: aplanar RGBA sobre fondo blanco antes de cualquier hash.
+
+    Los glifos del extractor son RGBA con fondo transparente y tinta RGB=(0,0,0).
+    Si convertimos a grayscale directamente, Image.convert("L") ignora alpha
+    y todos los píxeles dan luminancia 0 → todos los hashes son iguales →
+    el dedup rechaza absolutamente todo. Aplanar sobre blanco preserva la forma.
+    """
+    if img.mode == "RGBA":
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[3])
+        return bg
+    return img.convert("RGB")
+
+
 def _avg_hash(img: "Image.Image", size: int = 16) -> str:
-    gray = img.convert("L").resize((size, size), Image.Resampling.LANCZOS)
+    """Hash promedio (legacy). Mantenido como fallback; usa _flatten_rgba ahora."""
     import numpy as _np
-    px = _np.asarray(gray).flatten().tolist()
-    avg = sum(px) / max(1, len(px))
-    return "".join("1" if p >= avg else "0" for p in px)
+    flat = _flatten_rgba(img)
+    gray = flat.convert("L").resize((size, size), Image.Resampling.LANCZOS)
+    arr = _np.asarray(gray, dtype=_np.uint8)
+    avg = float(arr.mean())
+    bits = (arr > avg).flatten()
+    return "".join("1" if b else "0" for b in bits)
+
+
+def _dhash(img: "Image.Image", size: int = 16) -> str:
+    """Difference hash — más estable que avg_hash frente a cambios de brillo.
+
+    Compara cada píxel con su vecino derecho. Más discriminativo entre glifos
+    visualmente distintos del mismo carácter.
+    """
+    import numpy as _np
+    flat = _flatten_rgba(img)
+    gray = flat.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS)
+    arr = _np.asarray(gray, dtype=_np.int16)
+    diff = arr[:, 1:] > arr[:, :-1]
+    return "".join("1" if b else "0" for b in diff.flatten())
 
 
 def _hamming(a: str, b: str) -> int:
@@ -165,7 +197,7 @@ class GlyphBank:
         if PIL_OK:
             try:
                 new_img = Image.open(source_path).convert("RGBA")
-                new_hash = _avg_hash(new_img)
+                new_hash = _dhash(new_img)
                 with _bank_lock:
                     existing_snapshot = [e for e in self._entries if e.char == char]
                     old_hashes = []
@@ -173,7 +205,7 @@ class GlyphBank:
                         if not Path(e.image_path).exists():
                             continue
                         with contextlib.suppress(Exception):
-                            old_hashes.append(_avg_hash(Image.open(e.image_path).convert("RGBA")))
+                            old_hashes.append(_dhash(Image.open(e.image_path).convert("RGBA")))
                     if old_hashes:
                         best = min(_hamming(new_hash, h) for h in old_hashes)
                         strict, _ = _dup_thresholds(char)
