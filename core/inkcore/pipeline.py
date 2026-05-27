@@ -197,6 +197,8 @@ class InkCorePipeline:
         logger.info("save_glyphs_to_bank: start, %d glifos a procesar", len(glyphs))
         stats = {"saved": 0, "duplicates": 0, "missing_source": 0, "errors": 0}
         consumed_paths: list[str] = []
+        # PERF-01: un solo write al manifest por bulk en vez de N
+        self.bank.begin_batch()
         with self._bank_lock:
             for g in glyphs:
                 if not Path(g.image_path).exists():
@@ -246,6 +248,8 @@ class InkCorePipeline:
                         "save_glyphs_to_bank: ✕ glyph %r (%s) falló: %s",
                         g.char, g.image_path, exc, exc_info=True,
                     )
+        # PERF-01: flush al manifest una sola vez al cerrar el batch
+        self.bank.end_batch()
         logger.info(
             "save_glyphs_to_bank: done saved=%d duplicates=%d missing=%d errors=%d total=%d",
             stats["saved"], stats["duplicates"], stats["missing_source"],

@@ -94,7 +94,38 @@ class GlyphBank:
         self.bank_dir = config.TIPOGRAFIA_DIR / self.profile_id
         self.manifest_file = self.bank_dir / "_manifest.json"
         self._entries: list[GlyphEntry] = []
+        # PERF-03: índices por char/tier para lookups O(1) en lugar de O(N)
+        self._by_char: dict[str, list[GlyphEntry]] = {}
+        self._by_tier: dict[str, list[GlyphEntry]] = {}
+        # PERF-01: batched save — diferir self.save() durante batch operations
+        self._batch_depth = 0
+        self._batch_dirty = False
         self.load()
+
+    # ── PERF-03: índices ─────────────────────────────────────────
+
+    def _rebuild_indices(self) -> None:
+        from collections import defaultdict
+        idx_char: dict[str, list[GlyphEntry]] = defaultdict(list)
+        idx_tier: dict[str, list[GlyphEntry]] = defaultdict(list)
+        for e in self._entries:
+            idx_char[e.char].append(e)
+            idx_tier[e.tier].append(e)
+        self._by_char = dict(idx_char)
+        self._by_tier = dict(idx_tier)
+
+    # ── PERF-01: batched save ────────────────────────────────────
+
+    def begin_batch(self) -> None:
+        """Difiere todos los self.save() hasta el end_batch correspondiente."""
+        self._batch_depth += 1
+
+    def end_batch(self) -> None:
+        """Cierra un batch. Si era el outer, flush al disco si hubo cambios."""
+        self._batch_depth = max(0, self._batch_depth - 1)
+        if self._batch_depth == 0 and self._batch_dirty:
+            self._batch_dirty = False
+            self.save()
 
     def load(self):
         self.bank_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +151,7 @@ class GlyphBank:
                 self._entries = []
         else:
             self._scan_existing()
+        self._rebuild_indices()
 
     def _scan_existing(self):
         self._entries = []
@@ -136,6 +168,14 @@ class GlyphBank:
                 except ValueError:
                     idx = 0
                 metrics = assess_glyph(str(png))
+                # PERF-02/07: computar hash de una vez con context-managed PIL
+                ph = ""
+                if PIL_OK:
+                    try:
+                        with Image.open(png) as raw:
+                            ph = _dhash(raw.convert("RGBA"))
+                    except Exception:
+                        pass
                 self._entries.append(GlyphEntry(
                     char=char,
                     image_path=str(png),
@@ -143,6 +183,8 @@ class GlyphBank:
                     tier=metrics["tier"],
                     ink_coverage=metrics["ink_coverage"],
                     index=idx,
+                    profile_id=self.profile_id,
+                    perceptual_hash=ph,
                 ))
         self.save()
 
@@ -166,6 +208,10 @@ class GlyphBank:
             raise
 
     def save(self):
+        # PERF-01: si estamos dentro de un batch, marcar dirty y diferir el write
+        if self._batch_depth > 0:
+            self._batch_dirty = True
+            return
         with _bank_lock:
             self._atomic_write(self.manifest_file, [self._to_dict(e) for e in self._entries])
 
@@ -194,36 +240,41 @@ class GlyphBank:
             logger.warning("add_glyph: source image not found: %s", source_path)
             return None
 
+        # PERF-02/07: hash del source UNA vez con context-managed Image.open
+        new_hash = ""
         if PIL_OK:
             try:
-                new_img = Image.open(source_path).convert("RGBA")
-                new_hash = _dhash(new_img)
-                with _bank_lock:
-                    existing_snapshot = [e for e in self._entries if e.char == char]
-                    old_hashes = []
-                    for e in existing_snapshot:
-                        if not Path(e.image_path).exists():
-                            continue
-                        with contextlib.suppress(Exception):
-                            old_hashes.append(_dhash(Image.open(e.image_path).convert("RGBA")))
-                    if old_hashes:
-                        best = min(_hamming(new_hash, h) for h in old_hashes)
-                        strict, _ = _dup_thresholds(char)
-                        if best <= strict:
-                            logger.warning(
-                                "add_glyph: %r rechazado por dedup hamming=%d <= %d",
-                                char, best, strict,
-                            )
-                            return None
+                with Image.open(source_path) as raw:
+                    new_hash = _dhash(raw.convert("RGBA"))
             except Exception as e:
-                logger.warning("add_glyph: dedup check falló: %s", e, exc_info=True)
+                logger.warning("add_glyph: hash del source falló: %s", e)
+
+        # PERF-02: dedup contra hashes cacheados en self._by_char,
+        # sin re-abrir PNGs existentes.
+        if new_hash:
+            with _bank_lock:
+                existing = self._by_char.get(char, [])
+                old_hashes = [e.perceptual_hash for e in existing if e.perceptual_hash]
+                if old_hashes:
+                    best = min(_hamming(new_hash, h) for h in old_hashes)
+                    strict, _ = _dup_thresholds(char)
+                    if best <= strict:
+                        logger.warning(
+                            "add_glyph: %r rechazado por dedup hamming=%d <= %d",
+                            char, best, strict,
+                        )
+                        return None
 
         with _bank_lock:
-            existing = [e for e in self._entries if e.char == char]
+            existing = self._by_char.get(char, [])
             idx = max((e.index for e in existing), default=-1) + 1
             safe = char if char.isalnum() else f"punct_{ord(char)}"
             dest = self.bank_dir / f"{safe}_{idx:03d}.png"
-            shutil.copy2(source_path, dest)
+            try:
+                shutil.copy2(source_path, dest)
+            except OSError as exc:
+                logger.error("add_glyph: copy falló %s → %s: %s", source_path, dest, exc)
+                return None
             metrics = quality_override or assess_glyph(str(dest))
             entry = GlyphEntry(
                 char=char,
@@ -236,8 +287,12 @@ class GlyphBank:
                 label_confidence=label_confidence,
                 detector_sources=list(detector_sources or []),
                 profile_id=self.profile_id,
+                perceptual_hash=new_hash,
             )
             self._entries.append(entry)
+            # Mantener índices consistentes (PERF-03)
+            self._by_char.setdefault(char, []).append(entry)
+            self._by_tier.setdefault(entry.tier, []).append(entry)
         self.save()
         logger.info(
             "add_glyph: OK char=%r dest=%s tier=%s score=%.3f profile=%s",
@@ -248,8 +303,6 @@ class GlyphBank:
     def remove_glyph(self, entry: GlyphEntry):
         p = Path(entry.image_path)
         # Defense in depth: only delete files under bank_dir.
-        # Bank images are always copied into bank_dir by add_glyph(), so any
-        # external path here means corruption or tampering — skip the unlink.
         try:
             p.resolve().relative_to(self.bank_dir.resolve())
             _safe = True
@@ -264,10 +317,22 @@ class GlyphBank:
             logger.warning(f"remove_glyph: image_path '{p}' outside bank_dir — not deleting")
         with _bank_lock:
             self._entries = [e for e in self._entries if e.image_path != entry.image_path]
+            # PERF-03: actualizar índices
+            if entry.char in self._by_char:
+                self._by_char[entry.char] = [
+                    e for e in self._by_char[entry.char]
+                    if e.image_path != entry.image_path
+                ]
+            if entry.tier in self._by_tier:
+                self._by_tier[entry.tier] = [
+                    e for e in self._by_tier[entry.tier]
+                    if e.image_path != entry.image_path
+                ]
         self.save()
 
     def get_best_glyph(self, char: str) -> GlyphEntry | None:
-        candidates = [e for e in self._entries if e.char == char]
+        # PERF-03: lookup O(1) en _by_char en vez de scan O(N)
+        candidates = self._by_char.get(char, [])
         if not candidates:
             return None
         gold = [e for e in candidates if e.tier == "Gold"]
@@ -279,12 +344,14 @@ class GlyphBank:
         return random.choice(candidates)
 
     def get_all(self, char_filter: str = "", tier_filter: str = "") -> list[GlyphEntry]:
-        results = self._entries
+        # PERF-03: usar índices cuando hay filtro específico
+        if char_filter and tier_filter and tier_filter != "Todos":
+            return [e for e in self._by_char.get(char_filter, []) if e.tier == tier_filter]
         if char_filter:
-            results = [e for e in results if e.char == char_filter]
+            return list(self._by_char.get(char_filter, []))
         if tier_filter and tier_filter != "Todos":
-            results = [e for e in results if e.tier == tier_filter]
-        return results
+            return list(self._by_tier.get(tier_filter, []))
+        return list(self._entries)
 
     def coverage(self) -> dict:
         chars = set(e.char for e in self._entries)
@@ -313,7 +380,15 @@ class GlyphBank:
         with _bank_lock:
             for e in self._entries:
                 if e.image_path == glyph.image_path:
+                    old_tier = e.tier
                     e.tier = new_tier
+                    # PERF-03: mantener _by_tier consistente
+                    if old_tier in self._by_tier:
+                        self._by_tier[old_tier] = [
+                            x for x in self._by_tier[old_tier]
+                            if x.image_path != glyph.image_path
+                        ]
+                    self._by_tier.setdefault(new_tier, []).append(e)
                     break
             else:
                 return False

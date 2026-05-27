@@ -152,6 +152,8 @@ class GlyphEntry:
     # Perfil de letra al que pertenece (v4.2). Default mantiene compat hacia
     # atrás con bancos pre-perfiles que se migran a "default".
     profile_id: str = "default"
+    # PERF-02: hash perceptual cacheado para dedup rápido sin re-abrir PNGs
+    perceptual_hash: str = ""
 
 
 @dataclass
