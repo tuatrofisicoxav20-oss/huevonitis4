@@ -151,7 +151,39 @@ class GlyphBank:
                 self._entries = []
         else:
             self._scan_existing()
+        # PERF-02: recalcular perceptual_hash para entries pre-v4.2 que no lo tienen
+        self._backfill_missing_hashes()
         self._rebuild_indices()
+
+    def _backfill_missing_hashes(self) -> None:
+        """Para bancos migrados desde pre-v4.2, las entries no tienen
+        perceptual_hash. Sin hash el dedup no funciona contra ellos.
+        Recalcular on-load (operación de un solo cómputo, se persiste al save).
+        """
+        if not PIL_OK:
+            return
+        needs_hash = [e for e in self._entries if not e.perceptual_hash]
+        if not needs_hash:
+            return
+        rebuilt = 0
+        for e in needs_hash:
+            try:
+                with Image.open(e.image_path) as raw:
+                    e.perceptual_hash = _dhash(raw.convert("RGBA"))
+                rebuilt += 1
+            except Exception as exc:
+                logger.warning(
+                    "_backfill_missing_hashes: %s falló: %s", e.image_path, exc,
+                )
+        if rebuilt:
+            logger.info(
+                "_backfill_missing_hashes: %d/%d entries recibieron hash; guardando manifest",
+                rebuilt, len(needs_hash),
+            )
+            try:
+                self.save()
+            except Exception as exc:
+                logger.warning("backfill save falló (no crítico): %s", exc)
 
     def _scan_existing(self):
         self._entries = []
