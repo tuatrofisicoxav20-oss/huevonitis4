@@ -181,6 +181,34 @@ class HandwritingRenderer:
 
         return canvas.convert("RGB")
 
+    def _soft_wrap_text(
+        self, text: str, options: RenderOptions, usable_width: int,
+    ) -> list[str]:
+        """BUG-06: word-wrap propio para evitar que _render_line descarte chars.
+
+        Estima chars/línea con ancho promedio y parte palabras (no chars sueltos).
+        Mantiene los \\n originales del usuario; solo wrappea líneas largas.
+        """
+        avg_char_w = max(8, int(options.font_size * 0.55))
+        chars_per_line = max(10, usable_width // avg_char_w)
+        out_lines: list[str] = []
+        for raw in text.split("\n"):
+            if len(raw) <= chars_per_line:
+                out_lines.append(raw)
+                continue
+            words = raw.split(" ")
+            current = ""
+            for w in words:
+                tentative = (current + " " + w).strip()
+                if len(tentative) > chars_per_line and current:
+                    out_lines.append(current)
+                    current = w
+                else:
+                    current = tentative
+            if current:
+                out_lines.append(current)
+        return out_lines
+
     def render_pages(
         self, text: str, options: RenderOptions, page_height: int = 1122
     ) -> list:
@@ -189,8 +217,9 @@ class HandwritingRenderer:
             return []
         options = self.apply_style(options)
         options = self._apply_background_style(options)
-        lines = text.split("\n")
         usable_width = options.page_width - 2 * options.page_margin
+        # BUG-06: wrap antes de renderizar para que párrafos largos no se trunquen
+        lines = self._soft_wrap_text(text, options, usable_width)
         line_height_px = int(options.font_size * options.line_height)
 
         # Renderizar todas las líneas de texto

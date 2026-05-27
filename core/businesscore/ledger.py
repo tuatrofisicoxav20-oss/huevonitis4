@@ -85,14 +85,37 @@ class BusinessLedger:
         self.save()
 
     def get_payments(self) -> list[Payment]:
-        """Return payments sorted by date (oldest first); UI uses reversed() for newest-first."""
-        def _sort_key(p):
-            dt = self._parse_payment_date(p.date)
-            return dt if dt is not None else datetime.min
-        return sorted(self._payments, key=_sort_key)
+        """BUG-28: payments con fecha inválida van al FINAL (no al inicio).
+
+        Antes datetime.min ponía los inválidos primero en orden ascendente,
+        ensuciando la lista visible. Ahora se separan en dos listas: válidos
+        ordenados ascendentemente + inválidos al final (con warning).
+        """
+        valid: list[Payment] = []
+        invalid: list[Payment] = []
+        for p in self._payments:
+            if self._parse_payment_date(p.date) is None:
+                invalid.append(p)
+                logger.warning(
+                    "Payment con fecha no parseable: id=%s, date=%r",
+                    getattr(p, "id", "?"), p.date,
+                )
+            else:
+                valid.append(p)
+        valid.sort(key=lambda p: self._parse_payment_date(p.date))
+        return valid + invalid
+
+    @staticmethod
+    def _safe_amount(p: Payment) -> float:
+        """BUG-22: parsea amount tolerando None / strings / formatos raros."""
+        try:
+            return float(p.amount or 0)
+        except (TypeError, ValueError):
+            logger.warning("Payment.amount inválido: %r — usando 0.0", getattr(p, "amount", None))
+            return 0.0
 
     def total_income(self) -> float:
-        return round(sum(p.amount for p in self._payments), 2)
+        return round(sum(self._safe_amount(p) for p in self._payments), 2)
 
     def _parse_payment_date(self, date_str: str) -> datetime | None:
         """Parse a payment date in dd/mm/YYYY or ISO 8601 format. Returns None on failure."""
@@ -112,7 +135,7 @@ class BusinessLedger:
         for p in self._payments:
             dt = self._parse_payment_date(p.date)
             if dt is not None and dt.year == year and dt.month == month:
-                total += p.amount
+                total += self._safe_amount(p)
         return round(total, 2)
 
     def active_jobs_count(self) -> int:

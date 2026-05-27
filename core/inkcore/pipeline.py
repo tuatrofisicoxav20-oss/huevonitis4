@@ -12,18 +12,27 @@ from core.models import GlyphEntry
 logger = logging.getLogger(__name__)
 
 
-def _cleanup_temp_dir() -> None:
-    """Remove all PNGs from the temporary extraction directory.
+def _cleanup_temp_dir(paths_to_remove: list[str] | None = None) -> None:
+    """BUG-02: cleanup SELECTIVO de _temp_extract.
 
-    Called after glyphs have been copied into the permanent bank (or when
-    extraction is discarded) so that _temp_extract/ does not accumulate
-    gigabytes of orphaned files across sessions.
+    Si paths_to_remove es None, limpia todo el dir (comportamiento legacy
+    usado al descartar una extracción). Si se pasa una lista de paths,
+    solo elimina esos específicos.
+
+    Esto evita que el Extractor borre temporales pendientes de aprobación
+    del bulk capture al hacer save.
     """
     temp_dir = config.TIPOGRAFIA_DIR / "_temp_extract"
     if not temp_dir.exists():
         return
+    if paths_to_remove is None:
+        targets = list(temp_dir.glob("*.png"))
+    else:
+        # Solo aceptar paths que están dentro del temp_dir (evita borrar otros archivos)
+        targets = [Path(p) for p in paths_to_remove
+                   if Path(p).exists() and Path(p).parent == temp_dir]
     removed = 0
-    for png in temp_dir.glob("*.png"):
+    for png in targets:
         try:
             png.unlink()
             removed += 1
@@ -175,13 +184,28 @@ class InkCorePipeline:
             diagnostics.log_error("extract", exc)
             raise
 
-    def save_glyphs_to_bank(self, glyphs: list[GlyphEntry]) -> int:
+    def save_glyphs_to_bank(self, glyphs: list[GlyphEntry]) -> "dict | int":
+        """BUG-11: devuelve dict con stats explícitos: saved/duplicates/missing_source/errors.
+
+        Para compat hacia atrás con callers que esperan int, los stats incluyen
+        también el resultado como integer en stats["saved"]. La forma recomendada
+        es: ``stats = pipeline.save_glyphs_to_bank(glyphs); n = stats["saved"]``.
+
+        Si algún caller legacy hace ``n = pipeline.save_glyphs_to_bank(glyphs)``
+        recibe el dict (que es truthy), no rompe pero pierde precisión.
+        """
         logger.info("save_glyphs_to_bank: start, %d glifos a procesar", len(glyphs))
-        saved = 0
-        skipped = 0
-        errored = 0
+        stats = {"saved": 0, "duplicates": 0, "missing_source": 0, "errors": 0}
+        consumed_paths: list[str] = []
         with self._bank_lock:
             for g in glyphs:
+                if not Path(g.image_path).exists():
+                    stats["missing_source"] += 1
+                    logger.info(
+                        "save_glyphs_to_bank: ✕ %r src missing: %s",
+                        g.char, g.image_path,
+                    )
+                    continue
                 try:
                     has_pipeline_meta = (
                         g.predicted_char is not None
@@ -203,34 +227,35 @@ class InkCorePipeline:
                         quality_override=quality_override,
                     )
                     if result is not None:
-                        saved += 1
+                        stats["saved"] += 1
+                        consumed_paths.append(g.image_path)
                         logger.info(
                             "save_glyphs_to_bank: ✓ %r → %s",
                             g.char, result.image_path,
                         )
                     else:
-                        skipped += 1
+                        stats["duplicates"] += 1
+                        consumed_paths.append(g.image_path)  # también limpiar dupes
                         logger.info(
-                            "save_glyphs_to_bank: ⊘ %r saltado (dedup o source missing) src=%s",
+                            "save_glyphs_to_bank: ⊘ %r duplicado src=%s",
                             g.char, g.image_path,
                         )
                 except Exception as exc:
-                    errored += 1
+                    stats["errors"] += 1
                     logger.error(
                         "save_glyphs_to_bank: ✕ glyph %r (%s) falló: %s",
                         g.char, g.image_path, exc, exc_info=True,
                     )
         logger.info(
-            "save_glyphs_to_bank: done saved=%d skipped=%d errored=%d total=%d",
-            saved, skipped, errored, len(glyphs),
+            "save_glyphs_to_bank: done saved=%d duplicates=%d missing=%d errors=%d total=%d",
+            stats["saved"], stats["duplicates"], stats["missing_source"],
+            stats["errors"], len(glyphs),
         )
-        # reload_bank acquires the lock internally; call outside the block
         self.reload_bank()
-        # Bug fix #12: purge temp PNGs now that they have been copied into
-        # the permanent bank (or skipped as duplicates). Without this, each
-        # extraction session leaves files in _temp_extract/ forever.
-        _cleanup_temp_dir()
-        return saved
+        # BUG-02: cleanup SELECTIVO — solo los que se consumieron, no todo el dir.
+        # Esto evita borrar candidatos pendientes de bulk capture.
+        _cleanup_temp_dir(consumed_paths)
+        return stats
 
     def bank_coverage(self) -> dict:
         return self.bank.coverage()

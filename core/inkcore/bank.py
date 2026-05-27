@@ -414,9 +414,20 @@ class GlyphBank:
     def _to_dict(self, e: GlyphEntry) -> dict:
         return e.__dict__.copy()
 
+    _TIER_NORMALIZE = {"gold": "Gold", "silver": "Silver", "bronze": "Bronze"}
+
     def _from_dict(self, d: dict) -> GlyphEntry:
+        # BUG-29: normalizar tier legacy + loguear campos faltantes para diagnóstico
+        missing = [k for k in ("char", "image_path", "quality_score", "tier") if k not in d]
+        if missing:
+            logger.warning(
+                "Manifest entry incompleto (faltan %s) — usando defaults para %s",
+                missing, d.get("image_path", "?"),
+            )
         entry = GlyphEntry()
         for k, v in d.items():
+            if k == "tier" and isinstance(v, str):
+                v = self._TIER_NORMALIZE.get(v.lower(), v)
             if hasattr(entry, k):
                 setattr(entry, k, v)
         return entry

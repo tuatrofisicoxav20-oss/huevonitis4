@@ -110,6 +110,11 @@ class CanvasEditor(ctk.CTkFrame):
     def load_page(self, page: Page):
         self._page = page
         self._selected_id = None
+        # BUG-01: limpiar historial al cambiar de página/proyecto. Sin esto
+        # Ctrl+Z pushea elementos deep-copied de OTRA página al actual,
+        # corrompiendo la página visible.
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self.redraw()
 
     def set_tool(self, tool_id: str):

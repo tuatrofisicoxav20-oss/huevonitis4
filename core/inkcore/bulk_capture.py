@@ -62,14 +62,20 @@ class BulkCaptureSession:
         }
 
 
-def _rasterize_pdf(pdf_path: str, dpi: int = 200) -> list[tuple[str, int]]:
-    """Rasteriza PDF a PNGs temporales. Devuelve [(temp_path, page_num)]."""
+def _rasterize_pdf(
+    pdf_path: str, dpi: int = 200, *, tracker: "list[str] | None" = None,
+) -> list[tuple[str, int]]:
+    """BUG-04: si tracker se pasa (lista), registra el tmp_dir creado para
+    cleanup posterior. Sin esto, /tmp se llena con 10-50 MB por página
+    hasta reboot."""
     try:
         from pdf2image import convert_from_path
     except ImportError:
         logger.warning("pdf2image no disponible — saltando PDF '%s'", pdf_path)
         return []
     tmp_dir = tempfile.mkdtemp(prefix="bulk_raster_")
+    if tracker is not None:
+        tracker.append(tmp_dir)
     try:
         pages = convert_from_path(
             pdf_path, dpi=dpi, fmt="png",
@@ -108,6 +114,19 @@ class BulkCaptureRunner:
         self._pipeline = None
         # Lock para proteger appends a `session.candidates` desde varios threads.
         self._results_lock = threading.Lock()
+        # BUG-04: tracker de tmp_dirs creados por _rasterize_pdf — se limpian
+        # en _cleanup_raster_tmps() al final de run() / run_pdf().
+        self._raster_tmp_dirs: list[str] = []
+
+    def _cleanup_raster_tmps(self) -> None:
+        """Borra los tmp_dirs creados por _rasterize_pdf en esta sesión."""
+        import shutil
+        for d in self._raster_tmp_dirs:
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+            except Exception as exc:
+                logger.warning("No se pudo borrar tmp_dir %s: %s", d, exc)
+        self._raster_tmp_dirs.clear()
 
     def _get_pipeline(self):
         if self._pipeline is None:
@@ -123,7 +142,8 @@ class BulkCaptureRunner:
         image_pages: list[tuple[str, str, int]] = []
         for src in sources:
             if Path(src).suffix.lower() == ".pdf":
-                rasterized = _rasterize_pdf(src, dpi=200)
+                # BUG-04: pasar tracker para cleanup al final
+                rasterized = _rasterize_pdf(src, dpi=200, tracker=self._raster_tmp_dirs)
                 for img_path, pnum in rasterized:
                     image_pages.append((img_path, Path(src).name, pnum))
             else:
@@ -218,6 +238,8 @@ class BulkCaptureRunner:
             pass
 
         self._progress(1.0, f"Listo — {s['total']} glifos extraídos")
+        # BUG-04: limpiar tmp_dirs de rasterización
+        self._cleanup_raster_tmps()
         return session
 
     def run_pdf(self, pdf_path: str) -> BulkCaptureSession:

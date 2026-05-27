@@ -17,31 +17,36 @@ EXPECTATIONS_FILE = FIXTURES_DIR / "expectations.json"
 
 
 def _load_expectations() -> dict:
+    """BUG-03: NO llamar pytest.skip aquí — rompe la colección de TODO el módulo
+    cuando se invoca desde _list_fixtures() en parse-time."""
     if not EXPECTATIONS_FILE.exists():
-        pytest.skip("Sin expectations.json — añadir fixtures con tools/measure_fixture.py",
-                    allow_module_level=True)
-    with open(EXPECTATIONS_FILE) as f:
-        data = json.load(f)
+        return {}
+    try:
+        with open(EXPECTATIONS_FILE) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
     return data.get("fixtures", {})
 
 
 def _list_fixtures():
     exp = _load_expectations()
     if not exp:
-        pytest.skip("expectations.json sin fixtures definidos", allow_module_level=True)
+        return []
     params = []
     for name in exp:
         path = FIXTURES_DIR / name
         if path.exists():
             params.append(pytest.param(name, id=name))
-    if not params:
-        pytest.skip("Sin imágenes en fixtures/handwriting/ (sube tus fotos primero)",
-                    allow_module_level=True)
     return params
 
 
+_FIXTURES = _list_fixtures()
+
+
 @pytest.mark.slow
-@pytest.mark.parametrize("fixture_name", _list_fixtures())
+@pytest.mark.skipif(not _FIXTURES, reason="Sin fixtures en tests/fixtures/handwriting/")
+@pytest.mark.parametrize("fixture_name", _FIXTURES or [pytest.param("dummy", id="skipped")])
 def test_legacy_extraction_meets_minimum(fixture_name, tmp_path, monkeypatch):
     """El extractor legacy extrae al menos N glifos del fixture."""
     import config
