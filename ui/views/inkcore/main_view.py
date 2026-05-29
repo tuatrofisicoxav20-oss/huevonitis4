@@ -73,6 +73,10 @@ class InkCoreView(
         self._review_check_vars: list = []
         self._thumb_cache: dict[tuple, "ImageTk.PhotoImage"] = {}
         self._writer_page_photos: list = []
+        # PERF: tabs cuyo contenido quedó desactualizado y se refrescarán de
+        # forma diferida la próxima vez que se muestren (evita reconstruir grids
+        # no visibles en cada micro-acción del banco/revisión).
+        self._tabs_dirty: set[str] = set()
         self._build()
 
     def _get_thumb(self, path: str, w: int, h: int) -> "ImageTk.PhotoImage | None":
@@ -109,6 +113,7 @@ class InkCoreView(
             segmented_button_selected_hover_color=theme.ACCENT_ORANGE_HOVER,
             segmented_button_unselected_hover_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_PRIMARY,
+            command=self._on_tab_change,
         )
         self._tabs.pack(fill="both", expand=True, padx=16, pady=(0, 16))
         self._tabs.add("📷 Extractor")
@@ -133,9 +138,41 @@ class InkCoreView(
         self._bulk_filter_char_val: str = "(todos)"
 
     def on_show(self):
+        # Al ENTRAR a la vista sí releemos el banco del disco (pudo cambiar
+        # fuera de aquí). Las micro-acciones posteriores ya NO releen disco.
+        try:
+            self._pipeline.reload_bank()
+        except Exception as exc:
+            logger.error("on_show: reload_bank falló: %s", exc, exc_info=True)
         self._reload_and_refresh_all()
         self._refresh_detector_chip()
         self._maybe_load_pending_text()
+
+    # Nombres exactos de los tabs que cuelgan del banco (con emoji).
+    _BANK_TAB = "🗂 Banco"
+    _REVIEW_TAB = "✅ Revisión"
+
+    def _on_tab_change(self) -> None:
+        """Refresca de forma diferida un tab que quedó marcado como sucio.
+
+        El refresco de banco/revisión es caro (reconstruye cientos de widgets);
+        en vez de rehacer el tab no visible en cada acción, lo marcamos sucio y
+        lo reconstruimos solo cuando el usuario lo abre.
+        """
+        try:
+            name = self._tabs.get()
+        except Exception:
+            return
+        if name not in self._tabs_dirty:
+            return
+        self._tabs_dirty.discard(name)
+        try:
+            if name == self._BANK_TAB:
+                self._do_refresh_bank_ui()
+            elif name == self._REVIEW_TAB:
+                self._do_refresh_review_ui()
+        except Exception as exc:
+            logger.error("_on_tab_change(%s) falló: %s", name, exc, exc_info=True)
 
     def _maybe_load_pending_text(self) -> None:
         """Carga texto pendiente de Study si el escritor está vacío."""

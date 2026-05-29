@@ -146,8 +146,12 @@ class BankTabMixin:
     # ── Logic ──────────────────────────────────────────────────────
 
     def _refresh_bank(self):
+        # Viene de guardar desde el Extractor (otro tab): los datos cambiaron
+        # en disco, así que aquí sí releemos. La revisión queda desactualizada,
+        # se marca sucia para refrescarse al abrirse.
         self._pipeline.reload_bank()
         self._do_refresh_bank_ui()
+        self._tabs_dirty.add(self._REVIEW_TAB)
 
     def _do_refresh_bank_ui(self):
         for w in self._bank_scroll.winfo_children():
@@ -527,20 +531,34 @@ class BankTabMixin:
         self._reload_and_refresh_all()
 
     def _reload_and_refresh_all(self):
-        """Recarga el banco una sola vez y actualiza banco + revisión."""
+        """Refresca banco + revisión desde el estado EN MEMORIA del banco.
+
+        Ya NO relee el manifest del disco: tras approve/reject/rename/cycle el
+        estado en memoria es la verdad (esos métodos mutan self._entries y hacen
+        save()). Releer en cada micro-acción disparaba I/O + parse JSON + backfill
+        + N stat() innecesarios. La recarga de disco vive en on_show / _refresh_bank.
+
+        Solo se reconstruye el tab visible (banco o revisión); el otro se marca
+        sucio y se reconstruye al abrirse (ver _on_tab_change). Reconstruir un grid
+        de cientos de widgets que nadie está viendo era el grueso de la lentitud.
+        """
         try:
-            self._pipeline.reload_bank()
-        except Exception as exc:
-            logger.error("reload_bank failed: %s", exc, exc_info=True)
-            diagnostics.log_error("reload_and_refresh_all", exc)
-        try:
-            self._do_refresh_bank_ui()
-        except Exception as exc:
-            logger.error("_do_refresh_bank_ui failed: %s", exc, exc_info=True)
-        try:
-            self._do_refresh_review_ui()
-        except Exception as exc:
-            logger.error("_do_refresh_review_ui failed: %s", exc, exc_info=True)
+            visible = self._tabs.get()
+        except Exception:
+            visible = None
+        refreshers = {
+            self._BANK_TAB: self._do_refresh_bank_ui,
+            self._REVIEW_TAB: self._do_refresh_review_ui,
+        }
+        for name, fn in refreshers.items():
+            if name == visible:
+                try:
+                    fn()
+                except Exception as exc:
+                    logger.error("%s refresh failed: %s", name, exc, exc_info=True)
+                    diagnostics.log_error("reload_and_refresh_all", exc)
+            else:
+                self._tabs_dirty.add(name)
         # Profile bar counter (v4.2) — actualizar si el método existe
         try:
             self._update_profile_count()
