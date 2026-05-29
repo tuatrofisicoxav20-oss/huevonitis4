@@ -129,8 +129,8 @@ class ReviewTabRowMixin:
         btn_frame.pack(side="right", padx=8, pady=8)
 
         for txt, fg, hover, cmd in [
-            ("✅", theme.ACCENT_GREEN, theme.ACCENT_GREEN_HOVER,
-             lambda g=glyph: self._review_approve(g)),
+            ("⬆️", theme.ACCENT_GREEN, theme.ACCENT_GREEN_HOVER,
+             lambda g=glyph: self._review_promote(g)),
             ("❌", theme.ACCENT_RED, theme.ACCENT_RED_HOVER,
              lambda g=glyph: self._review_reject(g)),
             ("🔄", theme.ACCENT_BLUE, theme.ACCENT_BLUE_HOVER,

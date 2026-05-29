@@ -113,23 +113,34 @@ class ReviewTabMixin:
         self._review_checkboxes.clear()
         self._review_check_vars.clear()
 
-        queue = self._pipeline.bank.get_review_queue()
+        # El review muestra TODO el banco para reclasificar/limpiar muestras,
+        # ordenado de peor a mejor (Bronze y baja calidad arriba) para que lo
+        # que necesita atención salte primero a la vista.
         all_entries = self._pipeline.bank.get_all()
         silver_count = sum(1 for e in all_entries if e.tier == "Silver")
         gold_count = sum(1 for e in all_entries if e.tier == "Gold")
+        attention = sum(
+            1 for e in all_entries if e.tier == "Bronze" or e.quality_score < 0.50
+        )
 
-        self._review_pending_lbl.configure(text=f"🔴  {len(queue)}  pendientes")
+        self._review_pending_lbl.configure(text=f"🔴  {attention}  por revisar")
         self._review_silver_lbl.configure(text=f"🟡  {silver_count}  Silver")
         self._review_gold_lbl.configure(text=f"🟢  {gold_count}  Gold")
 
-        if not queue:
+        if not all_entries:
             ctk.CTkLabel(
                 self._review_scroll,
-                text="Sin glifos pendientes de revisión.\nTodos los glifos son Silver o Gold.",
+                text="Banco vacío.\nExtrae glifos en el tab 📷 Extractor y guárdalos.",
                 font=theme.FONT_BODY,
-                text_color=theme.ACCENT_GREEN,
+                text_color=theme.TEXT_MUTED,
             ).pack(pady=40)
             return
+
+        _TIER_RANK = {"Bronze": 0, "Silver": 1, "Gold": 2}
+        ordered = sorted(
+            all_entries,
+            key=lambda e: (_TIER_RANK.get(e.tier, 0), e.quality_score, e.char),
+        )
 
         header = ctk.CTkFrame(self._review_scroll, fg_color=theme.BG_SECONDARY, corner_radius=6)
         header.pack(fill="x", padx=2, pady=(2, 4))
@@ -141,30 +152,40 @@ class ReviewTabMixin:
                 text_color=theme.TEXT_SECONDARY,
             ).pack(side="left", padx=4, pady=4)
 
-        for glyph in queue:
+        for glyph in ordered:
             self._build_review_row(glyph)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         diagnostics.log_timing("refresh_review_ui", elapsed_ms)
-        diagnostics.log_event("ui", "refresh_review", f"{len(queue)} pendientes")
+        diagnostics.log_event("ui", "refresh_review", f"{len(ordered)} glifos")
 
-    def _review_approve(self, glyph):
-        logger.info("_review_approve: char=%r path=%s", glyph.char, glyph.image_path)
+    _PROMOTE_NEXT = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Gold"}
+
+    def _review_promote(self, glyph):
+        """Sube el glifo un nivel de tier (Bronze→Silver→Gold) sin degradarlo.
+
+        Como el review ahora lista TODO el banco, el botón ✅ no puede fijar
+        Silver a ciegas (degradaría un Gold). Promueve al siguiente tier; un
+        Gold ya está en el tope.
+        """
+        new_tier = self._PROMOTE_NEXT.get(glyph.tier, "Silver")
+        if new_tier == glyph.tier:
+            self.toast(f"'{glyph.char}' ya es Gold", "info")
+            return
+        logger.info("_review_promote: %r %s → %s", glyph.char, glyph.tier, new_tier)
         try:
-            ok = self._pipeline.bank.approve_glyph(glyph, new_tier="Silver")
+            ok = self._pipeline.bank.approve_glyph(glyph, new_tier=new_tier)
         except Exception as exc:
-            logger.error("_review_approve: bank.approve_glyph lanzó: %s", exc, exc_info=True)
-            self.toast(f"Error al aprobar: {exc}", "error")
+            logger.error("_review_promote: approve_glyph lanzó: %s", exc, exc_info=True)
+            self.toast(f"Error al promover: {exc}", "error")
             return
         if not ok:
-            logger.warning("_review_approve: %r no encontrado en banco", glyph.char)
             self.toast(f"'{glyph.char}' no se encontró en el banco", "warning")
             return
-        self.toast(f"'{glyph.char}' aprobado → Silver", "success")
-        logger.info("_review_approve: %r promovido a Silver", glyph.char)
+        self.toast(f"'{glyph.char}': {glyph.tier} → {new_tier}", "success")
         try:
             self._reload_and_refresh_all()
         except Exception as exc:
-            logger.error("_review_approve: refresh lanzó: %s", exc, exc_info=True)
+            logger.error("_review_promote: refresh lanzó: %s", exc, exc_info=True)
 
     def _review_reject(self, glyph):
         logger.info("_review_reject: char=%r path=%s", glyph.char, glyph.image_path)
@@ -200,9 +221,16 @@ class ReviewTabMixin:
             self.toast("Selecciona al menos un glifo", "warning")
             return
         if action == "approve":
+            # No degradar: solo sube a Silver los Bronze; deja Silver/Gold intactos.
+            promoted = 0
             for g in selected:
-                self._pipeline.bank.approve_glyph(g, new_tier="Silver")
-            self.toast(f"{len(selected)} glifos aprobados → Silver", "success")
+                if g.tier == "Bronze":
+                    self._pipeline.bank.approve_glyph(g, new_tier="Silver")
+                    promoted += 1
+            if promoted:
+                self.toast(f"{promoted} glifos promovidos → Silver", "success")
+            else:
+                self.toast("Los seleccionados ya eran Silver o Gold", "info")
         elif action == "reject":
             for g in selected:
                 self._pipeline.bank.reject_glyph(g)
