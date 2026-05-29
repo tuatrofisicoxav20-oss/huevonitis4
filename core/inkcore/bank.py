@@ -27,26 +27,37 @@ except ImportError:
     PIL_OK = False
 
 
-def _flatten_rgba(img: "Image.Image") -> "Image.Image":
-    """BUG-18: aplanar RGBA sobre fondo blanco antes de cualquier hash.
+def _glyph_to_gray(img: "Image.Image") -> "Image.Image":
+    """Devuelve el glifo como imagen 'L' con trazo OSCURO sobre fondo CLARO.
 
-    Los glifos del extractor son RGBA con fondo transparente y tinta RGB=(0,0,0).
-    Si convertimos a grayscale directamente, Image.convert("L") ignora alpha
-    y todos los píxeles dan luminancia 0 → todos los hashes son iguales →
-    el dedup rechaza absolutamente todo. Aplanar sobre blanco preserva la forma.
+    La forma de un glifo puede estar codificada de dos maneras distintas:
+
+      • Glifos del extractor: tinta BLANCA (RGB=255) sobre transparente, con la
+        forma viviendo enteramente en el canal alpha (así se ven sobre el fondo
+        oscuro de la UI). Pegarlos sobre blanco da una imagen 100% blanca → el
+        hash colapsa a un valor degenerado (todo ceros) y el dedup rechaza TODO.
+      • Glifos opacos (bulk/legacy): tinta oscura en RGB con alpha=255.
+
+    Derivamos la "presencia de trazo" del canal correcto: del alpha si la imagen
+    tiene zonas transparentes, o de la luminancia invertida si es opaca. Así el
+    hash representa la forma real en ambos casos.
     """
-    if img.mode == "RGBA":
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[3])
-        return bg
-    return img.convert("RGB")
+    import numpy as _np
+    arr = _np.asarray(img.convert("RGBA"), dtype=_np.float32)
+    alpha = arr[:, :, 3]
+    if float(alpha.min()) < 250.0:        # hay transparencia → forma en alpha
+        presence = alpha / 255.0
+    else:                                  # opaco → forma en luminancia (oscuro = trazo)
+        lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+        presence = 1.0 - lum / 255.0
+    gray = ((1.0 - presence) * 255.0).clip(0, 255).astype(_np.uint8)
+    return Image.fromarray(gray)  # array 2D uint8 → modo "L"
 
 
 def _avg_hash(img: "Image.Image", size: int = 16) -> str:
-    """Hash promedio (legacy). Mantenido como fallback; usa _flatten_rgba ahora."""
+    """Hash promedio (legacy). Mantenido como fallback; usa _glyph_to_gray ahora."""
     import numpy as _np
-    flat = _flatten_rgba(img)
-    gray = flat.convert("L").resize((size, size), Image.Resampling.LANCZOS)
+    gray = _glyph_to_gray(img).resize((size, size), Image.Resampling.LANCZOS)
     arr = _np.asarray(gray, dtype=_np.uint8)
     avg = float(arr.mean())
     bits = (arr > avg).flatten()
@@ -60,8 +71,7 @@ def _dhash(img: "Image.Image", size: int = 16) -> str:
     visualmente distintos del mismo carácter.
     """
     import numpy as _np
-    flat = _flatten_rgba(img)
-    gray = flat.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS)
+    gray = _glyph_to_gray(img).resize((size + 1, size), Image.Resampling.LANCZOS)
     arr = _np.asarray(gray, dtype=_np.int16)
     diff = arr[:, 1:] > arr[:, :-1]
     return "".join("1" if b else "0" for b in diff.flatten())
@@ -155,14 +165,30 @@ class GlyphBank:
         self._backfill_missing_hashes()
         self._rebuild_indices()
 
+    @staticmethod
+    def _is_degenerate_hash(h: str) -> bool:
+        """Un hash es inútil si está vacío o tiene todos los bits iguales.
+
+        Los bancos guardados con el _dhash roto (tinta en alpha → imagen toda
+        blanca) tienen perceptual_hash='000…0', que es truthy pero degenerado:
+        su distancia hamming contra cualquier otro hash igual es 0, así que el
+        dedup los toma como duplicados de todo. Hay que recomputarlos.
+        """
+        if not h:
+            return True
+        return h.count("0") == len(h) or h.count("1") == len(h)
+
     def _backfill_missing_hashes(self) -> None:
-        """Para bancos migrados desde pre-v4.2, las entries no tienen
-        perceptual_hash. Sin hash el dedup no funciona contra ellos.
-        Recalcular on-load (operación de un solo cómputo, se persiste al save).
+        """Recalcula perceptual_hash de entries sin hash o con hash degenerado.
+
+        Cubre dos casos: bancos pre-v4.2 que no tenían hash, y bancos guardados
+        con el _dhash roto que colapsaba a '000…0' (ver _glyph_to_gray). En ambos
+        el dedup queda inservible hasta recomputar. Operación de un solo cómputo,
+        se persiste al save.
         """
         if not PIL_OK:
             return
-        needs_hash = [e for e in self._entries if not e.perceptual_hash]
+        needs_hash = [e for e in self._entries if self._is_degenerate_hash(e.perceptual_hash)]
         if not needs_hash:
             return
         rebuilt = 0
