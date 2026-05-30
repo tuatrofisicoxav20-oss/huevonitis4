@@ -447,6 +447,11 @@ class GlyphExtractor:
             # Alineación por partición VPP (no usa blobs — divide directamente)
             aligned = self._align_pos([], ref_line, median_line_h, line_mask)
 
+            # Métricas verticales de la línea (x-height/baseline) para validar que
+            # la forma de cada glifo coincida con la letra que la posición le asignó.
+            from core.inkcore.extractor_validation import is_consistent, line_metrics
+            line_m = line_metrics(line_mask)
+
             for gbox, char, align_score in aligned:
                 if counts.get(char, 0) >= opts.max_per_char:
                     continue
@@ -455,6 +460,16 @@ class GlyphExtractor:
                 rx1, ry1, rx2, ry2 = self._refine_char_region(
                     line_mask, gbox.x, gbox.x2
                 )
+
+                # Validación estructural: si la forma contradice claramente la letra
+                # esperada ('a' con ascendente = probable 'd' por alineación
+                # desplazada), descartar en vez de guardar mal etiquetado.
+                if not is_consistent(char, ry1, ry2, line_m):
+                    logger.info(
+                        "extract: descarto '%s' por forma inconsistente "
+                        "(y=%d-%d, alineación desplazada?)", char, ry1, ry2,
+                    )
+                    continue
                 # Verificar que la región refinada contiene tinta suficiente.
                 # Si tiene menos del 5% de la tinta esperada para el char, advertir.
                 ref_ink = float(np.sum(line_mask[ry1:ry2, rx1:rx2] > 0))
