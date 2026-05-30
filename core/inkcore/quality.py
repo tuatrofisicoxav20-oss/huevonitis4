@@ -23,10 +23,23 @@ def assess_glyph(image_path: str) -> dict:
         return {"score": 0.5, "tier": "Bronze", "ink_coverage": 0.5, "valid": True}
     try:
         img = Image.open(image_path).convert("RGBA")
-        arr = np.array(img)
+        arr = np.array(img).astype(np.float32)
+        # Presencia de tinta del canal con SEÑAL REAL (mayor rango dinámico):
+        # el alpha para glifos del extractor (forma en alpha), o la luminancia
+        # invertida para glifos OPACOS (bulk/legacy, alpha=255 uniforme). Medir
+        # alpha a ciegas contaba alpha=255 como tinta total → ink_coverage=1.0 y
+        # tier Gold inflado para un opaco con poca tinta. (Consistente con
+        # bank._glyph_to_gray.)
         alpha = arr[:, :, 3]
-        total = alpha.size
-        ink = np.sum(alpha > 64)
+        lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+        cand_alpha = alpha / 255.0
+        cand_lum = 1.0 - lum / 255.0
+        if (cand_alpha.max() - cand_alpha.min()) >= (cand_lum.max() - cand_lum.min()):
+            presence = cand_alpha
+        else:
+            presence = cand_lum
+        total = presence.size
+        ink = int(np.sum(presence > 0.25))  # 0.25 ≈ el umbral viejo alpha>64
         ink_coverage = ink / total if total > 0 else 0
         w, h = img.size
         aspect = w / h if h > 0 else 1.0
