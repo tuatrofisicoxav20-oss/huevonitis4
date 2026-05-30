@@ -156,9 +156,12 @@ class HandwritingRenderer:
         usable_width = options.page_width - 2 * options.page_margin
         line_height_px = int(options.font_size * options.line_height)
 
-        rendered_lines = []
-        for line in lines:
-            rendered_lines.append(self._render_line(line, options, usable_width))
+        # BUG-06 (faltaba en esta ruta): word-wrap antes de renderizar, igual que
+        # render_pages. Sin esto, _render_line trunca (break) las líneas más anchas
+        # que usable_width y se pierde texto — visible en el replicador, que llama
+        # render_text por bloque. El writer principal ya usa render_pages.
+        wrapped_lines = self._soft_wrap_text(text, options, usable_width)
+        rendered_lines = [self._render_line(line, options, usable_width) for line in wrapped_lines]
 
         total_h = options.page_margin * 2 + len(rendered_lines) * line_height_px
         total_h = max(total_h, 400)
