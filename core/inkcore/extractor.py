@@ -739,6 +739,27 @@ class GlyphExtractor:
                     return word_result
                 # Si el conteo no cuadra, caer al pipeline completo
 
+        # ── Segmentación por GAPS reales entre letras (antes que la posicional) ──
+        # Para letras separadas (abecedario, imprenta) los espacios entre letras
+        # son fronteras mucho más fiables que repartir el ancho por posición, que
+        # junta vecinas ('c'+'d'→"cd") y corre las etiquetas. Devuelve None ante
+        # escritura ligada sin gaps claros, y ahí seguimos con la posicional.
+        from core.inkcore.extractor_gap_segment import segment_by_gaps
+        gap_bounds = segment_by_gaps(vpp, x_min, x_max, n)
+        if gap_bounds is not None and len(gap_bounds) == n + 1:
+            result_g: list[tuple[BBox, str, float]] = []
+            for i, ch in enumerate(chars):
+                gx1 = gap_bounds[i]
+                gx2 = min(gap_bounds[i + 1], w)
+                gbw = max(1, gx2 - gx1)
+                ink = float(np.sum(line_mask[:, gx1:gx2] > 0))
+                cov = ink / max(1, h * gbw)
+                result_g.append((BBox(gx1, 0, gbw, h), ch, min(1.0, max(0.1, cov / 0.18))))
+            logger.info(
+                "gap-segment '%s': %d letras por espacios reales", text[:40], n
+            )
+            return result_g
+
         # ── Etapa 1: hybrid_v2 (primario) ─────────────────────────
         primary_bounds = self._align_hybrid_v2(vpp, line_mask, x_min, x_max, n, chars)
 
