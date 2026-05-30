@@ -38,18 +38,23 @@ def _glyph_to_gray(img: "Image.Image") -> "Image.Image":
         hash colapsa a un valor degenerado (todo ceros) y el dedup rechaza TODO.
       • Glifos opacos (bulk/legacy): tinta oscura en RGB con alpha=255.
 
-    Derivamos la "presencia de trazo" del canal correcto: del alpha si la imagen
-    tiene zonas transparentes, o de la luminancia invertida si es opaca. Así el
-    hash representa la forma real en ambos casos.
+    Elegimos el canal con SEÑAL REAL (mayor rango dinámico) entre el alpha y la
+    luminancia invertida, en vez de adivinar por un umbral de alpha. El criterio
+    viejo (alpha.min() < 250 → usa alpha) fallaba para un glifo del extractor sin
+    zonas transparentes (alpha uniforme 255): caía en la rama de luminancia, y
+    como su RGB es blanco uniforme daba presencia 0 → imagen toda blanca → hash
+    degenerado → dedup colapsado otra vez. Comparar el rango de cada candidato
+    funciona en ambos formatos y nunca elige un canal plano si el otro tiene forma.
     """
     import numpy as _np
     arr = _np.asarray(img.convert("RGBA"), dtype=_np.float32)
     alpha = arr[:, :, 3]
-    if float(alpha.min()) < 250.0:        # hay transparencia → forma en alpha
-        presence = alpha / 255.0
-    else:                                  # opaco → forma en luminancia (oscuro = trazo)
-        lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
-        presence = 1.0 - lum / 255.0
+    lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+    cand_alpha = alpha / 255.0                 # forma en alpha (extractor)
+    cand_lum = 1.0 - lum / 255.0               # forma en luminancia (opaco)
+    spread_alpha = float(cand_alpha.max() - cand_alpha.min())
+    spread_lum = float(cand_lum.max() - cand_lum.min())
+    presence = cand_alpha if spread_alpha >= spread_lum else cand_lum
     gray = ((1.0 - presence) * 255.0).clip(0, 255).astype(_np.uint8)
     return Image.fromarray(gray)  # array 2D uint8 → modo "L"
 
@@ -306,13 +311,23 @@ class GlyphBank:
                     new_hash = _dhash(raw.convert("RGBA"))
             except Exception as e:
                 logger.warning("add_glyph: hash del source falló: %s", e)
+        # Un hash degenerado (todo ceros/unos) no sirve para deduplicar: su
+        # distancia contra cualquier otro igual es 0 y rechazaría todo. Lo tratamos
+        # como "sin hash" para el dedup en vez de envenenar la comparación.
+        usable_hash = bool(new_hash) and not self._is_degenerate_hash(new_hash)
 
-        # PERF-02: dedup contra hashes cacheados en self._by_char,
-        # sin re-abrir PNGs existentes.
-        if new_hash:
-            with _bank_lock:
-                existing = self._by_char.get(char, [])
-                old_hashes = [e.perceptual_hash for e in existing if e.perceptual_hash]
+        # Dedup + inserción en UN SOLO lock (atómico): si el chequeo y el append
+        # están en locks separados, dos llamadas concurrentes pueden pasar ambas
+        # el dedup e insertar el mismo glifo dos veces (TOCTOU). Aquí no.
+        with _bank_lock:
+            existing = self._by_char.get(char, [])
+            if usable_hash:
+                # PERF-02: comparar contra hashes cacheados, ignorando degenerados
+                # (un banco con basura todo-ceros no debe rechazar muestras nuevas).
+                old_hashes = [
+                    e.perceptual_hash for e in existing
+                    if e.perceptual_hash and not self._is_degenerate_hash(e.perceptual_hash)
+                ]
                 if old_hashes:
                     best = min(_hamming(new_hash, h) for h in old_hashes)
                     strict, _ = _dup_thresholds(char)
@@ -322,9 +337,11 @@ class GlyphBank:
                             char, best, strict,
                         )
                         return None
-
-        with _bank_lock:
-            existing = self._by_char.get(char, [])
+            elif new_hash:
+                logger.warning(
+                    "add_glyph: %r con hash degenerado — se omite dedup (glifo sólido/vacío?)",
+                    char,
+                )
             idx = max((e.index for e in existing), default=-1) + 1
             safe = char if char.isalnum() else f"punct_{ord(char)}"
             dest = self.bank_dir / f"{safe}_{idx:03d}.png"

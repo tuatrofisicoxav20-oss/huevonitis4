@@ -26,6 +26,27 @@ from core.models import GlyphEntry
 
 logger = logging.getLogger(__name__)
 
+
+def _purge_temp_pngs(temp_dir: Path) -> int:
+    """Borra los PNG residuales de _temp_extract antes de una extracción nueva.
+
+    Cada extracción reemplaza a la anterior (el extractor_tab hace
+    self._extracted = glyphs, no acumula). Los temporales de una extracción que
+    no se guardó quedan huérfanos y solo acumulan disco — el cleanup selectivo
+    de save_glyphs_to_bank solo borra los que SÍ se guardaron. Limpiar aquí, al
+    inicio, evita que crezcan sin límite. (El bulk capture usa otro directorio.)
+    """
+    removed = 0
+    for png in temp_dir.glob("*.png"):
+        try:
+            png.unlink()
+            removed += 1
+        except OSError as exc:
+            logger.warning("_purge_temp_pngs: no se pudo borrar %s: %s", png, exc)
+    if removed:
+        logger.info("_purge_temp_pngs: %d temporal(es) huérfano(s) descartado(s)", removed)
+    return removed
+
 try:
     import cv2
     import numpy as np
@@ -310,6 +331,7 @@ class GlyphExtractor:
 
         temp_dir = config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
+        _purge_temp_pngs(temp_dir)  # higiene: descartar huérfanos de extracciones previas
 
         glyphs = self._extract_pass(clean, line_boxes, ref_lines, median_line_h,
                                     opts, temp_dir)

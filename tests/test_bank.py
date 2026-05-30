@@ -75,15 +75,21 @@ def test_remove_glyph(bank, tmp_path):
     reason="Pillow not installed"
 )
 def test_dedup_identical_images(bank, tmp_path):
-    """Adding the same image twice should be deduplicated."""
+    """Dos copias idénticas de un glifo CON FORMA deben deduplicarse.
+
+    Usa un glifo con forma (hash perceptual con señal), no una imagen sólida:
+    el dedup confía en el hash perceptual, y una imagen plana produce un hash
+    degenerado que ya no se usa para deduplicar (es basura sin forma, ver
+    test_dedup_robusto_con_basura_degenerada).
+    """
     src1 = tmp_path / "dup1.png"
     src2 = tmp_path / "dup2.png"
-    if not _make_test_png(src1, px=30):
+    if not _make_alpha_glyph(src1, "ellipse"):
         pytest.skip("PIL not available")
     shutil.copy2(src1, src2)
     bank.add_glyph("d", str(src1))
     result2 = bank.add_glyph("d", str(src2))
-    # Identical images should be rejected as duplicates
+    # Copias idénticas con forma → mismo hash → rechazadas como duplicado
     assert result2 is None
 
 
@@ -167,6 +173,65 @@ def test_backfill_recomputes_degenerate_hash(bank, tmp_path):
     bank2 = GlyphBank()
     e2 = bank2.get_all(char_filter="a")[0]
     assert set(e2.perceptual_hash) != {"0"}, "el backfill no recomputó el hash degenerado"
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed"
+)
+def test_glyph_to_gray_prefiere_canal_con_senal(tmp_path):
+    """Glifo del extractor SIN fondo transparente (alpha alto pero con forma).
+
+    Regresión del criterio viejo (alpha.min() < 250 → usa alpha, si no luminancia):
+    un glifo con alpha denso caía en la rama de luminancia y, como su RGB es blanco
+    uniforme, daba presencia 0 → hash degenerado. Ahora se elige el canal con mayor
+    rango dinámico, así que la forma sutil del alpha se conserva.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from core.inkcore.bank import GlyphBank, _dhash
+    arr = np.full((48, 48, 4), 255, dtype=np.uint8)  # RGB y alpha altos uniformes
+    arr[12:36, 12:36, 3] = 252                        # forma sutil SOLO en el alpha
+    h = _dhash(Image.fromarray(arr))
+    assert not GlyphBank._is_degenerate_hash(h), "colapsó pese a tener forma en alpha"
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed"
+)
+def test_dedup_robusto_con_basura_degenerada(bank, tmp_path):
+    """Dos glifos planos DISTINTOS (ambos sin señal perceptual) no deben rechazarse.
+
+    Reproduce el corazón del bug: cuando todos los hashes colapsaban a '000…0',
+    glifos visualmente distintos daban hamming=0 entre sí ⇒ se rechazaban como
+    duplicados. El dedup ahora ignora los hashes degenerados en vez de tratar la
+    basura como duplicado universal, así que ambas muestras entran.
+    """
+    from PIL import Image
+    p1, p2 = tmp_path / "black.png", tmp_path / "white.png"
+    try:
+        Image.new("RGBA", (24, 24), (0, 0, 0, 255)).save(p1)     # negro sólido
+        Image.new("RGBA", (24, 24), (255, 255, 255, 255)).save(p2)  # blanco sólido
+    except Exception:
+        pytest.skip("PIL not available")
+    e1 = bank.add_glyph("z", str(p1))
+    e2 = bank.add_glyph("z", str(p2))
+    assert e1 is not None and e2 is not None, "glifos distintos rechazados por hash degenerado"
+    assert len(bank.get_all(char_filter="z")) == 2
+
+
+def test_purge_temp_pngs_descarta_huerfanos(tmp_path):
+    """_purge_temp_pngs borra solo los PNG huérfanos, deja intactos otros archivos."""
+    from core.inkcore.extractor import _purge_temp_pngs
+    for i in range(3):
+        (tmp_path / f"orphan_{i}.png").write_bytes(b"\x89PNG")
+    (tmp_path / "keep.json").write_bytes(b"{}")
+    removed = _purge_temp_pngs(tmp_path)
+    assert removed == 3
+    assert not list(tmp_path.glob("*.png"))
+    assert (tmp_path / "keep.json").exists()
 
 
 def test_coverage_empty(bank):
