@@ -22,6 +22,10 @@ class RenderOptions:
     rotation_range: float = 4.0
     ink_alpha_min: float = 0.80
     ink_alpha_max: float = 1.0
+    # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
+    # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
+    # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
+    ink_color: str = "#1A1A2E"
     style: str = "Limpio"
     mode: str = "PNG"
     page_width: int = 1240
@@ -295,13 +299,15 @@ class HandwritingRenderer:
             # than hard-breaking; caller splits into logical lines already.
             if x_cursor + glyph_img.width > max_width:
                 break
-            # Bug fix #1: baseline / descender alignment
-            # Apply jitter independently from the baseline calculation so that
-            # a negative jitter never pushes y_pos below 0.
+            # Línea base por categoría de letra: las descendentes (g,j,p,q,y)
+            # bajan su cola bajo el baseline en vez de quedar "flotando" alineadas
+            # por abajo como las de x-height (lo que se veía poco natural).
             jitter_y = random.randint(-options.jitter_px, options.jitter_px)
-            baseline = int(h * 0.75)  # 75% gives room for descenders below
-            # Align glyph top edge so its bottom sits at the baseline
-            y_pos = baseline - glyph_img.height
+            baseline = int(h * 0.72)
+            if self._vertical_class(char) == "desc":
+                y_pos = baseline - glyph_img.height + int(options.font_size * 0.30)
+            else:
+                y_pos = baseline - glyph_img.height
             # Apply jitter, then clamp to stay within the canvas vertically
             y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
             line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
@@ -309,6 +315,43 @@ class HandwritingRenderer:
             x_cursor += glyph_img.width + spacing_gap
 
         return line_canvas
+
+    # Categorías verticales para una línea base creíble (latina minúscula).
+    _ASCENDERS = frozenset("bdfhklt")
+    _DESCENDERS = frozenset("gjpqy")
+
+    @classmethod
+    def _vertical_class(cls, char: str) -> str:
+        c = char.lower()
+        if c in cls._DESCENDERS:
+            return "desc"
+        if c in cls._ASCENDERS:
+            return "asc"
+        return "xheight"
+
+    @staticmethod
+    def _recolor_ink(img: "Image.Image", ink_color: str) -> "Image.Image":
+        """Repinta la forma del glifo con ink_color, preservando su alpha.
+
+        La forma sale del canal alpha (glifos del extractor: tinta blanca, forma
+        en alpha) o, si el alpha es casi uniforme (glifo opaco bulk/legacy), de la
+        luminancia invertida (lo oscuro = tinta). Así la tinta siempre es visible
+        sobre el papel y con un único color de bolígrafo coherente.
+        """
+        from PIL import ImageColor
+        try:
+            r, g, b = ImageColor.getrgb(ink_color)[:3]
+        except (ValueError, TypeError):
+            r, g, b = (26, 26, 46)
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        mask = img.getchannel("A")
+        lo, hi = mask.getextrema()
+        if hi - lo < 12:  # alpha plano → glifo opaco: derivar forma de la luminancia
+            mask = img.convert("L").point(lambda v: 255 - v)
+        out = Image.new("RGBA", img.size, (r, g, b, 0))
+        out.putalpha(mask)
+        return out
 
     def _load_glyph(self, path: str, options: RenderOptions) -> "Image.Image | None":
         if not PIL_OK:
@@ -335,6 +378,11 @@ class HandwritingRenderer:
             # Bug fix #4: guard against zero-dimension glyphs
             if img.width < 1 or img.height < 1:
                 return None
+            # Recolorear la tinta al color del bolígrafo. Los glifos del extractor
+            # son RGB blanco con la forma en el alpha; sobre papel claro serían
+            # invisibles. Repinta la forma con ink_color preservando el alpha
+            # (anti-aliasing). Maneja también glifos opacos (forma en luminancia).
+            img = self._recolor_ink(img, options.ink_color)
             size_factor = 1.0 + random.uniform(-options.size_variation, options.size_variation)
             target_h = max(1, int(options.font_size * size_factor))
             ratio = target_h / img.height
@@ -366,6 +414,11 @@ class HandwritingRenderer:
             font = ImageFont.truetype("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", size - 4)
         except Exception:
             font = ImageFont.load_default()
-        draw.text((2, 2), char, fill=(40, 40, 40, 200), font=font)
+        from PIL import ImageColor
+        try:
+            ink = ImageColor.getrgb(options.ink_color)[:3]
+        except (ValueError, TypeError):
+            ink = (26, 26, 46)
+        draw.text((2, 2), char, fill=(*ink, 220), font=font)
         return img
 
