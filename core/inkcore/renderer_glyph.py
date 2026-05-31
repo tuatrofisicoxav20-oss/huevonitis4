@@ -7,7 +7,6 @@ los tests directamente sobre HandwritingRenderer).
 """
 import logging
 import random
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
