@@ -3,6 +3,13 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.inkcore.renderer_backgrounds import (
+    BACKGROUND_STYLES,
+    STYLE_PRESETS,
+    BackgroundMixin,
+)
+from core.inkcore.renderer_glyph import GlyphLoadMixin
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -10,6 +17,15 @@ try:
     PIL_OK = True
 except ImportError:
     PIL_OK = False
+
+# Re-exportados para compatibilidad: BACKGROUND_STYLES y STYLE_PRESETS vivían
+# acá antes de mover las decoraciones de fondo a renderer_backgrounds.py.
+__all__ = [
+    "RenderOptions",
+    "HandwritingRenderer",
+    "BACKGROUND_STYLES",
+    "STYLE_PRESETS",
+]
 
 
 @dataclass
@@ -37,39 +53,7 @@ class RenderOptions:
     background_style: str = ""
 
 
-BACKGROUND_STYLES: dict[str, dict] = {
-    "hoja_blanca": {
-        "bg": "#FFFFFF",
-        "draw_lines": False,
-        "margin_color": None,
-    },
-    "libreta": {
-        "bg": "#FEFCE8",
-        "draw_lines": True,
-        "line_color": "#B9D5E0",
-        "margin_color": "#F4A0A0",
-        "margin_x": 80,
-    },
-    "hoja_cuadricula": {
-        "bg": "#F0F4FF",
-        "draw_lines": True,
-        "line_color": "#C5D5F0",
-        "draw_grid": True,
-        "grid_size": 28,
-    },
-}
-
-
-STYLE_PRESETS: dict[str, dict] = {
-    "Limpio": {"jitter_px": 2, "size_variation": 0.08, "rotation_range": 2.0},
-    "Escolar": {"jitter_px": 4, "size_variation": 0.14, "rotation_range": 5.0, "draw_lines": True},
-    "Universitario": {"jitter_px": 2, "size_variation": 0.10, "rotation_range": 3.0},
-    "Relajado": {"jitter_px": 6, "size_variation": 0.20, "rotation_range": 8.0},
-    "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 3.0, "draw_lines": True},
-}
-
-
-class HandwritingRenderer:
+class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
     def __init__(self, bank):
         self.bank = bank
         self._raw_cache: dict[str, Image.Image] = {}  # path -> RGBA image raw
@@ -79,60 +63,6 @@ class HandwritingRenderer:
         for k, v in preset.items():
             setattr(options, k, v)
         return options
-
-    def _apply_background_style(self, options: RenderOptions) -> RenderOptions:
-        """Aplica el estilo de fondo (libreta, cuadrícula, etc.) a las opciones."""
-        style_def = BACKGROUND_STYLES.get(options.background_style)
-        if style_def is None:
-            return options
-        if "bg" in style_def:
-            options.background_color = style_def["bg"]
-        if "draw_lines" in style_def:
-            options.draw_lines = style_def["draw_lines"]
-        if "line_color" in style_def:
-            options.line_color = style_def["line_color"]
-        return options
-
-    def _draw_background_decorations(
-        self,
-        canvas: "Image.Image",
-        options: RenderOptions,
-        line_height_px: int,
-        canvas_h: int,
-    ) -> None:
-        """Dibuja líneas, cuadrícula y margen según el background_style."""
-        if not PIL_OK:
-            return
-        style_def = BACKGROUND_STYLES.get(options.background_style, {})
-        draw = ImageDraw.Draw(canvas)
-
-        if style_def.get("draw_grid"):
-            # Cuadrícula
-            grid_size = style_def.get("grid_size", 28)
-            line_col = style_def.get("line_color", "#C5D5F0")
-            x = options.page_margin
-            while x < options.page_width - options.page_margin:
-                draw.line([(x, 0), (x, canvas_h)], fill=line_col, width=1)
-                x += grid_size
-            y = options.page_margin
-            while y < canvas_h - options.page_margin:
-                draw.line([(0, y), (options.page_width, y)], fill=line_col, width=1)
-                y += grid_size
-        elif options.draw_lines:
-            # Líneas horizontales
-            y = options.page_margin + line_height_px
-            while y < canvas_h - options.page_margin:
-                draw.line(
-                    [(options.page_margin, y), (options.page_width - options.page_margin, y)],
-                    fill=options.line_color, width=1,
-                )
-                y += line_height_px
-
-        # Línea de margen roja (solo libreta)
-        if style_def.get("margin_color"):
-            margin_x = style_def.get("margin_x", 80)
-            draw.line([(margin_x, 0), (margin_x, canvas_h)],
-                      fill=style_def["margin_color"], width=2)
 
     def render_text(self, text: str, options: RenderOptions) -> "Image.Image | None":
         """Renderiza texto completo. Usa render_pages internamente para textos largos."""
@@ -315,110 +245,3 @@ class HandwritingRenderer:
             x_cursor += glyph_img.width + spacing_gap
 
         return line_canvas
-
-    # Categorías verticales para una línea base creíble (latina minúscula).
-    _ASCENDERS = frozenset("bdfhklt")
-    _DESCENDERS = frozenset("gjpqy")
-
-    @classmethod
-    def _vertical_class(cls, char: str) -> str:
-        c = char.lower()
-        if c in cls._DESCENDERS:
-            return "desc"
-        if c in cls._ASCENDERS:
-            return "asc"
-        return "xheight"
-
-    @staticmethod
-    def _recolor_ink(img: "Image.Image", ink_color: str) -> "Image.Image":
-        """Repinta la forma del glifo con ink_color, preservando su alpha.
-
-        La forma sale del canal alpha (glifos del extractor: tinta blanca, forma
-        en alpha) o, si el alpha es casi uniforme (glifo opaco bulk/legacy), de la
-        luminancia invertida (lo oscuro = tinta). Así la tinta siempre es visible
-        sobre el papel y con un único color de bolígrafo coherente.
-        """
-        from PIL import ImageColor
-        try:
-            r, g, b = ImageColor.getrgb(ink_color)[:3]
-        except (ValueError, TypeError):
-            r, g, b = (26, 26, 46)
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
-        mask = img.getchannel("A")
-        lo, hi = mask.getextrema()
-        if hi - lo < 12:  # alpha plano → glifo opaco: derivar forma de la luminancia
-            mask = img.convert("L").point(lambda v: 255 - v)
-        out = Image.new("RGBA", img.size, (r, g, b, 0))
-        out.putalpha(mask)
-        return out
-
-    def _load_glyph(self, path: str, options: RenderOptions) -> "Image.Image | None":
-        if not PIL_OK:
-            return None
-        try:
-            # Cache de imagen raw (sin escalar/rotar) para no abrir archivo desde disco cada vez
-            if path in self._raw_cache:
-                raw = self._raw_cache[path].copy()
-            else:
-                raw = Image.open(path)
-                # Bug fix #3: palette ("P") images must be converted before RGBA
-                # to avoid unexpected channel counts from split().
-                if raw.mode == "P":
-                    raw = raw.convert("RGBA")
-                else:
-                    raw = raw.convert("RGBA")
-                # Limitar cache a 500 entradas (FIFO)
-                if len(self._raw_cache) >= 500:
-                    oldest_key = next(iter(self._raw_cache))
-                    del self._raw_cache[oldest_key]
-                self._raw_cache[path] = raw
-                raw = raw.copy()
-            img = raw
-            # Bug fix #4: guard against zero-dimension glyphs
-            if img.width < 1 or img.height < 1:
-                return None
-            # Recolorear la tinta al color del bolígrafo. Los glifos del extractor
-            # son RGB blanco con la forma en el alpha; sobre papel claro serían
-            # invisibles. Repinta la forma con ink_color preservando el alpha
-            # (anti-aliasing). Maneja también glifos opacos (forma en luminancia).
-            img = self._recolor_ink(img, options.ink_color)
-            size_factor = 1.0 + random.uniform(-options.size_variation, options.size_variation)
-            target_h = max(1, int(options.font_size * size_factor))
-            ratio = target_h / img.height
-            target_w = max(1, int(img.width * ratio))
-            img = img.resize((target_w, target_h), Image.LANCZOS)
-            if options.rotation_range > 0:
-                angle = random.uniform(-options.rotation_range, options.rotation_range)
-                img = img.rotate(angle, expand=True, resample=Image.BICUBIC)
-            # Guard again after rotation (expand=True can theoretically produce odd sizes)
-            if img.width < 1 or img.height < 1:
-                return None
-            alpha_factor = random.uniform(options.ink_alpha_min, options.ink_alpha_max)
-            if alpha_factor < 1.0:
-                r, g, b, a = img.split()
-                a = a.point(lambda v: int(v * alpha_factor))
-                img = Image.merge("RGBA", (r, g, b, a))
-            return img
-        except Exception as e:
-            logger.debug(f"Could not load glyph {path}: {e}")
-            return None
-
-    def _render_fallback_char(self, char: str, options: RenderOptions) -> "Image.Image | None":
-        if not PIL_OK:
-            return None
-        size = options.font_size
-        img = Image.new("RGBA", (int(size * 0.7), size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", size - 4)
-        except Exception:
-            font = ImageFont.load_default()
-        from PIL import ImageColor
-        try:
-            ink = ImageColor.getrgb(options.ink_color)[:3]
-        except (ValueError, TypeError):
-            ink = (26, 26, 46)
-        draw.text((2, 2), char, fill=(*ink, 220), font=font)
-        return img
-
