@@ -7,53 +7,27 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Literal
 
 import config as _config
 
 from core.models import GlyphEntry
+# PipelineConfig/ExtractionResult viven en extraction_pipeline_config y el
+# overlay de debug en extraction_debug; se re-exportan acá para no romper la
+# API pública (from core.inkcore.extraction_pipeline import ...).
+from core.inkcore.extraction_debug import _generate_debug_overlay
+from core.inkcore.extraction_pipeline_config import (
+    ExtractionResult,
+    PipelineConfig,
+)
+
+__all__ = [
+    "GlyphExtractionPipeline",
+    "PipelineConfig",
+    "ExtractionResult",
+    "_generate_debug_overlay",
+]
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PipelineConfig:
-    detectors: list[str] = field(default_factory=lambda: ["classic_cv"])
-    detector_fusion: Literal["union", "intersection", "cascade"] = "union"
-    iou_dedup_threshold: float = 0.5
-
-    labelers: list[str] = field(default_factory=list)
-    labeler_voting: Literal["majority", "highest_conf", "consensus"] = "highest_conf"
-
-    min_quality: float = 0.18
-    min_label_confidence: float = 0.0
-    label_conf_weight: float = 0.3
-
-    labeler_batch_size: int = 32
-    debug_overlay: bool = False
-
-    # Modo automático: si auto_label=True y labelers está vacío, inyecta
-    # los labelers disponibles (trocr si está, si no tesseract). Cuando se usa
-    # sin reference_text esto es lo que clasifica cada glifo extraído.
-    auto_label: bool = False
-    # Si True, descarta glifos cuyo predicted_char no sea letra/dígito
-    # (filtra ruido: líneas, manchas, puntuación que el detector recoja).
-    letters_only: bool = False
-    # Aspect ratio (w/h) admitido para considerar un blob "glifo".
-    # Por debajo del mínimo es línea vertical; por arriba del máximo es línea horizontal.
-    min_aspect_ratio: float = 0.12
-    max_aspect_ratio: float = 6.0
-    # Cobertura mínima de tinta dentro del bbox detectado (descarta manchas huecas).
-    min_ink_coverage: float = 0.02
-
-
-@dataclass
-class ExtractionResult:
-    glyphs: list[GlyphEntry]
-    debug_image_path: str | None = None
-    stats: dict = field(default_factory=dict)
-    timings_ms: dict = field(default_factory=dict)
 
 
 class GlyphExtractionPipeline:
@@ -381,53 +355,3 @@ class GlyphExtractionPipeline:
             stats=stats,
             timings_ms=timings,
         )
-
-
-def _generate_debug_overlay(
-    img_bgr: "np.ndarray",
-    accepted: list[tuple],
-    discarded: list[tuple],
-) -> str | None:
-    """Genera PNG con overlay de cajas aceptadas y descartadas."""
-    try:
-        import cv2
-    except ImportError:
-        return None
-
-    overlay = img_bgr.copy()
-    h, w = overlay.shape[:2]
-
-    for fb, _, char, conf in accepted:
-        # Verde si todos lo vieron, amarillo si solo algunos
-        if fb.agreement_score >= 0.99:
-            color = (0, 200, 0)
-        else:
-            color = (0, 180, 255)  # BGR amarillo
-        cv2.rectangle(overlay, (fb.x, fb.y), (fb.x + fb.w, fb.y + fb.h), color, 2)
-        label = char
-        if conf is not None:
-            label += f" {conf:.2f}"
-        cv2.putText(overlay, label, (fb.x, max(10, fb.y - 3)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
-
-    for fb, _, char, conf in discarded:
-        cv2.rectangle(overlay, (fb.x, fb.y), (fb.x + fb.w, fb.y + fb.h),
-                      (0, 0, 200), 1)
-
-    # Leyenda en esquina superior derecha
-    legend_x = max(0, w - 210)
-    cv2.rectangle(overlay, (legend_x, 5), (w - 5, 75), (20, 20, 30), -1)
-    cv2.putText(overlay, "Verde: todos detectores", (legend_x + 5, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 200, 0), 1)
-    cv2.putText(overlay, "Amarillo: algunos", (legend_x + 5, 42),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 180, 255), 1)
-    cv2.putText(overlay, "Rojo: descartados", (legend_x + 5, 62),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 200), 1)
-
-    debug_dir = _config.DEBUG_DIR
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    ts = int(time.time())
-    out_path = str(debug_dir / f"extraction_{ts}.png")
-    cv2.imwrite(out_path, overlay)
-    logger.info("Debug overlay guardado en %s", out_path)
-    return out_path
