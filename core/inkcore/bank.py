@@ -6,12 +6,27 @@ import random
 import shutil
 import tempfile
 import threading
-from datetime import datetime
 from pathlib import Path
 
 import config
+from core.inkcore.bank_io import backfill_missing_hashes, scan_existing
+from core.inkcore.bank_report import build_bank_report
+from core.inkcore.bank_serial import _TIER_NORMALIZE, entry_from_dict, entry_to_dict
 from core.inkcore.quality import assess_glyph
 from core.models import GlyphEntry
+
+# Re-export de las funciones de hashing perceptual (movidas a bank_hashing.py
+# en v4.2 para mantener bank.py por debajo de ~420 líneas). Se re-importan acá
+# para no romper `from core.inkcore.bank import _dhash` (los tests dependen de
+# que sigan accesibles desde core.inkcore.bank). PIL_OK también se re-exporta.
+from core.inkcore.bank_hashing import (  # noqa: F401
+    PIL_OK,
+    _avg_hash,
+    _dhash,
+    _dup_thresholds,
+    _glyph_to_gray,
+    _hamming,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,80 +35,8 @@ logger = logging.getLogger(__name__)
 # trigger bank.save() from the main thread at the same time.
 _bank_lock = threading.Lock()
 
-try:
+if PIL_OK:
     from PIL import Image
-    PIL_OK = True
-except ImportError:
-    PIL_OK = False
-
-
-def _glyph_to_gray(img: "Image.Image") -> "Image.Image":
-    """Devuelve el glifo como imagen 'L' con trazo OSCURO sobre fondo CLARO.
-
-    La forma de un glifo puede estar codificada de dos maneras distintas:
-
-      • Glifos del extractor: tinta BLANCA (RGB=255) sobre transparente, con la
-        forma viviendo enteramente en el canal alpha (así se ven sobre el fondo
-        oscuro de la UI). Pegarlos sobre blanco da una imagen 100% blanca → el
-        hash colapsa a un valor degenerado (todo ceros) y el dedup rechaza TODO.
-      • Glifos opacos (bulk/legacy): tinta oscura en RGB con alpha=255.
-
-    Elegimos el canal con SEÑAL REAL (mayor rango dinámico) entre el alpha y la
-    luminancia invertida, en vez de adivinar por un umbral de alpha. El criterio
-    viejo (alpha.min() < 250 → usa alpha) fallaba para un glifo del extractor sin
-    zonas transparentes (alpha uniforme 255): caía en la rama de luminancia, y
-    como su RGB es blanco uniforme daba presencia 0 → imagen toda blanca → hash
-    degenerado → dedup colapsado otra vez. Comparar el rango de cada candidato
-    funciona en ambos formatos y nunca elige un canal plano si el otro tiene forma.
-    """
-    import numpy as _np
-    arr = _np.asarray(img.convert("RGBA"), dtype=_np.float32)
-    alpha = arr[:, :, 3]
-    lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
-    cand_alpha = alpha / 255.0                 # forma en alpha (extractor)
-    cand_lum = 1.0 - lum / 255.0               # forma en luminancia (opaco)
-    spread_alpha = float(cand_alpha.max() - cand_alpha.min())
-    spread_lum = float(cand_lum.max() - cand_lum.min())
-    presence = cand_alpha if spread_alpha >= spread_lum else cand_lum
-    gray = ((1.0 - presence) * 255.0).clip(0, 255).astype(_np.uint8)
-    return Image.fromarray(gray)  # array 2D uint8 → modo "L"
-
-
-def _avg_hash(img: "Image.Image", size: int = 16) -> str:
-    """Hash promedio (legacy). Mantenido como fallback; usa _glyph_to_gray ahora."""
-    import numpy as _np
-    gray = _glyph_to_gray(img).resize((size, size), Image.Resampling.LANCZOS)
-    arr = _np.asarray(gray, dtype=_np.uint8)
-    avg = float(arr.mean())
-    bits = (arr > avg).flatten()
-    return "".join("1" if b else "0" for b in bits)
-
-
-def _dhash(img: "Image.Image", size: int = 16) -> str:
-    """Difference hash — más estable que avg_hash frente a cambios de brillo.
-
-    Compara cada píxel con su vecino derecho. Más discriminativo entre glifos
-    visualmente distintos del mismo carácter.
-    """
-    import numpy as _np
-    gray = _glyph_to_gray(img).resize((size + 1, size), Image.Resampling.LANCZOS)
-    arr = _np.asarray(gray, dtype=_np.int16)
-    diff = arr[:, 1:] > arr[:, :-1]
-    return "".join("1" if b else "0" for b in diff.flatten())
-
-
-def _hamming(a: str, b: str) -> int:
-    return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
-
-
-def _dup_thresholds(ch: str) -> tuple[int, int]:
-    if ch in ".,;:!¡?¿|'`":
-        return 3, 7
-    if ch in "iltI1íì":
-        return 5, 10
-    if ch in "mwMW":
-        return 9, 16
-    return 7, 13
 
 
 class GlyphBank:
@@ -186,69 +129,20 @@ class GlyphBank:
     def _backfill_missing_hashes(self) -> None:
         """Recalcula perceptual_hash de entries sin hash o con hash degenerado.
 
-        Cubre dos casos: bancos pre-v4.2 que no tenían hash, y bancos guardados
-        con el _dhash roto que colapsaba a '000…0' (ver _glyph_to_gray). En ambos
-        el dedup queda inservible hasta recomputar. Operación de un solo cómputo,
-        se persiste al save.
+        Delega en bank_io.backfill_missing_hashes (repara IN PLACE) y persiste
+        sólo si hubo cambios. Ver esa función para el detalle de los dos casos
+        que cubre (pre-v4.2 sin hash y _dhash roto colapsado a '000…0').
         """
-        if not PIL_OK:
-            return
-        needs_hash = [e for e in self._entries if self._is_degenerate_hash(e.perceptual_hash)]
-        if not needs_hash:
-            return
-        rebuilt = 0
-        for e in needs_hash:
-            try:
-                with Image.open(e.image_path) as raw:
-                    e.perceptual_hash = _dhash(raw.convert("RGBA"))
-                rebuilt += 1
-            except Exception as exc:
-                logger.warning(
-                    "_backfill_missing_hashes: %s falló: %s", e.image_path, exc,
-                )
+        rebuilt = backfill_missing_hashes(self._entries, self._is_degenerate_hash)
         if rebuilt:
-            logger.info(
-                "_backfill_missing_hashes: %d/%d entries recibieron hash; guardando manifest",
-                rebuilt, len(needs_hash),
-            )
             try:
                 self.save()
             except Exception as exc:
                 logger.warning("backfill save falló (no crítico): %s", exc)
 
     def _scan_existing(self):
-        self._entries = []
-        for png in sorted(self.bank_dir.glob("*.png")):
-            stem = png.stem
-            parts = stem.rsplit("_", 1)
-            if len(parts) == 2:
-                char = parts[0]
-                if char.startswith("punct_"):
-                    with contextlib.suppress(Exception):
-                        char = chr(int(char[6:]))
-                try:
-                    idx = int(parts[1])
-                except ValueError:
-                    idx = 0
-                metrics = assess_glyph(str(png))
-                # PERF-02/07: computar hash de una vez con context-managed PIL
-                ph = ""
-                if PIL_OK:
-                    try:
-                        with Image.open(png) as raw:
-                            ph = _dhash(raw.convert("RGBA"))
-                    except Exception:
-                        pass
-                self._entries.append(GlyphEntry(
-                    char=char,
-                    image_path=str(png),
-                    quality_score=metrics["score"],
-                    tier=metrics["tier"],
-                    ink_coverage=metrics["ink_coverage"],
-                    index=idx,
-                    profile_id=self.profile_id,
-                    perceptual_hash=ph,
-                ))
+        # Delega el scan de PNGs en bank_io; el save() se mantiene acá.
+        self._entries = scan_existing(self.bank_dir, self.profile_id)
         self.save()
 
     def _atomic_write(self, path: Path, data) -> None:
@@ -491,93 +385,15 @@ class GlyphBank:
 
     def get_bank_report(self) -> dict:
         """Devuelve estadísticas completas del banco para el informe."""
-        entries = self._entries
-        if not entries:
-            return {
-                "total_glyphs": 0,
-                "by_tier": {"Gold": 0, "Silver": 0, "Bronze": 0},
-                "by_char": {},
-                "avg_quality": 0.0,
-                "coverage_pct": 0.0,
-                "alpha_covered": 0,
-                "alpha_missing": list("abcdefghijklmnñopqrstuvwxyz"),
-                "problematic_chars": [],
-                "best_chars": [],
-                "session_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "review_queue_count": 0,
-            }
+        return build_bank_report(self._entries, len(self.get_review_queue()))
 
-        by_tier = {"Gold": 0, "Silver": 0, "Bronze": 0}
-        by_char: dict = {}
-        for e in entries:
-            tier_key = e.tier if e.tier in by_tier else "Bronze"
-            by_tier[tier_key] += 1
-            if e.char not in by_char:
-                by_char[e.char] = {"count": 0, "quality_sum": 0.0, "tier": e.tier}
-            by_char[e.char]["count"] += 1
-            by_char[e.char]["quality_sum"] += e.quality_score
-            if e.tier == "Gold" or (e.tier == "Silver" and by_char[e.char]["tier"] == "Bronze"):
-                by_char[e.char]["tier"] = e.tier
-
-        for ch_data in by_char.values():
-            ch_data["avg_quality"] = round(ch_data["quality_sum"] / max(1, ch_data["count"]), 3)
-
-        alpha = list("abcdefghijklmnñopqrstuvwxyz")
-        alpha_set = set(alpha)
-        chars_set = set(by_char.keys())
-        covered = chars_set & alpha_set
-        missing = sorted(alpha_set - chars_set)
-        coverage_pct = round(len(covered) / max(1, len(alpha_set)) * 100, 1)
-
-        avg_quality = round(
-            sum(e.quality_score for e in entries) / max(1, len(entries)), 3
-        )
-
-        problematic = [
-            {"char": ch, **data}
-            for ch, data in by_char.items()
-            if data["avg_quality"] < 0.50
-        ]
-        problematic.sort(key=lambda x: x["avg_quality"])
-
-        best = [
-            {"char": ch, **data}
-            for ch, data in by_char.items()
-        ]
-        best.sort(key=lambda x: x["avg_quality"], reverse=True)
-        best_chars = best[:5]
-
-        return {
-            "total_glyphs": len(entries),
-            "by_tier": by_tier,
-            "by_char": by_char,
-            "avg_quality": avg_quality,
-            "coverage_pct": coverage_pct,
-            "alpha_covered": len(covered),
-            "alpha_missing": missing,
-            "problematic_chars": problematic,
-            "best_chars": best_chars,
-            "session_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-            "review_queue_count": len(self.get_review_queue()),
-        }
+    # Serialización movida a bank_serial.py en v4.2; estos métodos delegan ahí
+    # (se conservan como wrappers para no romper callers/subclases que los usen).
+    _TIER_NORMALIZE = _TIER_NORMALIZE
 
     def _to_dict(self, e: GlyphEntry) -> dict:
-        return e.__dict__.copy()
-
-    _TIER_NORMALIZE = {"gold": "Gold", "silver": "Silver", "bronze": "Bronze"}
+        return entry_to_dict(e)
 
     def _from_dict(self, d: dict) -> GlyphEntry:
         # BUG-29: normalizar tier legacy + loguear campos faltantes para diagnóstico
-        missing = [k for k in ("char", "image_path", "quality_score", "tier") if k not in d]
-        if missing:
-            logger.warning(
-                "Manifest entry incompleto (faltan %s) — usando defaults para %s",
-                missing, d.get("image_path", "?"),
-            )
-        entry = GlyphEntry()
-        for k, v in d.items():
-            if k == "tier" and isinstance(v, str):
-                v = self._TIER_NORMALIZE.get(v.lower(), v)
-            if hasattr(entry, k):
-                setattr(entry, k, v)
-        return entry
+        return entry_from_dict(d)
