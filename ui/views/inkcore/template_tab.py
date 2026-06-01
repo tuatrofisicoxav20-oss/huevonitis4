@@ -1,0 +1,240 @@
+"""TemplateTabMixin — tab 🧩 Plantilla (captura por grilla, una letra por casilla).
+
+Soluciona de raíz el problema del extractor de renglón (recortes y etiquetas
+corridas con letra ligada): el usuario imprime una plantilla con una casilla
+rotulada por letra, la rellena, le saca foto y la app recorta cada casilla
+CONOCIDA. Sin segmentación ni clasificación por posición.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+from pathlib import Path
+from tkinter import filedialog
+
+import customtkinter as ctk
+
+from ui import theme
+
+logger = logging.getLogger(__name__)
+
+try:
+    from PIL import Image, ImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
+
+class TemplateTabMixin:
+    """Tab: generar plantilla → cargar foto rellena → extraer → guardar al banco."""
+
+    def _build_template(self, parent):
+        self._tpl_photo_path: str | None = None
+        self._tpl_results: list = []
+        self._tpl_thumb_photos: list = []
+
+        main = ctk.CTkFrame(parent, fg_color="transparent")
+        main.pack(fill="both", expand=True)
+        main.columnconfigure(0, weight=32)
+        main.columnconfigure(1, weight=68)
+        main.rowconfigure(0, weight=1)
+
+        left = self.card_frame(main)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self._build_tpl_left(left)
+
+        right = self.card_frame(main)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self._build_tpl_right(right)
+
+    def _build_tpl_left(self, parent):
+        ctk.CTkLabel(
+            parent, text="🧩  Plantilla de letra",
+            font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
+        ).pack(padx=14, pady=(14, 4), anchor="w")
+
+        ctk.CTkLabel(
+            parent,
+            text="1) Generá la plantilla e imprimila.\n"
+                 "2) Escribí UNA letra por casilla, centrada, sin tocar los bordes.\n"
+                 "3) Sacale una foto derecha y cargala acá.\n"
+                 "Cada casilla se recorta sola: sin recortes a la mitad ni letras "
+                 "confundidas.",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+            wraplength=250, justify="left",
+        ).pack(padx=14, pady=(0, 8), anchor="w")
+
+        ctk.CTkButton(
+            parent, text="📄  Generar plantilla…", height=38,
+            fg_color=theme.ACCENT_ORANGE, hover_color=theme.ACCENT_ORANGE_HOVER,
+            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            command=self._tpl_generate,
+        ).pack(padx=14, pady=(6, 4), fill="x")
+
+        ctk.CTkButton(
+            parent, text="📷  Cargar foto de plantilla", height=38,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            command=self._tpl_load_photo,
+        ).pack(padx=14, pady=4, fill="x")
+
+        self._tpl_photo_name = ctk.CTkLabel(
+            parent, text="Sin foto cargada",
+            font=theme.FONT_SMALL, text_color=theme.ACCENT_RED,
+        )
+        self._tpl_photo_name.pack(padx=14, pady=(2, 6), anchor="w")
+
+        ctk.CTkButton(
+            parent, text="💾  Guardar en banco", height=38,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            command=self._tpl_save_to_bank,
+        ).pack(padx=14, pady=(6, 4), fill="x")
+
+        self._tpl_status = ctk.CTkLabel(
+            parent, text="", font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+            wraplength=250, justify="left",
+        )
+        self._tpl_status.pack(padx=14, pady=(4, 10), anchor="w")
+
+    def _build_tpl_right(self, parent):
+        ctk.CTkLabel(
+            parent, text="🔤 Letras extraídas",
+            font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
+        ).pack(padx=14, pady=(14, 4), anchor="w")
+        self._tpl_grid = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        self._tpl_grid.pack(fill="both", expand=True, padx=8, pady=4)
+        self._tpl_empty_lbl = ctk.CTkLabel(
+            self._tpl_grid,
+            text="Cargá la foto de una plantilla rellena para ver las letras.",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
+        )
+        self._tpl_empty_lbl.pack(pady=20)
+
+    # ── Lógica ───────────────────────────────────────────────────
+
+    def _tpl_generate(self):
+        path = filedialog.asksaveasfilename(
+            title="Guardar plantilla",
+            defaultextension=".pdf",
+            initialfile="plantilla_letra.pdf",
+            filetypes=[("PDF", "*.pdf"), ("PNG", "*.png")],
+        )
+        if not path:
+            return
+        try:
+            from core.inkcore.template_sheet import save_template_sheet
+            out = save_template_sheet(path)
+            self._tpl_status.configure(
+                text=f"✓ Plantilla guardada: {Path(out).name}. Imprimila y rellenala.",
+                text_color=theme.ACCENT_GREEN,
+            )
+            self.toast(f"Plantilla guardada: {Path(out).name}", "success")
+        except Exception as exc:
+            logger.error("tpl_generate: %s", exc, exc_info=True)
+            self.toast(f"No se pudo generar: {exc}", "error")
+
+    def _tpl_load_photo(self):
+        path = filedialog.askopenfilename(
+            title="Foto de la plantilla rellena",
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp")],
+        )
+        if not path:
+            return
+        self._tpl_photo_path = path
+        self._tpl_photo_name.configure(
+            text=f"✓ {Path(path).name}", text_color=theme.ACCENT_GREEN,
+        )
+        self._tpl_status.configure(
+            text="🔎 Extrayendo casillas…", text_color=theme.ACCENT_ORANGE,
+        )
+
+        def worker():
+            try:
+                from core.inkcore.template_extract import extract_from_template
+                results = extract_from_template(path)
+            except Exception as exc:
+                logger.error("tpl_load worker: %s", exc, exc_info=True)
+                results = None
+
+            def _done():
+                if not results:
+                    self._tpl_status.configure(
+                        text="⚠ No se detectaron letras (¿foto nítida? ¿marcadores visibles?)",
+                        text_color=theme.ACCENT_RED,
+                    )
+                    self.toast("No se extrajo ninguna letra", "error")
+                    return
+                self._tpl_results = results
+                self._render_tpl_grid(results)
+                self._tpl_status.configure(
+                    text=f"✓ {len(results)} letras extraídas. Revisá y guardá en el banco.",
+                    text_color=theme.ACCENT_GREEN,
+                )
+                self.toast(f"{len(results)} letras extraídas", "success")
+
+            if self.winfo_exists():
+                self.after(0, _done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_tpl_grid(self, results):
+        for w in self._tpl_grid.winfo_children():
+            w.destroy()
+        self._tpl_thumb_photos.clear()
+        if not _PIL_OK:
+            return
+        cols = 6
+        for i, (ch, glyph, score) in enumerate(results):
+            r, c = divmod(i, cols)
+            cell = ctk.CTkFrame(self._tpl_grid, fg_color=theme.BG_TERTIARY, corner_radius=6)
+            cell.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            # Glifo blanco sobre tile oscuro para que la tinta se vea.
+            tile = Image.new("RGBA", (84, 84), (20, 20, 30, 255))
+            g = glyph.copy()
+            g.thumbnail((74, 74), Image.LANCZOS)
+            tile.paste(g, ((84 - g.width) // 2, (84 - g.height) // 2), g)
+            photo = ImageTk.PhotoImage(tile)
+            self._tpl_thumb_photos.append(photo)
+            ctk.CTkLabel(cell, image=photo, text="").pack(padx=4, pady=(4, 0))
+            ctk.CTkLabel(
+                cell, text=f"{ch}  ·  {score:.0%}",
+                font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+            ).pack(pady=(0, 4))
+
+    def _tpl_save_to_bank(self):
+        if not self._tpl_results:
+            self.toast("Primero cargá una foto de plantilla", "warning")
+            return
+        results = self._tpl_results
+
+        def worker():
+            try:
+                from core.inkcore.template_extract import save_template_glyphs_to_bank
+                stats = save_template_glyphs_to_bank(results, self._pipeline.bank)
+            except Exception as exc:
+                logger.error("tpl_save worker: %s", exc, exc_info=True)
+                stats = None
+
+            def _done():
+                if stats is None:
+                    self._tpl_status.configure(
+                        text="⚠ Guardado falló — revisá el log",
+                        text_color=theme.ACCENT_RED,
+                    )
+                    self.toast("Guardado falló", "error")
+                    return
+                self._tpl_status.configure(
+                    text=f"✓ Guardadas {stats['saved']} en el banco "
+                         f"({stats['dupes']} ya estaban).",
+                    text_color=theme.ACCENT_GREEN,
+                )
+                self.toast(f"{stats['saved']} letras al banco", "success")
+                # Refrescar banco/revisión si la vista lo soporta
+                if hasattr(self, "_tabs_dirty"):
+                    self._tabs_dirty.update({"🗂 Banco", "✅ Revisión"})
+
+            if self.winfo_exists():
+                self.after(0, _done)
+
+        threading.Thread(target=worker, daemon=True).start()
