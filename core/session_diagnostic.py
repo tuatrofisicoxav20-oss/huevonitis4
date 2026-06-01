@@ -275,14 +275,42 @@ class SessionDiagnostic:
     # ── Helpers ──────────────────────────────────────────────────
 
     @staticmethod
+    def _registered_profile_ids() -> set[str] | None:
+        """IDs de perfiles registrados en _profiles.json.
+
+        Devuelve None si no hay registro (instalación fresca) → no filtrar. Si
+        hay registro, sólo esos cuentan como perfiles vivos; las carpetas de
+        backup/corruptas que quedan sueltas en TIPOGRAFIA_DIR no.
+        """
+        pf = config.PROFILES_FILE
+        if not pf.exists():
+            return None
+        try:
+            with open(pf, encoding="utf-8") as f:
+                data = json.load(f)
+            return {p.get("id", "") for p in data if p.get("id")}
+        except Exception:
+            return None
+
+    @staticmethod
     def _iter_profile_dirs():
-        """Itera los directorios de perfil bajo TIPOGRAFIA_DIR."""
+        """Itera los directorios de perfil VIVOS bajo TIPOGRAFIA_DIR.
+
+        Sólo perfiles registrados en _profiles.json. Las carpetas de backup
+        (`default_backup_*`, `default_CORRUPTO_*`, etc.) que el usuario o el
+        pipeline dejan en la carpeta NO se escanean: sus manifests apuntan a
+        PNGs viejos y dispararían el modal de diagnóstico al arrancar sin que
+        haya nada roto en el banco activo.
+        """
         if not config.TIPOGRAFIA_DIR.exists():
             return
+        registered = SessionDiagnostic._registered_profile_ids()
         for item in config.TIPOGRAFIA_DIR.iterdir():
             if not item.is_dir():
                 continue
             if item.name.startswith("_"):
+                continue
+            if registered is not None and item.name not in registered:
                 continue
             yield item
 
