@@ -117,11 +117,18 @@ class ReplicatorTabMixin:
         ).pack(padx=14, pady=4, fill="x")
 
         ctk.CTkButton(
+            parent, text="✏️  Editar y retocar…", height=34,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
+            font=theme.FONT_SMALL,
+            command=self._repl_open_editor,
+        ).pack(padx=14, pady=(4, 2), fill="x")
+
+        ctk.CTkButton(
             parent, text="📥  Exportar resultado", height=34,
             fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
             font=theme.FONT_SMALL,
             command=self._repl_export,
-        ).pack(padx=14, pady=(4, 14), fill="x")
+        ).pack(padx=14, pady=(2, 14), fill="x")
 
         self._repl_status = ctk.CTkLabel(
             parent, text="", font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
@@ -355,4 +362,91 @@ class ReplicatorTabMixin:
             self.toast(f"Exportado: {Path(out).name}", "success")
         except Exception as exc:
             logger.error("repl_export: %s", exc, exc_info=True)
+            self.toast(f"Export falló: {exc}", "error")
+
+    # ── Edición interactiva (Fase 2) ─────────────────────────────
+
+    def _repl_open_editor(self):
+        """Abre el apunte detectado en un editor de canvas para retocarlo.
+
+        Convierte los bloques (respetando los toggles del panel derecho) en una
+        Page editable, la carga en un CanvasEditor en una ventana aparte y
+        permite mover/agregar/borrar/editar texto antes de exportar con la letra
+        del perfil. El canvas muestra el texto con fuente normal; el export final
+        lo re-escribe con el banco.
+        """
+        if self._repl_layout is None:
+            self.toast("Primero analiza una imagen", "warning")
+            return
+        try:
+            from core.inkcore.replicator_edit import layout_to_page
+            from ui.components.canvas_editor import CanvasEditor
+        except Exception as exc:
+            logger.error("_repl_open_editor import: %s", exc, exc_info=True)
+            self.toast("No se pudo abrir el editor", "error")
+            return
+
+        page = layout_to_page(self._repl_layout)
+        if not page.elements:
+            self.toast("No hay bloques editables (analiza primero)", "warning")
+            return
+        self._repl_edit_page = page
+
+        win = ctk.CTkToplevel(self)
+        win.title("✏️ Retocar apunte — mover / agregar / borrar bloques")
+        win.geometry("1100x760")
+        win.transient(self.winfo_toplevel())
+
+        bar = ctk.CTkFrame(win, fg_color=theme.BG_TERTIARY, height=46)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
+        ctk.CTkLabel(
+            bar,
+            text="Arrastra para mover · doble clic para editar texto · herramientas T/▭/línea arriba",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=12)
+        ctk.CTkButton(
+            bar, text="📥  Exportar con mi letra", height=32,
+            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            font=("Segoe UI", 12, "bold"),
+            command=lambda: self._repl_export_edited(page),
+        ).pack(side="right", padx=10, pady=7)
+
+        editor = CanvasEditor(win)
+        editor.pack(fill="both", expand=True)
+        editor.load_page(page)
+        self._repl_editor = editor
+
+    def _repl_export_edited(self, page):
+        """Renderiza la Page editada con la letra del banco y la exporta."""
+        from tkinter import filedialog
+        try:
+            from core.inkcore.replicator import export_replicated
+            from core.inkcore.replicator_edit import render_page_handwritten
+        except Exception as exc:
+            logger.error("_repl_export_edited import: %s", exc, exc_info=True)
+            self.toast("Export no disponible", "error")
+            return
+
+        img = render_page_handwritten(page, self._pipeline.bank)
+        if img is None:
+            self.toast("No se pudo renderizar (¿PIL?)", "error")
+            return
+        # Reflejar el resultado en la preview principal del tab
+        self._repl_rendered = img
+        self._show_repl_rendered_preview(img)
+
+        path = filedialog.asksaveasfilename(
+            title="Exportar apunte retocado",
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf")],
+        )
+        if not path:
+            self.toast("Render listo (no exportado)", "info")
+            return
+        try:
+            out = export_replicated(img, path)
+            self.toast(f"Exportado: {Path(out).name}", "success")
+        except Exception as exc:
+            logger.error("_repl_export_edited: %s", exc, exc_info=True)
             self.toast(f"Export falló: {exc}", "error")

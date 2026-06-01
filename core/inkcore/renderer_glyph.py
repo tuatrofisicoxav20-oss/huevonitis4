@@ -99,6 +99,23 @@ class GlyphLoadMixin:
             if options.rotation_range > 0:
                 angle = random.uniform(-options.rotation_range, options.rotation_range)
                 img = img.rotate(angle, expand=True, resample=Image.BICUBIC)
+            # Fase 3 — inclinación tipo cursiva: shear horizontal. slant_deg>0
+            # recuesta el glifo a la derecha (la parte de arriba se corre). El
+            # mapeo afín toma input_x = x + shear*(y - h): en la base (y=h) no hay
+            # desplazamiento, arriba (y=0) se corre shear*h. Ensancha el lienzo
+            # para no recortar.
+            slant = getattr(options, "slant_deg", 0.0) or 0.0
+            if abs(slant) > 0.1:
+                import math
+                shear = math.tan(math.radians(slant))
+                extra = math.ceil(abs(shear) * img.height)
+                if extra > 0:
+                    new_w = img.width + extra
+                    img = img.transform(
+                        (new_w, img.height), Image.AFFINE,
+                        (1, shear, -shear * img.height if shear > 0 else 0.0, 0, 1, 0),
+                        resample=Image.BICUBIC,
+                    )
             # Guard again after rotation (expand=True can theoretically produce odd sizes)
             if img.width < 1 or img.height < 1:
                 return None
