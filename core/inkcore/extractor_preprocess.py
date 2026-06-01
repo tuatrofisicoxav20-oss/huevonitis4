@@ -170,11 +170,110 @@ class ImagePreprocessor:
                 best_angle = a
         return best_angle if abs(best_angle) > 0.3 else None
 
+    # ── Detección del papel (encuadre con fondo oscuro / mano) ─────
+
+    @staticmethod
+    def detect_paper_mask(gray: "np.ndarray") -> "np.ndarray | None":
+        """Detecta la región del PAPEL (zona clara grande) en la imagen.
+
+        Pensado para fotos donde el papel no llena el cuadro: hay fondo oscuro,
+        sombra lateral o una mano sosteniendo la hoja (img2). El papel es la
+        componente brillante más grande; todo lo demás (oscuro) se descarta.
+
+        Devuelve una máscara uint8 (255 = papel) o None cuando el papel ya cubre
+        casi todo el cuadro (escaneos limpios como img1/img3): en ese caso no hay
+        nada que recortar y aplicar la máscara sería contraproducente.
+        """
+        if not CV2_OK or gray is None or gray.size == 0:
+            return None
+        h, w = gray.shape[:2]
+        total = float(h * w)
+
+        # Otsu sobre gris suavizado separa "claro" (papel) de "oscuro" (fondo/mano).
+        blur = cv2.GaussianBlur(gray, (9, 9), 0)
+        otsu_thr, bright = cv2.threshold(blur, 0, 255,
+                                         cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # Si casi todo es claro, no hay fondo oscuro que recortar (escaneo limpio).
+        bright_frac = float(np.count_nonzero(bright)) / max(1.0, total)
+        if bright_frac > 0.93:
+            return None
+
+        # OPEN: borra motas brillantes del fondo oscuro (ruido de sensor) que si no
+        # se fusionarían con el papel al cerrar y lo inflarían.
+        op = max(3, min(h, w) // 120)
+        op = op if op % 2 == 1 else op + 1
+        bright = cv2.morphologyEx(
+            bright, cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (op, op)),
+        )
+        # CLOSE: une el papel (la tinta y sombras suaves dejan huecos) en una sola
+        # componente sólida.
+        k = max(15, min(h, w) // 25)
+        k = k if k % 2 == 1 else k + 1
+        closed = cv2.morphologyEx(
+            bright, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)),
+        )
+
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+        if num <= 1:
+            return None
+        big = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        area_frac = float(stats[big, cv2.CC_STAT_AREA]) / total
+
+        # El papel debe ser una porción sustancial del cuadro (evita confundir un
+        # reflejo pequeño con el papel) pero no casi todo (ya cubierto arriba).
+        if area_frac < 0.20 or area_frac > 0.95:
+            return None
+
+        paper = np.where(labels == big, np.uint8(255), np.uint8(0))
+        # Rellenar agujeros internos del papel (tinta, sombras) para no perder
+        # letras que caen sobre zonas que Otsu marcó oscuras.
+        paper = ImagePreprocessor._fill_holes(paper)
+        # Erosión: descarta el borde del papel donde se cuela la transición
+        # papel→fondo (anillo de tinta espuria). Moderada: la escritura vive en el
+        # interior, pero erosionar de más recorta papel útil sin matar el pliegue.
+        er = max(9, min(h, w) // 45)
+        er = er if er % 2 == 1 else er + 1
+        paper = cv2.erode(paper, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (er, er)))
+
+        # Guarda final: tras rellenar/erosionar, si el papel quedó cubriendo casi
+        # todo (la imagen era casi todo claro) no aporta y podría dañar — no-op.
+        final_frac = float(np.count_nonzero(paper)) / max(1.0, total)
+        if final_frac > 0.95:
+            return None
+        return paper
+
+    @staticmethod
+    def _fill_holes(mask: "np.ndarray") -> "np.ndarray":
+        """Rellena agujeros internos (rodeados de blanco) de una máscara binaria.
+
+        Hace flood-fill del FONDO desde un marco exterior de 1px (garantizado
+        background): así el "exterior" siempre está conectado a la semilla aunque
+        el fondo real esté fragmentado por la propia forma. Lo que el flood NO
+        alcanza son agujeros internos → se rellenan.
+        """
+        h, w = mask.shape[:2]
+        padded = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+        ff = padded.copy()
+        m = np.zeros((h + 4, w + 4), np.uint8)
+        cv2.floodFill(ff, m, (0, 0), 255)
+        ff = ff[1:-1, 1:-1]
+        holes = cv2.bitwise_not(ff)  # lo que el flood NO alcanzó = agujeros internos
+        return cv2.bitwise_or(mask, holes)
+
     # ── Umbralización y normalización ──────────────────────────────
 
     @staticmethod
     def normalize_illumination(gray: "np.ndarray") -> "np.ndarray":
-        """Sustrae el fondo estimado por dilatación → iluminación uniforme."""
+        """Sustrae el fondo estimado por dilatación → iluminación uniforme.
+
+        (Versión original, robusta para escaneos/cuaderno rayado: estima el fondo
+        como el máximo local —dilatación— y divide. La penumbra ancha de las fotos
+        se trata aparte en `flatten_shadows`, sólo cuando se detecta papel, para no
+        alterar este camino que ya funciona bien en hojas limpias.)
+        """
         ks = max(51, gray.shape[1] // 10)
         ks = ks if ks % 2 == 1 else ks + 1
         ks = min(ks, 201)
@@ -182,6 +281,27 @@ class ImagePreprocessor:
         bg = cv2.morphologyEx(gray, cv2.MORPH_DILATE, k)
         norm = cv2.divide(gray.astype(np.float32), bg.astype(np.float32), scale=255.0)
         return np.clip(norm, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def flatten_shadows(gray: "np.ndarray") -> "np.ndarray":
+        """Aplana sombras/pliegues anchos del papel (caso foto) dividiendo por un
+        CLOSE morfológico de kernel mayor que el grosor de los trazos.
+
+        El CLOSE borra la tinta (rellena trazos finos con el papel de alrededor)
+        pero conserva la penumbra ancha; dividir gris/fondo cancela esa penumbra y
+        deja la tinta. Pensado para llamarse SOLO cuando hay papel detectado, antes
+        de la normalización estándar, para no afectar escaneos limpios.
+        """
+        h, w = gray.shape[:2]
+        ks = max(31, min(w, h) // 16)
+        ks = ks if ks % 2 == 1 else ks + 1
+        ks = min(ks, 151)
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
+        bg = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, k)
+        bg = cv2.GaussianBlur(bg, (0, 0), ks / 3.0)
+        bg = np.maximum(bg, 1)
+        flat = cv2.divide(gray.astype(np.float32), bg.astype(np.float32), scale=235.0)
+        return np.clip(flat, 0, 255).astype(np.uint8)
 
     @staticmethod
     def sauvola(gray: "np.ndarray", window: int = 25, k: float = 0.20) -> "np.ndarray":
@@ -205,6 +325,174 @@ class ImagePreprocessor:
             h = int(stats[i, cv2.CC_STAT_HEIGHT])
             if a >= MIN_COMP_AREA and w >= MIN_CHAR_W and h >= MIN_CHAR_H:
                 out[labels == i] = 255
+        return out
+
+    @staticmethod
+    def _denoise_specks(mask: "np.ndarray") -> "np.ndarray":
+        """Borra componentes de ruido (granulado del papel) en fotos.
+
+        Usa el tamaño TÍPICO de los componentes grandes (las letras) como escala:
+        cualquier componente mucho más pequeño que la letra mediana es mota de
+        textura/sombra y se descarta. Conservador: si no hay componentes grandes
+        claros (línea casi vacía), no borra nada para no perder escritura tenue.
+        """
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        if num <= 2:
+            return mask
+        areas = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+        heights = stats[1:, cv2.CC_STAT_HEIGHT].astype(np.float64)
+        # Referencia de "letra": mediana de las componentes del tercio superior por área.
+        big = np.sort(areas)[::-1]
+        ref_area = float(np.median(big[: max(1, len(big) // 3)]))
+        ref_h = float(np.median(heights[heights >= np.percentile(heights, 60)]))
+        if ref_area < 30 or ref_h < 6:
+            return mask  # nada claramente "letra" → no arriesgar
+        # Umbral de mota: < 6% del área de letra Y baja altura → ruido.
+        min_area = max(MIN_COMP_AREA, ref_area * 0.06)
+        min_h = max(MIN_CHAR_H, ref_h * 0.30)
+        out = np.zeros_like(mask)
+        for i in range(1, num):
+            a = float(stats[i, cv2.CC_STAT_AREA])
+            hh = float(stats[i, cv2.CC_STAT_HEIGHT])
+            if a >= min_area or hh >= min_h:
+                out[labels == i] = 255
+        return out
+
+    @staticmethod
+    def _remove_long_lines(mask: "np.ndarray") -> "np.ndarray":
+        """Borra componentes muy anchos/elongados (borde o pliegue del papel).
+
+        En una foto, el filo y el pliegue del papel binarizan como trazos largos
+        que cruzan casi toda la imagen. Ninguna letra suelta es tan ancha, así que
+        eliminar las componentes cuyo ancho supera ~45% del ancho de la imagen (o
+        que son extremadamente elongadas horizontalmente) limpia esos artefactos
+        sin tocar letras. Sólo se usa en el camino "papel detectado" (foto).
+        """
+        h, w = mask.shape[:2]
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        out = mask.copy()
+        max_w = int(w * 0.45)
+        for i in range(1, num):
+            cw = int(stats[i, cv2.CC_STAT_WIDTH])
+            ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+            very_wide = cw >= max_w
+            elongated = cw >= 8 * max(1, ch) and cw >= w * 0.18
+            if very_wide or elongated:
+                out[labels == i] = 0
+        return out
+
+    @staticmethod
+    def _gate_text_rows(mask: "np.ndarray") -> "np.ndarray":
+        """Conserva el BLOQUE de texto (renglones contiguos) y descarta lo demás.
+
+        En una foto, el borde/pliegue curvo del papel y el granulado generan
+        renglones falsos lejos de la escritura. La escritura forma un bloque de
+        pocas líneas con MUCHAS componentes pequeñas (letras); el pliegue es un
+        bloque con POCAS componentes grandes/elongadas. Aquí:
+          1. Marcamos filas con tinta y las agrupamos en bloques contiguos
+             (uniendo huecos pequeños = interlínea).
+          2. Puntuamos cada bloque por cuántas componentes con forma de LETRA
+             contiene (no por masa de tinta, que el pliegue también tiene).
+          3. Conservamos el mejor bloque y los cercanos con puntaje comparable.
+
+        Conservador: si no hay un pico de densidad claro, no toca nada (escritura
+        muy tenue, p.ej. escaneo gris — que de todos modos no entra por aquí).
+        """
+        h, w = mask.shape[:2]
+        if h < 10:
+            return mask
+        rowden = (mask > 0).sum(axis=1).astype(np.float32) / max(1, w)
+        ksz = max(3, (h // 80) | 1)
+        sm = cv2.GaussianBlur(rowden.reshape(-1, 1), (1, ksz), 0).flatten()
+        peak = float(sm.max())
+        if peak < 0.03:
+            return mask
+        keep_thr = max(0.014, peak * 0.13)
+        keep = sm >= keep_thr
+        if not keep.any():
+            return mask
+
+        # Agrupar filas marcadas en bloques, uniendo huecos <= interlínea típica.
+        gap_join = max(6, h // 30)
+        blocks: list[list[int]] = []
+        y = 0
+        while y < h:
+            if keep[y]:
+                y0 = y
+                while y < h and keep[y]:
+                    y += 1
+                y1 = y
+                if blocks and y0 - blocks[-1][1] <= gap_join:
+                    blocks[-1][1] = y1
+                else:
+                    blocks.append([y0, y1])
+            else:
+                y += 1
+        if len(blocks) <= 1:
+            return mask  # un solo bloque → nada que descartar
+
+        # Componentes con forma de letra: ni motas, ni trazos enormes/elongados,
+        # ni fragmentos finos del pliegue (baja altura). Usamos la altura típica de
+        # las componentes grandes como referencia de "alto de letra": los trozos del
+        # pliegue son mucho más bajos que una letra real.
+        num, _, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        all_h = stats[1:, cv2.CC_STAT_HEIGHT].astype(np.float64) if num > 1 else np.empty(0)
+        ref_h = float(np.percentile(all_h, 75)) if all_h.size else 0.0
+        min_letter_h = max(MIN_CHAR_H, ref_h * 0.45)
+        letters_y: list[float] = []
+        for i in range(1, num):
+            a = int(stats[i, cv2.CC_STAT_AREA])
+            cw = int(stats[i, cv2.CC_STAT_WIDTH])
+            ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+            if a < 20:
+                continue
+            if cw >= w * 0.30:            # demasiado ancho → línea/pliegue
+                continue
+            if cw >= 6 * max(1, ch):      # muy elongado horizontal → trazo
+                continue
+            if ch < min_letter_h:         # muy bajo → fragmento de pliegue/ruido
+                continue
+            letters_y.append(float(cents[i][1]))
+        letters_y_arr = np.asarray(letters_y) if letters_y else np.empty(0)
+
+        def block_score(b):
+            if letters_y_arr.size == 0:
+                return float(rowden[b[0]:b[1]].sum())  # fallback por masa
+            return int(np.count_nonzero((letters_y_arr >= b[0]) & (letters_y_arr < b[1])))
+
+        best = max(blocks, key=block_score)
+        best_score = block_score(best)
+        if best_score <= 0:
+            return mask
+        # "Cercano" = a lo sumo ~1.5x la altura del bloque de texto: renglones del
+        # mismo abecedario están pegados; el pliegue queda más lejos y se descarta.
+        best_h = best[1] - best[0]
+        near = max(h // 12, int(best_h * 1.5))
+
+        def keep_block(b):
+            if b is best:
+                return True
+            # Conservar otro bloque sólo si aporta varias letras (otro renglón
+            # real), no un pliegue con unos pocos fragmentos altos.
+            if block_score(b) < max(3, best_score * 0.45):
+                return False
+            return (b[0] - best[1] <= near) and (best[0] - b[1] <= near)
+
+        keep_blocks = [b for b in blocks if keep_block(b)]
+        margin = max(4, h // 40)
+        band = np.zeros(h, dtype=bool)
+        for b in keep_blocks:
+            band[max(0, b[0] - margin):min(h, b[1] + margin)] = True
+        out = mask.copy()
+        out[~band, :] = 0
+        # Recorte vertical fino: dejar la banda ceñida a las filas con tinta real
+        # (sin colas vacías que vuelvan "alto" un renglón y confundan el split).
+        rows_ink = np.where(out.sum(axis=1) > 0)[0]
+        if rows_ink.size:
+            top = max(0, int(rows_ink[0]))
+            bot = min(h, int(rows_ink[-1]) + 1)
+            out[:top, :] = 0
+            out[bot:, :] = 0
         return out
 
     def remove_lines(self, mask: "np.ndarray") -> "np.ndarray":
@@ -235,12 +523,35 @@ class ImagePreprocessor:
     def full_preprocess(
         self, img: "np.ndarray", opts
     ) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
-        """Preprocesamiento completo: normalización + multi-threshold + limpieza.
+        """Preprocesamiento completo: papel + normalización + multi-threshold + limpieza.
 
         Devuelve (gray_normalizado, thresh_raw, mask_limpia).
         """
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Encuadre: detectar la región del PAPEL cuando no llena el cuadro
+        # (fondo oscuro/sombra/mano, p.ej. una foto). None ⇒ escaneo limpio (no-op).
+        # Para no crear un borde artificial papel↔relleno que la normalización
+        # convierta en un anillo de "tinta", rellenamos el exterior con el brillo
+        # MEDIANO del papel (transición suave) en vez de blanco puro. La tinta que
+        # igual aparezca fuera del papel se borra al final confinando la máscara.
+        paper_mask = self.detect_paper_mask(gray)
+        if paper_mask is not None:
+            inside = paper_mask > 0
+            fill = int(np.median(gray[inside])) if np.any(inside) else 255
+            gray = gray.copy()
+            gray[~inside] = fill
+            # Foto: aplanar pliegues/penumbra anchos del papel ANTES de normalizar.
+            gray = self.flatten_shadows(gray)
+            logger.info("Papel detectado: %.0f%% del cuadro (relleno exterior=%d)",
+                        100.0 * float(np.count_nonzero(paper_mask)) / max(1, paper_mask.size),
+                        fill)
+
         gray = self.normalize_illumination(gray)
+        # Mediana: borra la textura/granulado fino del papel (especialmente en
+        # fotos con sombra) que la binarización confundiría con tinta, sin comerse
+        # los trazos (más gruesos). Suave para no dañar escritura tenue (img3).
+        gray = cv2.medianBlur(gray, 3)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
         img_w = gray.shape[1]
@@ -269,6 +580,18 @@ class ImagePreprocessor:
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+
+        # Confinar la tinta al papel: aunque rellenamos el fondo, el borde
+        # papel→fondo puede dejar un anillo de ruido. Lo recortamos con la máscara
+        # y, como es una foto (no escaneo limpio), limpiamos motas más fuerte: el
+        # granulado/sombra del papel deja puntos y filamentos sueltos que generan
+        # renglones falsos. La escritura fotografiada suele ser gruesa, así que un
+        # OPEN moderado la respeta, y borramos componentes finos (ruido) por área.
+        if paper_mask is not None:
+            mask[paper_mask == 0] = 0
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            mask = self._denoise_specks(mask)
+
         raw = mask.copy()
 
         if opts.remove_lines:
@@ -276,4 +599,14 @@ class ImagePreprocessor:
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
 
         clean = self.filtered_mask(mask)
+
+        # Foto: limpiar artefactos del encuadre que generan renglones falsos y
+        # desbaratan el reparto del texto de referencia. Primero borramos los
+        # trazos largos (filo/pliegue del papel) y luego descartamos las franjas
+        # de filas dispersas (granulado). Sólo en el camino "papel detectado"
+        # para no tocar escaneos limpios (que ya funcionan).
+        if paper_mask is not None:
+            clean = self._remove_long_lines(clean)
+            clean = self._gate_text_rows(clean)
+
         return gray, raw, clean
