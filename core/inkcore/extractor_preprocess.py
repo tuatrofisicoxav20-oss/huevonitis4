@@ -18,6 +18,17 @@ try:
 except ImportError:
     CV2_OK = False
 
+# scikit-image (opcional): binarización de documento de nivel "escáner".
+# Si no está instalado, todo el preprocesamiento degrada a las variantes
+# basadas en cv2 (Sauvola casero + CLAHE de OpenCV) — el comportamiento previo.
+try:
+    from skimage.filters import threshold_sauvola as _sk_threshold_sauvola
+    from skimage.exposure import equalize_adapthist as _sk_equalize_adapthist
+    from skimage.exposure import rescale_intensity as _sk_rescale_intensity
+    SKIMAGE_OK = True
+except ImportError:  # pragma: no cover - entorno sin scikit-image
+    SKIMAGE_OK = False
+
 # Constantes compartidas con extractor.py
 MIN_COMP_AREA = 10
 MIN_CHAR_W = 2
@@ -305,14 +316,94 @@ class ImagePreprocessor:
 
     @staticmethod
     def sauvola(gray: "np.ndarray", window: int = 25, k: float = 0.20) -> "np.ndarray":
-        """Thresholding de Sauvola — robusto para escritura a mano con iluminación variable."""
+        """Thresholding de Sauvola — robusto para escritura a mano con iluminación variable.
+
+        Usa la implementación canónica de scikit-image (`threshold_sauvola`,
+        fórmula Sauvola–Pietikäinen con r=128 para 8 bits) cuando está disponible,
+        que tolera mejor la iluminación despareja de las fotos (img2) que la
+        aproximación casera. Si scikit-image no está, cae a la versión basada en
+        OpenCV. En ambos casos devuelve una máscara binaria {0,255} del mismo
+        shape (tinta = 255, escritura oscura sobre papel claro).
+        """
+        win = int(window)
+        if win % 2 == 0:  # skimage exige ventana impar
+            win += 1
+        if SKIMAGE_OK:
+            try:
+                thr = _sk_threshold_sauvola(gray, window_size=win, k=k, r=128.0)
+                return (gray < thr).astype(np.uint8) * 255
+            except Exception:  # pragma: no cover - degradar a cv2 ante cualquier fallo
+                pass
+        # Fallback OpenCV (entorno sin scikit-image)
         g = gray.astype(np.float32)
-        mean = cv2.boxFilter(g, cv2.CV_32F, (window, window))
-        sq_mean = cv2.boxFilter(g * g, cv2.CV_32F, (window, window))
+        mean = cv2.boxFilter(g, cv2.CV_32F, (win, win))
+        sq_mean = cv2.boxFilter(g * g, cv2.CV_32F, (win, win))
         std = np.sqrt(np.maximum(0.0, sq_mean - mean * mean))
         threshold = mean * (1.0 + k * (std / 128.0 - 1.0))
         threshold = np.maximum(0.0, threshold)
         return (g < threshold).astype(np.uint8) * 255
+
+    @staticmethod
+    def enhance_contrast(gray: "np.ndarray") -> "np.ndarray":
+        """Realza letras tenues/de bajo contraste (img3) antes de binarizar.
+
+        Combina dos técnicas de scikit-image:
+          • `equalize_adapthist` (CLAHE de skimage) ecualiza por regiones para
+            que la tinta gris pálida gane separación respecto al papel.
+          • `rescale_intensity` con percentiles (2–98) estira el histograma
+            recortando extremos, levantando trazos muy claros sin saturar.
+        Se aplican en cascada y se devuelve un gris uint8 del mismo shape.
+
+        Si scikit-image no está, devuelve el gris sin tocar (el CLAHE de OpenCV
+        del flujo principal ya aporta algo de realce). Pensado como ENTRADA extra
+        para la votación de binarización, no para reemplazar al gris normalizado.
+        """
+        if not SKIMAGE_OK:
+            return gray
+        try:
+            # CLAHE de skimage: kernel ~ 1/8 del lado para regiones amplias.
+            h, w = gray.shape[:2]
+            ksz = max(8, min(h, w) // 8)
+            eq = _sk_equalize_adapthist(gray, kernel_size=ksz, clip_limit=0.01)
+            eq8 = (np.clip(eq, 0.0, 1.0) * 255.0).astype(np.uint8)
+            # Estiramiento por percentiles para recortar extremos de ruido.
+            p2, p98 = np.percentile(eq8, (2, 98))
+            if p98 - p2 < 5:  # contraste ya plano → no forzar
+                return eq8
+            stretched = _sk_rescale_intensity(
+                eq8, in_range=(float(p2), float(p98)), out_range=(0, 255)
+            )
+            return stretched.astype(np.uint8)
+        except Exception:  # pragma: no cover
+            return gray
+
+    @staticmethod
+    def _estimate_text_height(gray: "np.ndarray") -> int:
+        """Estima el alto típico de letra (px) para dimensionar la ventana Sauvola.
+
+        Una binarización Otsu rápida + componentes conexas: la mediana de la
+        altura de las componentes "grandes" (las letras dominan en número) es una
+        referencia barata del alto de renglón. La ventana de Sauvola debe ser algo
+        mayor que el grosor del trazo pero del orden del alto de letra para captar
+        la variación de iluminación local sin difuminar la tinta. Devuelve 0 si no
+        hay nada claro (deja que el llamador use un valor por defecto).
+        """
+        try:
+            _, b = cv2.threshold(gray, 0, 255,
+                                 cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            num, _, stats, _ = cv2.connectedComponentsWithStats(b, connectivity=8)
+            if num <= 1:
+                return 0
+            hs = stats[1:, cv2.CC_STAT_HEIGHT].astype(np.float64)
+            ar = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+            hs = hs[ar >= MIN_COMP_AREA]
+            if hs.size == 0:
+                return 0
+            # Mediana del tercio más alto: ignora motas, sigue las letras reales.
+            top = np.sort(hs)[::-1][: max(1, hs.size // 3)]
+            return int(np.median(top))
+        except Exception:  # pragma: no cover
+            return 0
 
     @staticmethod
     def filtered_mask(mask: "np.ndarray") -> "np.ndarray":
@@ -356,6 +447,48 @@ class ImagePreprocessor:
             hh = float(stats[i, cv2.CC_STAT_HEIGHT])
             if a >= min_area or hh >= min_h:
                 out[labels == i] = 255
+        return out
+
+    @staticmethod
+    def _remove_hdashes(mask: "np.ndarray") -> "np.ndarray":
+        """Borra GUIONES horizontales: fragmentos de renglón rayado roto (caso foto).
+
+        En una foto de hoja rayada, la línea del cuaderno no sale entera (como en
+        un escaneo limpio que `remove_lines` ya maneja) sino partida en trocitos
+        horizontales por la tinta y la deformación de la perspectiva. Esos trocitos
+        son demasiado cortos para `remove_lines` (no alcanzan el % de fila) y para
+        `_remove_long_lines` (no son tan anchos), así que sobreviven y se reparten
+        como "letras" falsas, desalineando todo el renglón.
+
+        Criterio (conservador, sólo camino "papel detectado"): una componente es
+        guion si es MUCHO más ancha que alta (≥4×), bastante BAJA respecto al alto
+        de letra típico (≤45%) y tiene un ancho mínimo apreciable. Se calcula el
+        alto de letra como la mediana de las componentes altas; si no hay letras
+        claras no se toca nada (evita comerse escritura tenue).
+        """
+        h, w = mask.shape[:2]
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        if num <= 2:
+            return mask
+        heights = stats[1:, cv2.CC_STAT_HEIGHT].astype(np.float64)
+        areas = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+        tall = heights[(areas >= MIN_COMP_AREA)]
+        if tall.size == 0:
+            return mask
+        ref_h = float(np.median(np.sort(tall)[::-1][: max(1, tall.size // 3)]))
+        if ref_h < 8:
+            return mask  # sin un alto de letra fiable, no arriesgar
+        min_w = max(8, int(w * 0.03))
+        out = mask.copy()
+        for i in range(1, num):
+            cw = int(stats[i, cv2.CC_STAT_WIDTH])
+            ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+            # Una letra real nunca es a la vez ≥3× más ancha que alta Y muy baja:
+            # las anchas (m, w) son altas; las bajas (guiones, restos de renglón) no
+            # son letras. Doble condición → seguro.
+            is_dash = (cw >= 3 * max(1, ch)) and (ch <= 0.40 * ref_h) and (cw >= min_w)
+            if is_dash:
+                out[labels == i] = 0
         return out
 
     @staticmethod
@@ -559,14 +692,29 @@ class ImagePreprocessor:
         clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(tile, tile))
         enhanced = clahe.apply(gray)
 
-        # Votación de 5 estrategias de umbralización
+        # Ventana de Sauvola. Por defecto se conservan los valores afinados para
+        # escaneos limpios (25 / 41), que ya extraen muy bien hojas rayadas y de
+        # bajo contraste. SÓLO en el camino "papel detectado" (foto con luz
+        # despareja, img2) la dimensionamos en proporción al alto de letra: ahí una
+        # ventana mayor (≈1.5×–2.3× la letra) capta la variación de iluminación
+        # local sin partir trazos, que es la recomendación para escaneo de
+        # documentos. (Medido: img2 sube de 12 a 13 glifos vs. ventana fija.)
+        if paper_mask is not None:
+            txt_h = self._estimate_text_height(enhanced)
+            base = txt_h if txt_h > 0 else 31
+            win_s = int(np.clip(int(base * 1.5) | 1, 31, 95))
+            win_l = int(np.clip(int(base * 2.3) | 1, 51, 141))
+        else:
+            win_s, win_l = 25, 41
+
+        # Votación de 5 estrategias de umbralización (sobre el gris realzado cv2).
         _, m1 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         m2 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY_INV, 31, 8)
-        m3 = self.sauvola(enhanced, window=25, k=0.14)
+        m3 = self.sauvola(enhanced, window=win_s, k=0.14)
         m4 = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
                                    cv2.THRESH_BINARY_INV, 19, 6)
-        m5 = self.sauvola(enhanced, window=41, k=0.20)
+        m5 = self.sauvola(enhanced, window=win_l, k=0.20)
 
         vote = ((m1 > 0).astype(np.int16) + (m2 > 0).astype(np.int16)
                 + (m3 > 0).astype(np.int16) + (m4 > 0).astype(np.int16)
@@ -574,9 +722,34 @@ class ImagePreprocessor:
 
         mask = np.where(vote >= 2, np.uint8(255), np.uint8(0))
         ink_ratio = np.sum(mask > 0) / max(1, mask.size)
-        if ink_ratio < 0.008:
-            mask = np.where(vote >= 1, np.uint8(255), np.uint8(0))
-            logger.debug("Votación relajada a ≥1 (ratio=%.4f)", ink_ratio)
+
+        # Rescate de letras MUY tenues / ink-starved (escritura gris pálida que casi
+        # no cruza el umbral): si el consenso deja muy poca tinta, el cuello de
+        # botella suele ser de CONTRASTE, no de iluminación. Realzamos con
+        # scikit-image (CLAHE adaptativo + estiramiento por percentiles) y volvemos a
+        # binarizar; esa máscara recupera trazos pálidos. Se confirma con Otsu del
+        # realce para no traer ruido y sólo se incorpora si la cobertura resultante
+        # sigue siendo razonable de documento. Conservador (umbral bajo): a cobertura
+        # moderada el realce tiende a sumar textura/granulado en vez de letras, así
+        # que NO se aplica ahí — evita "muchas componentes pero desalineadas".
+        if ink_ratio < 0.012:
+            enh2 = self.enhance_contrast(gray)
+            faint = self.sauvola(enh2, window=win_s, k=0.12)
+            _, otsu2 = cv2.threshold(enh2, 0, 255,
+                                     cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            faint = cv2.bitwise_and(faint, otsu2)
+            merged = np.where((vote >= 1) | (faint > 0), np.uint8(255), np.uint8(0))
+            mr = np.sum(merged > 0) / max(1, merged.size)
+            if 0.004 <= mr <= 0.12:
+                mask = merged
+                logger.debug("Rescate contraste (skimage): ratio %.4f→%.4f",
+                             ink_ratio, mr)
+            elif ink_ratio < 0.008:
+                # Rescate no concluyente y tinta de verdad escasa: relajar el consenso
+                # a ≥1 como hacía el flujo previo (mejor algo que nada).
+                mask = np.where(vote >= 1, np.uint8(255), np.uint8(0))
+                logger.debug("Votación relajada a ≥1 (ratio=%.4f)", ink_ratio)
+            # Resto rechazado → conservar la máscara de consenso ≥2 original.
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
@@ -606,6 +779,7 @@ class ImagePreprocessor:
         # de filas dispersas (granulado). Sólo en el camino "papel detectado"
         # para no tocar escaneos limpios (que ya funcionan).
         if paper_mask is not None:
+            clean = self._remove_hdashes(clean)
             clean = self._remove_long_lines(clean)
             clean = self._gate_text_rows(clean)
 

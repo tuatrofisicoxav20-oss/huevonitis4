@@ -53,6 +53,17 @@
 # ocrmypdf>=16.0
 
 # -----------------------------------------------------------------------------
+# Preprocesamiento de imágenes "nivel escáner" (extractor de glifos)
+# -----------------------------------------------------------------------------
+
+# scikit-image — binarización de documento robusta (threshold_sauvola) y realce
+# de contraste para letras tenues (equalize_adapthist / rescale_intensity).
+# Mejora notablemente la extracción de fotos difíciles (sombra, bajo contraste).
+# OPCIONAL: si no está instalado, el extractor degrada a Sauvola casero + CLAHE
+# de OpenCV automáticamente (mismo resultado que antes, sin errores).
+# scikit-image>=0.24
+
+# -----------------------------------------------------------------------------
 # Utilidades de sistema
 # -----------------------------------------------------------------------------
 
