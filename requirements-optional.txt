@@ -21,7 +21,16 @@
 # docTR — bueno para texto impreso, layout complejo.
 # python-doctr[torch]>=0.8
 
-# EasyOCR — ligero, buen fallback.
+# EasyOCR — detector CRAFT moderno (reemplaza a craft-text-detector, muerto en
+# Python 3.14). Se registra como detector "easyocr" (EasyOCRDetector).
+# Instalar torchvision desde el índice CPU de PyTorch para que empareje con torch
+# y cargue el operador NMS (si no: "operator torchvision::nms does not exist"):
+#   pip install torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install easyocr
+# NOTA medida (2026-06): activarlo NO mejora la extracción de letra suelta —
+# CRAFT agrupa por línea/palabra (2-4 cajas por hoja, no ~27 caracteres). El
+# cuello de botella es la segmentación, no la detección. Para un banco bueno usar
+# el MODO PLANTILLA (pestaña 🧩). Queda como opción, apagado por defecto.
 # easyocr>=1.7
 
 # -----------------------------------------------------------------------------
