@@ -38,6 +38,17 @@ class RenderOptions:
     rotation_range: float = 4.0
     ink_alpha_min: float = 0.80
     ink_alpha_max: float = 1.0
+    # Realismo de la escritura (Fase 3). Valores conservadores: suben la
+    # credibilidad sin volver el texto ilegible.
+    #   baseline_drift: amplitud máx (px) del vaivén lento de la línea base a lo
+    #     largo del renglón — una persona no escribe perfectamente recto.
+    #   kerning_jitter: fracción del hueco entre letras que varía al azar (0-1);
+    #     da espaciado irregular y leves solapes como en la letra real.
+    #   slant_deg: inclinación (shear) de cada glifo en grados; >0 = cursiva
+    #     ligeramente reclinada a la derecha.
+    baseline_drift: float = 2.5
+    kerning_jitter: float = 0.5
+    slant_deg: float = 0.0
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
@@ -63,6 +74,32 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         for k, v in preset.items():
             setattr(options, k, v)
         return options
+
+    def render_transparent(self, text: str, options: RenderOptions) -> "Image.Image | None":
+        """Como render_text pero sobre fondo TRANSPARENTE (RGBA), sin decoraciones.
+
+        Pensado para compositar un bloque en una posición arbitraria (replicador):
+        sólo la tinta queda, el resto es transparente, así no tapa lo de abajo.
+        No aplica fondo/renglones (sería opaco); sí respeta wrap y la variación.
+        """
+        if not PIL_OK:
+            return None
+        options = self.apply_style(options)
+        usable_width = max(1, options.page_width - 2 * options.page_margin)
+        line_height_px = int(options.font_size * options.line_height)
+        wrapped = self._soft_wrap_text(text, options, usable_width)
+        rendered = [self._render_line(line, options, usable_width) for line in wrapped]
+        total_h = max(line_height_px, options.page_margin * 2 + len(rendered) * line_height_px)
+        canvas = Image.new("RGBA", (options.page_width, total_h), (0, 0, 0, 0))
+        y_cursor = options.page_margin
+        for line_img in rendered:
+            if line_img:
+                jitter_y = random.randint(-options.jitter_px, options.jitter_px)
+                paste_y = max(0, y_cursor + jitter_y)
+                if paste_y + line_img.height <= total_h:
+                    canvas.paste(line_img, (options.page_margin, paste_y), line_img)
+            y_cursor += line_height_px
+        return canvas
 
     def render_text(self, text: str, options: RenderOptions) -> "Image.Image | None":
         """Renderiza texto completo. Usa render_pages internamente para textos largos."""
@@ -212,6 +249,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         # Bug fix #2: minimum word space of 4px for very small fonts
         word_space = max(4, int(options.font_size * 0.4))
 
+        # Fase 3 — deriva de línea base: un offset que se mueve poco a poco a lo
+        # largo del renglón (random walk acotado) en vez de una recta perfecta.
+        # Cada letra hereda casi todo el offset de la anterior + un pasito al
+        # azar, así el vaivén es suave y no un temblor letra-a-letra.
+        drift = 0.0
+        drift_amp = max(0.0, options.baseline_drift)
+
         for char, is_space in wrapped_chars:
             if is_space:
                 x_cursor += word_space
@@ -233,7 +277,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
             # bajan su cola bajo el baseline en vez de quedar "flotando" alineadas
             # por abajo como las de x-height (lo que se veía poco natural).
             jitter_y = random.randint(-options.jitter_px, options.jitter_px)
-            baseline = int(h * 0.72)
+            # Avanza el random walk de la línea base y lo mantiene acotado a
+            # ±drift_amp para que el renglón ondule sin despegarse.
+            if drift_amp > 0:
+                drift += random.uniform(-drift_amp * 0.4, drift_amp * 0.4)
+                drift = max(-drift_amp, min(drift_amp, drift))
+            baseline = int(h * 0.72) + round(drift)
             if self._vertical_class(char) == "desc":
                 y_pos = baseline - glyph_img.height + int(options.font_size * 0.30)
             else:
@@ -241,7 +290,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
             # Apply jitter, then clamp to stay within the canvas vertically
             y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
             line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
+            # Kerning variable: el hueco base puede encogerse (leve solape) o
+            # crecer al azar según kerning_jitter, imitando el espaciado irregular
+            # de la mano. Nunca baja de 1px para no fundir letras.
             spacing_gap = max(2, int(options.font_size * 0.08))
-            x_cursor += glyph_img.width + spacing_gap
+            kj = max(0.0, min(1.0, options.kerning_jitter))
+            if kj > 0:
+                spacing_gap += round(random.uniform(-spacing_gap * kj, spacing_gap * kj))
+            x_cursor += glyph_img.width + max(1, spacing_gap)
 
         return line_canvas
