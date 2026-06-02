@@ -164,6 +164,21 @@ def extract_from_template(
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     canon = _rectify(gray, lay)
 
+    # Clasificador opcional: la casilla↔letra ya es correcta por construcción,
+    # pero el CNN marca como dudosa la casilla donde se escribió OTRA letra (error
+    # humano) o quedó ilegible → su score baja y la UI la resalta para revisar.
+    clf = None
+    char_to_label = None
+    try:
+        import config as _cfg
+        if getattr(_cfg, "USE_CNN_ALIGN", False):
+            from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
+            _c = EMNISTCharClassifier()
+            if _c.available:
+                clf = _c
+    except Exception as _exc:
+        logger.info("extract_from_template: CNN no disponible (%s)", _exc)
+
     results: list[tuple[str, Image.Image, float]] = []
     n_labeled = min(lay.n_cells, len(lay.letters) * lay.repeats)
     for i in range(n_labeled):
@@ -181,6 +196,12 @@ def extract_from_template(
             score = float(q.get("quality_score", q.get("score", 0.5)))
         except Exception:
             score = 0.5
+        # Validación por CNN: si no reconoce la casilla como su letra (ni de
+        # lejos), marcarla dudosa bajando el score (solo a-z; la ñ no aplica).
+        if clf is not None and char_to_label is not None and char_to_label(ch) is not None:
+            cnn = clf.score(mask, ch)
+            if cnn is not None and cnn < 0.12:
+                score = min(score, 0.45)
         results.append((ch, glyph, score))
     logger.info("extract_from_template: %d/%d casillas con tinta (repeats=%d)",
                 len(results), n_labeled, lay.repeats)
