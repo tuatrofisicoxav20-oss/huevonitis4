@@ -100,6 +100,53 @@ class AlignmentMixin:
         from core.inkcore.extractor_strategies import benchmark_all
         return benchmark_all(band_img, band_binary, x_min, x_max, n, chars, line_mask)
 
+    # ── Helpers de combinación de estrategias (gap-segment vs CNN) ──────
+
+    def _bounds_to_result(
+        self, line_mask: "np.ndarray", chars: list[str], bounds: list[int],
+    ) -> list[tuple["BBox", str, float]]:
+        """Convierte n+1 fronteras en la lista (BBox, char, align_score)."""
+        from core.inkcore.extractor import BBox
+        h, w = line_mask.shape[:2]
+        result: list[tuple[BBox, str, float]] = []
+        for i, ch in enumerate(chars):
+            x1 = bounds[i]
+            x2 = min(bounds[i + 1], w)
+            bw = max(1, x2 - x1)
+            ink = float(np.sum(line_mask[:, x1:x2] > 0))
+            cov = ink / max(1, h * bw)
+            result.append((BBox(x1, 0, bw, h), ch, min(1.0, max(0.1, cov / 0.18))))
+        return result
+
+    def _count_consistent(
+        self, line_mask: "np.ndarray", chars: list[str], bounds: list[int], line_m,
+    ) -> int:
+        """Cuántas letras quedarían estructuralmente consistentes con estos cortes.
+
+        Es el mismo filtro duro que aplica _extract_pass (is_consistent sobre la
+        extensión vertical del blob refinado), así que predice bien cuántos glifos
+        sobrevivirán. Sirve para elegir entre particiones rivales (gaps vs CNN).
+        """
+        from core.inkcore.extractor_validation import is_consistent
+        w = line_mask.shape[1]
+        cnt = 0
+        for i, ch in enumerate(chars):
+            x1 = bounds[i]
+            x2 = min(bounds[i + 1], w)
+            if x2 <= x1:
+                continue
+            rx1, ry1, rx2, ry2 = self._refine_char_region(line_mask, x1, x2)
+            if not is_consistent(ch, ry1, ry2, line_m):
+                continue
+            # Exigir cobertura real: una región que pasa is_consistent pero está
+            # casi vacía (corte sobre un hueco) no produciría un glifo bueno, así
+            # que no debe inflar el puntaje de su estrategia.
+            ink = float(np.sum(line_mask[ry1:ry2, rx1:rx2] > 0))
+            area = max(1, (ry2 - ry1) * max(1, rx2 - rx1))
+            if ink / area >= 0.06:
+                cnt += 1
+        return cnt
+
     def _align_pos(
         self, boxes: list["BBox"], text: str, line_h: float = 30.0,
         line_mask: "np.ndarray | None" = None,
@@ -173,19 +220,57 @@ class AlignmentMixin:
         # escritura ligada sin gaps claros, y ahí seguimos con la posicional.
         from core.inkcore.extractor_gap_segment import segment_by_gaps
         gap_bounds = segment_by_gaps(vpp, x_min, x_max, n)
+
+        # ── Juez de cortes por CNN + gaps reales: elegir el mejor por renglón ──
+        # gap-segment es fiable para letras separadas; el CNN (over-segmentación +
+        # DP guiado por reconocimiento) ataca la letra ligada sin gaps. Cuando hay
+        # clasificador entrenado, calculamos ambas particiones y nos quedamos con
+        # la que deja MÁS letras estructuralmente consistentes (la forma coincide
+        # con la letra que la posición le asignó). Sin clasificador, gap-segment
+        # decide solo, como antes.
+        clf = getattr(self, "_char_classifier", None)
+        if clf is not None and getattr(clf, "available", False):
+            from core.inkcore.extractor_cnn_align import align_by_classifier
+            from core.inkcore.extractor_validation import line_metrics
+            cnn_bounds = align_by_classifier(line_mask, chars, clf, char_w_avg, self._wf)
+            line_m = line_metrics(line_mask)
+            candidates: list[tuple[str, list[int]]] = []
+            if gap_bounds is not None and len(gap_bounds) == n + 1:
+                candidates.append(("gap-segment", gap_bounds))
+            if cnn_bounds is not None and len(cnn_bounds) == n + 1:
+                candidates.append(("cnn-align", cnn_bounds))
+            # Ensemble de segmentación: todas las estrategias compiten y el árbitro
+            # (consistencia estructural) elige la mejor por renglón. Cada una acierta
+            # en regímenes distintos (gaps, ligado, posicional), así que la unión
+            # cubre más casos que cualquiera sola. El costo extra es despreciable
+            # frente al CNN (que ya clasifica ~200 segmentos por línea).
+            extra = [
+                ("hybrid_v2", lambda: self._align_hybrid_v2(vpp, line_mask, x_min, x_max, n, chars)),
+                ("dp_energy", lambda: self._align_dp_energy(vpp, x_min, x_max, n)),
+                ("cc_first", lambda: self._align_cc_first(line_mask, x_min, x_max, n)),
+                ("vpp_only", lambda: self._align_vpp_only(vpp, x_min, x_max, n)),
+                ("inkflow", lambda: self._align_inkflow(vpp, x_min, x_max, chars)),
+            ]
+            for nm, fn in extra:
+                try:
+                    bd = fn()
+                except Exception:
+                    continue
+                if bd is not None and len(bd) == n + 1:
+                    candidates.append((nm, bd))
+            if candidates:
+                name, chosen = max(
+                    candidates,
+                    key=lambda c: self._count_consistent(line_mask, chars, c[1], line_m),
+                )
+                logger.info("align '%s': %s elegido (%d letras)", text[:40], name, n)
+                return self._bounds_to_result(line_mask, chars, chosen)
+
         if gap_bounds is not None and len(gap_bounds) == n + 1:
-            result_g: list[tuple[BBox, str, float]] = []
-            for i, ch in enumerate(chars):
-                gx1 = gap_bounds[i]
-                gx2 = min(gap_bounds[i + 1], w)
-                gbw = max(1, gx2 - gx1)
-                ink = float(np.sum(line_mask[:, gx1:gx2] > 0))
-                cov = ink / max(1, h * gbw)
-                result_g.append((BBox(gx1, 0, gbw, h), ch, min(1.0, max(0.1, cov / 0.18))))
             logger.info(
                 "gap-segment '%s': %d letras por espacios reales", text[:40], n
             )
-            return result_g
+            return self._bounds_to_result(line_mask, chars, gap_bounds)
 
         # ── Etapa 1: hybrid_v2 (primario) ─────────────────────────
         primary_bounds = self._align_hybrid_v2(vpp, line_mask, x_min, x_max, n, chars)

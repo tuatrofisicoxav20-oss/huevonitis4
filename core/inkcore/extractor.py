@@ -149,6 +149,26 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
         except Exception as exc:
             logger.warning(f"No se pudo cargar el detector de glifos: {exc}")
 
+        # Clasificador de caracteres (juez de cortes por CNN) — opcional.
+        # Se activa con la env var H4_CNN_ALIGN=1 o config.USE_CNN_ALIGN=True, y
+        # sólo si el modelo entrenado está presente. Si no, queda None y el
+        # alineador clásico sigue intacto.
+        self._char_classifier = None
+        try:
+            import os
+            use_cnn = (os.environ.get("H4_CNN_ALIGN", "") == "1"
+                       or getattr(config, "USE_CNN_ALIGN", False))
+            if use_cnn:
+                from core.inkcore.ai.char_cnn import EMNISTCharClassifier
+                clf = EMNISTCharClassifier()
+                if clf.available:
+                    self._char_classifier = clf
+                    logger.info("GlyphExtractor: clasificador CNN activo (juez de cortes)")
+                else:
+                    logger.info("GlyphExtractor: CNN solicitado pero sin modelo entrenado")
+        except Exception as exc:
+            logger.warning(f"No se pudo cargar el clasificador CNN: {exc}")
+
     def extract_from_image(
         self,
         image_path: str,
