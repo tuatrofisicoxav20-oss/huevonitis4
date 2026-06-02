@@ -160,6 +160,13 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
             line1 = (f"✓ {len(glyphs)} glifos  —  "
                      f"🥇 Gold: {gold}  🥈 Silver: {silver}  🥉 Bronze: {bronze}")
 
+            # Cobertura: qué letras quedaron sin recortar en ESTA foto, para que
+            # el usuario reescriba con más espacio o cargue otra foto que las
+            # incluya (el banco acumula al guardar → flujo multi-imagen).
+            from core.inkcore.alphabet_coverage import coverage_message
+            cov_line = "\n" + coverage_message(
+                [g.char for g in glyphs], scope="Esta foto")
+
             ensemble = getattr(self._pipeline.extractor, "_last_ensemble_result", None)
             extra = ""
             if ensemble is not None:
@@ -173,7 +180,7 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
                          f"fusionados {stats.get('fused_count', 0)} · "
                          f"descartados {discarded} · {total_ms} ms")
             self._extract_status.configure(
-                text=line1 + extra,
+                text=line1 + cov_line + extra,
                 text_color=theme.ACCENT_GREEN,
             )
             self.toast(f"{len(glyphs)} glifos extraídos", "success")

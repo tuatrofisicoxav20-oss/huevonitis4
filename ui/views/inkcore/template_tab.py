@@ -55,13 +55,26 @@ class TemplateTabMixin:
 
         ctk.CTkLabel(
             parent,
-            text="1) Generá la plantilla e imprimila.\n"
-                 "2) Escribí UNA letra por casilla, centrada, sin tocar los bordes.\n"
+            text="1) Elegí cuántas muestras por letra y generá la plantilla.\n"
+                 "2) Escribí cada letra en su casilla, centrada, sin tocar los bordes.\n"
                  "3) Sacale una foto derecha y cargala acá.\n"
                  "Cada casilla se recorta sola: sin recortes a la mitad ni letras "
                  "confundidas.",
             font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
             wraplength=250, justify="left",
+        ).pack(padx=14, pady=(0, 8), anchor="w")
+
+        # Selector de muestras por letra: el MISMO valor sirve para generar la
+        # hoja y para extraer la foto (la geometría depende de él). Más muestras
+        # = más variación natural en el banco → letra renderizada más creíble.
+        self._tpl_repeats_var = ctk.StringVar(value="1")
+        ctk.CTkLabel(
+            parent, text="Muestras por letra:",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(padx=14, pady=(2, 2), anchor="w")
+        ctk.CTkSegmentedButton(
+            parent, values=["1", "2", "3"], variable=self._tpl_repeats_var,
+            font=theme.FONT_SMALL,
         ).pack(padx=14, pady=(0, 8), anchor="w")
 
         ctk.CTkButton(
@@ -113,20 +126,33 @@ class TemplateTabMixin:
 
     # ── Lógica ───────────────────────────────────────────────────
 
+    def _tpl_layout(self):
+        """Layout actual según el selector de muestras por letra."""
+        from core.inkcore.template_sheet import TemplateLayout
+        try:
+            reps = int(self._tpl_repeats_var.get())
+        except (ValueError, AttributeError):
+            reps = 1
+        return TemplateLayout(repeats=max(1, reps))
+
     def _tpl_generate(self):
+        layout = self._tpl_layout()
+        reps = layout.repeats
         path = filedialog.asksaveasfilename(
             title="Guardar plantilla",
             defaultextension=".pdf",
-            initialfile="plantilla_letra.pdf",
+            initialfile=f"plantilla_letra_x{reps}.pdf" if reps > 1 else "plantilla_letra.pdf",
             filetypes=[("PDF", "*.pdf"), ("PNG", "*.png")],
         )
         if not path:
             return
         try:
             from core.inkcore.template_sheet import save_template_sheet
-            out = save_template_sheet(path)
+            out = save_template_sheet(path, layout)
+            extra = (f" ({reps} casillas por letra)" if reps > 1 else "")
             self._tpl_status.configure(
-                text=f"✓ Plantilla guardada: {Path(out).name}. Imprimila y rellenala.",
+                text=f"✓ Plantilla guardada: {Path(out).name}{extra}. "
+                     "Imprimila y rellenala.",
                 text_color=theme.ACCENT_GREEN,
             )
             self.toast(f"Plantilla guardada: {Path(out).name}", "success")
@@ -148,11 +174,13 @@ class TemplateTabMixin:
         self._tpl_status.configure(
             text="🔎 Extrayendo casillas…", text_color=theme.ACCENT_ORANGE,
         )
+        # Capturar el layout en el hilo de UI (no leer la var Tk desde el worker).
+        layout = self._tpl_layout()
 
         def worker():
             try:
                 from core.inkcore.template_extract import extract_from_template
-                results = extract_from_template(path)
+                results = extract_from_template(path, layout)
             except Exception as exc:
                 logger.error("tpl_load worker: %s", exc, exc_info=True)
                 results = None
@@ -167,8 +195,10 @@ class TemplateTabMixin:
                     return
                 self._tpl_results = results
                 self._render_tpl_grid(results)
+                from core.inkcore.alphabet_coverage import coverage_message
+                cov = coverage_message([c for c, _g, _q in results], scope="Plantilla")
                 self._tpl_status.configure(
-                    text=f"✓ {len(results)} letras extraídas. Revisá y guardá en el banco.",
+                    text=f"✓ {len(results)} casillas. {cov}\nRevisá y guardá en el banco.",
                     text_color=theme.ACCENT_GREEN,
                 )
                 self.toast(f"{len(results)} letras extraídas", "success")
@@ -224,9 +254,16 @@ class TemplateTabMixin:
                     )
                     self.toast("Guardado falló", "error")
                     return
+                bank_cov = ""
+                try:
+                    from core.inkcore.alphabet_coverage import coverage_message
+                    bank_chars = [e.char for e in self._pipeline.bank.get_all()]
+                    bank_cov = "\n" + coverage_message(bank_chars, scope="Banco")
+                except Exception as exc:
+                    logger.warning("tpl_save: cobertura no disponible: %s", exc)
                 self._tpl_status.configure(
                     text=f"✓ Guardadas {stats['saved']} en el banco "
-                         f"({stats['dupes']} ya estaban).",
+                         f"({stats['dupes']} ya estaban).{bank_cov}",
                     text_color=theme.ACCENT_GREEN,
                 )
                 self.toast(f"{stats['saved']} letras al banco", "success")

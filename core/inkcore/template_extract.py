@@ -165,8 +165,11 @@ def extract_from_template(
     canon = _rectify(gray, lay)
 
     results: list[tuple[str, Image.Image, float]] = []
-    for i in range(min(lay.n_cells, len(lay.letters))):
-        ch = lay.letters[i]
+    n_labeled = min(lay.n_cells, len(lay.letters) * lay.repeats)
+    for i in range(n_labeled):
+        ch = lay.cell_letter(i)
+        if ch is None:
+            continue
         wx, wy, ww, wh = lay.writing_rect(i)
         cell = canon[wy:wy + wh, wx:wx + ww]
         mask = _clean_cell(cell)
@@ -179,8 +182,8 @@ def extract_from_template(
         except Exception:
             score = 0.5
         results.append((ch, glyph, score))
-    logger.info("extract_from_template: %d/%d casillas con tinta",
-                len(results), min(lay.n_cells, len(lay.letters)))
+    logger.info("extract_from_template: %d/%d casillas con tinta (repeats=%d)",
+                len(results), n_labeled, lay.repeats)
     return results
 
 

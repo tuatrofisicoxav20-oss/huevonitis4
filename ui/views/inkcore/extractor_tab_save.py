@@ -85,7 +85,19 @@ class ExtractorTabSaveMixin:
                 msg += f"  ({', '.join(extras)})"
             kind = "warning" if errors else "success"
             self.toast(msg, kind)
-            self._set_status(f"✓ {msg}", theme.ACCENT_GREEN if not errors else theme.ACCENT_ORANGE)
+            # Cobertura del banco COMPLETO tras guardar: guía el flujo
+            # multi-imagen ("faltan g m n → cargá otra foto con esas").
+            bank_cov = ""
+            try:
+                from core.inkcore.alphabet_coverage import coverage_message
+                bank_chars = [e.char for e in self._pipeline.bank.get_all()]
+                bank_cov = "\n" + coverage_message(bank_chars, scope="Banco")
+            except Exception as exc:
+                logger.warning("_save_to_bank: cobertura no disponible: %s", exc)
+            self._set_status(
+                f"✓ {msg}{bank_cov}",
+                theme.ACCENT_GREEN if not errors else theme.ACCENT_ORANGE,
+            )
             # save_glyphs_to_bank llama _cleanup_temp_dir() internamente, así
             # que los PNG temporales ya no existen. Reemplazamos las rutas en
             # self._extracted con las entradas permanentes del banco para que
