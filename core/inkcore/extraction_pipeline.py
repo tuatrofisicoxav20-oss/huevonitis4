@@ -290,6 +290,11 @@ class GlyphExtractionPipeline:
         boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
         debug_accepted: list[tuple] = []
         debug_discarded: list[tuple] = []
+        # Salto 4 — altura de línea de referencia para normalizar anchos y muestras
+        # de wf de los glifos VERIFICADOS (consenso + match), que calibran wf().
+        med_h = float(np.median([fb.h for fb in valid_fused])) if valid_fused else 1.0
+        med_h = med_h or 1.0
+        wf_samples: list[tuple[str, float]] = []
 
         for i, (fb, crop) in enumerate(zip(valid_fused, crops)):
             crop_preds = {
@@ -362,6 +367,10 @@ class GlyphExtractionPipeline:
                 expected = ref_chars[_pos]
             verified = is_verified(char, expected, has_consensus)
             tier = classify_tier_verified(final_q, verified)
+            # Salto 4 — solo aprendemos anchos de glifos VERIFICADOS (alta
+            # confianza); el char es el confirmado y la caja es fiable.
+            if verified and char.isalnum():
+                wf_samples.append((char, fb.w / med_h))
             glyphs.append(GlyphEntry(
                 char=char,
                 image_path=str(out_path),
@@ -378,6 +387,14 @@ class GlyphExtractionPipeline:
 
         stats["glyphs_accepted"] = len(glyphs)
         stats["glyphs_discarded"] = len(debug_discarded)
+        # Salto 4 — persistir las muestras de ancho de los glifos verificados.
+        if wf_samples:
+            try:
+                from core.inkcore import wf_calibration
+                wf_calibration.record_many(wf_samples)
+                stats["wf_samples_learned"] = len(wf_samples)
+            except Exception as exc:
+                logger.debug("wf_calibration record falló: %s", exc)
         timings["total_ms"] = int((time.perf_counter() - t_start) * 1000)
 
         # 7. Debug overlay
