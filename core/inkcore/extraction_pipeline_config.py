@@ -53,3 +53,8 @@ class ExtractionResult:
     debug_image_path: str | None = None
     stats: dict = field(default_factory=dict)
     timings_ms: dict = field(default_factory=dict)
+    # Salto 0 (eval) — cajas predichas alineadas 1:1 con `glyphs`, en coords de la
+    # imagen ya preprocesada (la misma sobre la que corre la detección). Cada
+    # entrada es [x, y, w, h]. Permite calcular IoU contra el ground-truth sin
+    # tocar el modelo persistido GlyphEntry.
+    boxes: list = field(default_factory=list)

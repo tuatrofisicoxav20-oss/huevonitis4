@@ -287,6 +287,7 @@ class GlyphExtractionPipeline:
         _purge_temp_pngs(temp_dir)
 
         glyphs: list[GlyphEntry] = []
+        boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
         debug_accepted: list[tuple] = []
         debug_discarded: list[tuple] = []
 
@@ -372,6 +373,7 @@ class GlyphExtractionPipeline:
                 label_confidence=label_conf,
                 detector_sources=list(fb.sources),
             ))
+            boxes.append([int(fb.x), int(fb.y), int(fb.w), int(fb.h)])
             debug_accepted.append((fb, crop, char, label_conf))
 
         stats["glyphs_accepted"] = len(glyphs)
@@ -394,6 +396,7 @@ class GlyphExtractionPipeline:
         )
         return ExtractionResult(
             glyphs=glyphs,
+            boxes=boxes,
             debug_image_path=debug_path,
             stats=stats,
             timings_ms=timings,

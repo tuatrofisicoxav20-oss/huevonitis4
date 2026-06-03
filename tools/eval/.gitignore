@@ -1,0 +1,4 @@
+# Artefactos generados por run_eval — no versionar
+results/
+*.preprocessed.png
+*.pred.json
