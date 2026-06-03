@@ -94,9 +94,21 @@ def assess_glyph(image_path: str) -> dict:
         ink_coverage = ink / total if total > 0 else 0
         w, h = img.size
         aspect = w / h if h > 0 else 1.0
-        aspect_score = 1.0 - abs(aspect - 0.6) / 1.5
-        aspect_score = max(0.0, min(1.0, aspect_score))
-        size_score = min(1.0, min(w, h) / 30)
+        # F2 — Banda de aspecto ANCHA y tolerante: sin conocer el char esperado no
+        # se debe castigar una 'i'/'l'/puntuación (angostas) ni una 'm'/'w'
+        # (anchas). Dentro de [0.10, 1.80] no se penaliza; sólo fuera: aspecto
+        # extremo (>1.8) sugiere dos letras pegadas o franja de renglón. El
+        # componente además pesa POCO en el score (señal débil frente a la forma).
+        if 0.10 <= aspect <= 1.80:
+            aspect_score = 1.0
+        elif aspect > 1.80:
+            aspect_score = max(0.0, 1.0 - (aspect - 1.80) / 1.5)
+        else:  # línea finísima (aspect < 0.10)
+            aspect_score = max(0.0, aspect / 0.10)
+        # Tamaño por el lado MAYOR del glifo: una 'i'/'l' es angosta pero NO
+        # diminuta (es alta). Medir por min(w,h) la castigaba por angosta; usar el
+        # lado mayor sólo descarta motas de verdad pequeñas.
+        size_score = min(1.0, max(w, h) / 30)
 
         # Solidez: fracción de tinta en el blob conexo dominante. Un glifo bien
         # extraído es 1-2 piezas (cuerpo + diacrítico); un recorte de pura mota o
@@ -104,8 +116,13 @@ def assess_glyph(image_path: str) -> dict:
         # Es la señal que separa "letra real" de "ruido con cobertura decente".
         solidity = _largest_cc_ratio(mask)
 
-        score = (ink_coverage * 0.45 + aspect_score * 0.25
-                 + size_score * 0.15 + solidity * 0.15)
+        # F2 — Pesos: el aspecto pasa a pesar POCO (0.10); ese peso va a la
+        # solidez (forma de letra real = 1-2 piezas), que es la señal fuerte que
+        # separa una letra limpia de ruido. Así una 'i'/'m' limpia ya no queda
+        # bloqueada bajo Gold por su aspecto, sin inflar ruido: las motas y
+        # fragmentos siguen cayendo por los castigos de ink/solidez de abajo.
+        score = (ink_coverage * 0.20 + aspect_score * 0.10
+                 + size_score * 0.20 + solidity * 0.50)
 
         # Castigos para glifos claramente malos → que caigan a Bronze/baja:
         #  • Vacío / casi vacío (pura mancha mínima o nada de tinta).
