@@ -164,6 +164,14 @@ def compute_final_quality(
     if label_confidence is not None:
         weight = getattr(config, "label_conf_weight", 0.3)
         if weight > 0:
+            # F3 — boost ACOTADO a [0.85, 1.10]: la confianza del labeler ajusta
+            # poco; no puede por sí sola convertir calidad mediocre en Gold.
             boost = 1.0 + weight * (label_confidence - 0.5)
-            final *= max(0.1, boost)
+            boost = max(0.85, min(1.10, boost))
+            final *= boost
+    # F3 — el boost no fabrica Golds desde calidad POBRE: si la calidad base (la
+    # forma del glifo, sin acuerdo ni confianza) no alcanza siquiera Silver, el
+    # resultado final no puede cruzar el umbral Gold por mucha confianza que haya.
+    if base_quality < TIER_SILVER:
+        final = min(final, TIER_GOLD - 1e-6)
     return min(1.0, max(0.0, final))

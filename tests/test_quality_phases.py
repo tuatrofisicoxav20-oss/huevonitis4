@@ -71,3 +71,32 @@ def test_basura_clara_no_es_gold():
     ruido = Image.new("RGBA", a2.size, (255, 255, 255, 0)); ruido.putalpha(a2)
     pr = tempfile.mktemp(suffix=".png"); ruido.save(pr)
     assert assess_glyph(pr)["tier"] != "Gold"
+
+
+# ── F3 ────────────────────────────────────────────────────────────────
+class _Cfg:
+    label_conf_weight = 0.3
+
+
+def test_boost_no_crea_gold_desde_calidad_mediocre():
+    """Caso del plan: base 0.66 + confianza 1.0 NO debe terminar en Gold."""
+    from core.inkcore.quality import classify_tier, compute_final_quality
+    final = compute_final_quality(0.66, 1.0, 1.0, _Cfg())
+    assert classify_tier(final) != "Gold", f"final={final} cruzó a Gold por confianza"
+
+
+def test_boost_acotado_a_110():
+    """El boost por confianza no puede multiplicar más de 1.10."""
+    from core.inkcore.quality import compute_final_quality
+    base = 0.50
+    final = compute_final_quality(base, 1.0, 1.0, _Cfg())
+    assert final <= base * 1.10 + 1e-9, f"boost excedió 1.10: {final}"
+
+
+def test_calidad_bajo_silver_nunca_es_gold():
+    """Calidad base < Silver: ni con confianza y acuerdo máximos llega a Gold."""
+    class CfgBig:
+        label_conf_weight = 5.0
+    from core.inkcore.quality import classify_tier, compute_final_quality
+    final = compute_final_quality(0.40, 1.0, 1.0, CfgBig())
+    assert classify_tier(final) != "Gold", f"calidad pobre llegó a Gold: {final}"
