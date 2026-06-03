@@ -250,7 +250,7 @@ class GlyphExtractionPipeline:
         # del extractor, que pondera cobertura asimétrica, ancho de trazo
         # por distance transform, borde, alineación e ink absoluto).
         from core.inkcore.glyph_labelers.voting import vote
-        from core.inkcore.quality import compute_final_quality
+        from core.inkcore.quality import classify_tier, compute_final_quality
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -317,7 +317,7 @@ class GlyphExtractionPipeline:
                 debug_discarded.append((fb, crop, char, label_conf))
                 continue
 
-            tier = "Gold" if final_q > 0.75 else "Silver" if final_q > 0.48 else "Bronze"
+            tier = classify_tier(final_q)
             glyphs.append(GlyphEntry(
                 char=char,
                 image_path=str(out_path),

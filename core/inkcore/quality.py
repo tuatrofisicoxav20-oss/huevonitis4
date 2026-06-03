@@ -17,6 +17,23 @@ except ImportError:
     PIL_OK = False
 
 
+# ── Umbrales de tier: FUENTE ÚNICA para todo el extractor ──────────────
+# Cualquier corte Gold/Silver del proyecto debe pasar por classify_tier; no
+# hardcodear estos números en otros módulos (assess_glyph, extraction_pipeline,
+# _extract_pass los consumen desde aquí).
+TIER_GOLD = 0.75
+TIER_SILVER = 0.48
+
+
+def classify_tier(score: float) -> str:
+    """Tier de un glifo por su score final: Gold≥0.75, Silver≥0.48, si no Bronze."""
+    if score >= TIER_GOLD:
+        return "Gold"
+    if score >= TIER_SILVER:
+        return "Silver"
+    return "Bronze"
+
+
 def _largest_cc_ratio(mask: "np.ndarray") -> float:
     """Fracción de píxeles de tinta que caen en el componente conexo más grande.
 
@@ -102,12 +119,7 @@ def assess_glyph(image_path: str) -> dict:
             score *= 0.40 + 0.60 * (solidity / 0.55)
 
         score = round(min(1.0, max(0.0, score)), 3)
-        if score >= 0.75:
-            tier = "Gold"
-        elif score >= 0.45:
-            tier = "Silver"
-        else:
-            tier = "Bronze"
+        tier = classify_tier(score)
         return {"score": score, "tier": tier, "ink_coverage": round(ink_coverage, 3), "valid": True}
     except Exception as e:
         logger.warning(f"Quality assess failed for {image_path}: {e}")

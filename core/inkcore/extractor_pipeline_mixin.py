@@ -285,7 +285,8 @@ class ExtractionPipelineMixin:
                                     qs = min(qs, 0.40)  # cae a Bronze
                     except Exception as _gate_exc:
                         logger.debug("gate CNN omitido: %s", _gate_exc)
-                tier = "Gold" if qs > 0.75 else "Silver" if qs > 0.48 else "Bronze"
+                from core.inkcore.quality import classify_tier
+                tier = classify_tier(qs)
                 glyphs.append(GlyphEntry(
                     char=char,
                     image_path=str(out_path),
