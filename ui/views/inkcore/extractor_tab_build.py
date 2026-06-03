@@ -130,6 +130,25 @@ class ExtractorTabBuildMixin:
             width=40,
         ).pack(side="right")
 
+        # Toggle de la IA (juez de cortes por CNN). Mejora la separación de letras
+        # pegadas pero agrega ~2-3 s por extracción; el usuario decide.
+        cnn_row = ctk.CTkFrame(adj_frame, fg_color="transparent")
+        cnn_row.pack(fill="x", padx=10, pady=(0, 8))
+        ctk.CTkLabel(
+            cnn_row, text="🧠 IA: mejorar cortes (+lento)",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        import config as _cfg
+        self._use_cnn_var = ctk.BooleanVar(value=bool(getattr(_cfg, "USE_CNN_ALIGN", False)))
+        ctk.CTkSwitch(
+            cnn_row, text="", variable=self._use_cnn_var,
+            onvalue=True, offvalue=False,
+            progress_color=theme.ACCENT_BLUE,
+            button_color=theme.ACCENT_BLUE_HOVER,
+            width=40,
+            command=self._on_cnn_toggle,
+        ).pack(side="right")
+
     def _build_auto_mode_section(self, parent):
         auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         auto_row.pack(fill="x", padx=12, pady=(8, 2))

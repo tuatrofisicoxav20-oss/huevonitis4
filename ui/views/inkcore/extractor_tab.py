@@ -145,6 +145,22 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
         threading.Thread(target=worker, daemon=True).start()
         logger.info("_extract: hilo iniciado")
 
+    def _on_cnn_toggle(self):
+        """Activa/desactiva la IA de cortes en vivo (recarga el clasificador)."""
+        config.USE_CNN_ALIGN = bool(self._use_cnn_var.get())
+        ok = False
+        try:
+            ok = self._pipeline.extractor.reload_char_classifier()
+        except Exception as exc:
+            logger.warning("toggle CNN: %s", exc)
+        if config.USE_CNN_ALIGN and not ok:
+            # Pidió activarla pero no hay modelo/torch → revertir el switch.
+            self.toast("IA no disponible (falta el modelo entrenado o torch)", "warning")
+            self._use_cnn_var.set(False)
+            config.USE_CNN_ALIGN = False
+        else:
+            self.toast(f"IA de cortes {'activada' if ok else 'desactivada'}", "info")
+
     def _on_extracted(self, glyphs: list):
         if not self.winfo_exists():
             return

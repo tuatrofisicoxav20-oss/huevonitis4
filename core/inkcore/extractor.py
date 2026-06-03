@@ -150,9 +150,17 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
             logger.warning(f"No se pudo cargar el detector de glifos: {exc}")
 
         # Clasificador de caracteres (juez de cortes por CNN) — opcional.
-        # Se activa con la env var H4_CNN_ALIGN=1 o config.USE_CNN_ALIGN=True, y
-        # sólo si el modelo entrenado está presente. Si no, queda None y el
-        # alineador clásico sigue intacto.
+        self._char_classifier = None
+        self.reload_char_classifier()
+
+    def reload_char_classifier(self) -> bool:
+        """(Re)carga el clasificador CNN según config.USE_CNN_ALIGN / H4_CNN_ALIGN.
+
+        Permite togglear la IA en vivo desde la UI sin recrear el extractor. Se
+        activa sólo si el flag está on Y el modelo entrenado está presente; si no,
+        queda None y el alineador clásico sigue intacto. Devuelve True si quedó
+        activo.
+        """
         self._char_classifier = None
         try:
             import os
@@ -168,6 +176,7 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
                     logger.info("GlyphExtractor: CNN solicitado pero sin modelo entrenado")
         except Exception as exc:
             logger.warning(f"No se pudo cargar el clasificador CNN: {exc}")
+        return self._char_classifier is not None
 
     def extract_from_image(
         self,
