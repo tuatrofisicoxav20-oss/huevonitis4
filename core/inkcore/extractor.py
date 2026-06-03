@@ -86,8 +86,10 @@ class ExtractionOptions:
     rotation_deg: float = 0.0
     min_quality: float = QUALITY_MIN
     max_per_char: int = 10
-    # Pipeline ensemble (B8) — False por defecto para mantener backward compat
-    use_pipeline: bool = False
+    # Pipeline ensemble — F6: ACTIVADO por defecto. El ensemble (detectores +
+    # labelers + voting con consenso) es el camino que verifica cada glifo; el
+    # legacy queda como fallback automático si el pipeline falla o da 0 glifos.
+    use_pipeline: bool = True
     pipeline_config: "object | None" = None
 
 
@@ -196,7 +198,14 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
                 pipeline = GlyphExtractionPipeline(cfg)
                 result = pipeline.extract(image_path, reference_text)
                 self._last_ensemble_result = result
-                return result.glyphs
+                if result.glyphs:
+                    return result.glyphs
+                # F6 — fallback por 0 glifos: si el ensemble no extrajo nada
+                # (p.ej. ningún labeler instalado o todo descartado), caemos al
+                # path legacy en vez de devolver vacío.
+                logger.info(
+                    "Pipeline ensemble devolvió 0 glifos; cayendo a legacy"
+                )
             except Exception as exc:
                 logger.error("Pipeline ensemble falló, cayendo a legacy: %s", exc,
                              exc_info=True)

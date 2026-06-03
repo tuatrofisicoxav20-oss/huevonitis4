@@ -17,8 +17,13 @@ class PipelineConfig:
     detector_fusion: Literal["union", "intersection", "cascade"] = "union"
     iou_dedup_threshold: float = 0.5
 
-    labelers: list[str] = field(default_factory=list)
-    labeler_voting: Literal["majority", "highest_conf", "consensus"] = "highest_conf"
+    # F6 — defaults del ensemble: ambos labelers + voting por CONSENSO. El
+    # consenso es lo que habilita la verificación cruzada (Gold sólo si ambos
+    # labelers coinciden). Los labelers no instalados se omiten con un warning.
+    labelers: list[str] = field(
+        default_factory=lambda: ["tesseract_labeler", "trocr_labeler"]
+    )
+    labeler_voting: Literal["majority", "highest_conf", "consensus"] = "consensus"
 
     min_quality: float = 0.18
     min_label_confidence: float = 0.0

@@ -11,7 +11,10 @@ def test_extraction_options_includes_pipeline_config():
     assert "tesseract_labeler" in opts.pipeline_config.labelers
 
 
-def test_extraction_options_default_no_pipeline():
+def test_extraction_options_default_pipeline_on():
+    # F6 — actualizado: el default de use_pipeline cambió de False a True
+    # (ensemble por defecto, con fallback automático a legacy). pipeline_config
+    # sigue siendo None por defecto: se construye un PipelineConfig() al vuelo.
     opts = ExtractionOptions()
-    assert opts.use_pipeline is False
+    assert opts.use_pipeline is True
     assert opts.pipeline_config is None

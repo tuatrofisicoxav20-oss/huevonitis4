@@ -87,7 +87,10 @@ class GlyphExtractionPipeline:
         except ImportError:
             return ExtractionResult(glyphs=[], stats={"error": "cv2 no disponible"})
 
-        img_bgr = cv2.imread(image_path)
+        # F5/F6 — respetar orientación EXIF también en el pipeline ensemble
+        # (cv2.imread la ignora; fotos de celular entrarían acostadas).
+        from core.inkcore.extractor_preprocess import imread_oriented
+        img_bgr = imread_oriented(image_path)
         if img_bgr is None:
             return ExtractionResult(glyphs=[], stats={"error": f"no se pudo leer {image_path}"})
 
