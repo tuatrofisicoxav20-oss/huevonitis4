@@ -121,37 +121,22 @@ def _fuse_union(detections: dict[str, list], iou_thr: float,
 
 def _fuse_intersection(detections: dict[str, list], iou_thr: float,
                        n_detectors: int) -> list[FusedBBox]:
-    """Intersección: solo sobrevive una caja si TODOS los detectores la vieron."""
+    """Intersección por CONSENSO SIMÉTRICO: un bbox sobrevive si lo vieron al
+    menos ceil(n/2) detectores distintos.
+
+    F8 — el criterio viejo anclaba arbitrariamente en det_names[0] y exigía que
+    TODOS los detectores coincidieran; si ese ancla no detectaba nada, el método
+    devolvía vacío aunque el resto coincidiera. Ahora agrupamos todas las cajas
+    por IoU (igual que union) y conservamos las que alcanzan el quórum, sin
+    privilegiar a ningún detector.
+    """
     if n_detectors <= 1:
         return _fuse_union(detections, iou_thr, n_detectors)
 
-    det_names = list(detections.keys())
-    # Anclar en el primer detector, luego verificar que cada otro también lo ve
-    anchor_name = det_names[0]
-    anchor_boxes = detections[anchor_name]
-
-    result: list[FusedBBox] = []
-    for ab in anchor_boxes:
-        matched_by: list[str] = [anchor_name]
-        final_box = FusedBBox(x=ab.x, y=ab.y, w=ab.w, h=ab.h, sources=[anchor_name])
-        for other_name in det_names[1:]:
-            other_boxes = detections[other_name]
-            best_iou = 0.0
-            best_b = None
-            for ob in other_boxes:
-                v = _bbox_iou(ab, ob)
-                if v > best_iou:
-                    best_iou = v
-                    best_b = ob
-            if best_iou >= iou_thr and best_b is not None:
-                matched_by.append(other_name)
-                final_box = _merge_bbox(final_box, best_b.x, best_b.y,
-                                        best_b.w, best_b.h, other_name)
-
-        if len(matched_by) == n_detectors:
-            final_box.agreement_score = 1.0
-            result.append(final_box)
-
+    import math
+    quorum = math.ceil(n_detectors / 2)
+    groups = _fuse_union(detections, iou_thr, n_detectors)
+    result = [g for g in groups if len(set(g.sources)) >= quorum]
     result.sort(key=lambda b: (b.y, b.x))
     return result
 
@@ -174,23 +159,29 @@ def _fuse_cascade(detections: dict[str, list], iou_thr: float,
     if len(det_names) < 2:
         return sorted(primary, key=lambda b: (b.y, b.x))
 
-    # Encontrar "huecos" horizontales donde el primario no detectó nada.
-    # Un hueco es un rango X sin cobertura del primario.
-    if primary:
-        covered_x: set[int] = set()
-        for b in primary:
-            for x in range(b.x, b.x + b.w):
-                covered_x.add(x)
-    else:
-        covered_x = set()
-
+    # F8 — Un bbox secundario "llena un hueco" solo si NO solapa (en 2D) con
+    # ningún bbox primario. El criterio viejo usaba un set de columnas X de TODO
+    # el renglón sin considerar Y: en texto multi-línea una letra de la línea 2
+    # que cae en la misma columna X que algo de la línea 1 se marcaba "cubierta"
+    # y se descartaba (la cascade colapsaba todas las líneas en un eje X común).
+    # Además el set-por-píxel era O(ancho_total). Ahora comparamos por intervalos
+    # con la fracción de ÁREA del secundario que cae dentro de cada primario.
     secondary_name = det_names[1]
     secondary_fills: list[FusedBBox] = []
     for b in detections[secondary_name]:
-        # Solo añadir si la mayor parte del bbox está en un hueco
-        overlap = sum(1 for x in range(b.x, b.x + b.w) if x in covered_x)
-        coverage = overlap / max(1, b.w)
-        if coverage < 0.3:  # < 30% solapado con primario → es un hueco real
+        area_b = max(1, b.w * b.h)
+        max_cov = 0.0
+        for p in primary:
+            ix1 = max(b.x, p.x)
+            iy1 = max(b.y, p.y)
+            ix2 = min(b.x + b.w, p.x + p.w)
+            iy2 = min(b.y + b.h, p.y + p.h)
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue  # sin solapamiento real (distinta línea o distinta zona)
+            cov = (ix2 - ix1) * (iy2 - iy1) / area_b
+            if cov > max_cov:
+                max_cov = cov
+        if max_cov < 0.3:  # < 30% del secundario solapa un primario → hueco real
             secondary_fills.append(
                 FusedBBox(x=b.x, y=b.y, w=b.w, h=b.h,
                           sources=[secondary_name],
