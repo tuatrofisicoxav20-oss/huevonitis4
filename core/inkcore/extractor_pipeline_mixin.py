@@ -38,7 +38,8 @@ class ExtractionPipelineMixin:
 
     def _run(self, path: str, ref_text: str, opts: "ExtractionOptions") -> list[GlyphEntry]:
         from core.inkcore.extractor import ExtractionOptions, _purge_temp_pngs
-        img = cv2.imread(path)
+        from core.inkcore.extractor_preprocess import imread_oriented
+        img = imread_oriented(path)  # F5 — respeta orientación EXIF de fotos de celular
         if img is None:
             return []
 
