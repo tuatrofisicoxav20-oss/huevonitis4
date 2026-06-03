@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 # Protects concurrent access to the manifest file.
 # The extractor runs in a background thread; autosave and UI may also
 # trigger bank.save() from the main thread at the same time.
-_bank_lock = threading.Lock()
+# RLock (reentrante): add_glyph mantiene el lock para dedup+append+save de forma
+# atómica, y save() vuelve a adquirirlo internamente. Con un Lock simple eso sería
+# deadlock; con RLock el mismo hilo puede re-entrar. (F7)
+_bank_lock = threading.RLock()
 
 if PIL_OK:
     from PIL import Image
@@ -262,7 +265,9 @@ class GlyphBank:
             # Mantener índices consistentes (PERF-03)
             self._by_char.setdefault(char, []).append(entry)
             self._by_tier.setdefault(entry.tier, []).append(entry)
-        self.save()
+            # F7 — save DENTRO del lock (RLock): el estado en memoria y el manifest
+            # en disco quedan atómicos; ningún otro hilo ve un punto intermedio.
+            self.save()
         logger.info(
             "add_glyph: OK char=%r dest=%s tier=%s score=%.3f profile=%s",
             char, dest, entry.tier, entry.quality_score, self.profile_id,
@@ -300,8 +305,10 @@ class GlyphBank:
         self.save()
 
     def get_best_glyph(self, char: str) -> GlyphEntry | None:
-        # PERF-03: lookup O(1) en _by_char en vez de scan O(N)
-        candidates = self._by_char.get(char, [])
+        # PERF-03: lookup O(1) en _by_char en vez de scan O(N).
+        # F7 — snapshot bajo lock: el hilo de fondo puede estar mutando la lista.
+        with _bank_lock:
+            candidates = list(self._by_char.get(char, []))
         if not candidates:
             return None
         gold = [e for e in candidates if e.tier == "Gold"]
@@ -313,27 +320,33 @@ class GlyphBank:
         return random.choice(candidates)
 
     def get_all(self, char_filter: str = "", tier_filter: str = "") -> list[GlyphEntry]:
-        # PERF-03: usar índices cuando hay filtro específico
-        if char_filter and tier_filter and tier_filter != "Todos":
-            return [e for e in self._by_char.get(char_filter, []) if e.tier == tier_filter]
-        if char_filter:
-            return list(self._by_char.get(char_filter, []))
-        if tier_filter and tier_filter != "Todos":
-            return list(self._by_tier.get(tier_filter, []))
-        return list(self._entries)
+        # PERF-03: usar índices cuando hay filtro específico.
+        # F7 — todo bajo lock y devolviendo copias: nunca exponemos la lista viva
+        # ni la iteramos mientras el hilo de fondo la muta.
+        with _bank_lock:
+            if char_filter and tier_filter and tier_filter != "Todos":
+                return [e for e in self._by_char.get(char_filter, []) if e.tier == tier_filter]
+            if char_filter:
+                return list(self._by_char.get(char_filter, []))
+            if tier_filter and tier_filter != "Todos":
+                return list(self._by_tier.get(tier_filter, []))
+            return list(self._entries)
 
     def coverage(self) -> dict:
-        chars = set(e.char for e in self._entries)
+        # F7 — snapshot bajo lock antes de agregar.
+        with _bank_lock:
+            _entries_snap = list(self._entries)
+        chars = set(e.char for e in _entries_snap)
         alpha = set("abcdefghijklmnñopqrstuvwxyz")
         covered = chars & alpha
         missing = alpha - chars
         return {
-            "total_glyphs": len(self._entries),
+            "total_glyphs": len(_entries_snap),
             "unique_chars": len(chars),
             "alpha_covered": len(covered),
             "alpha_missing": sorted(missing),
             "avg_quality": round(
-                sum(e.quality_score for e in self._entries) / max(1, len(self._entries)), 3
+                sum(e.quality_score for e in _entries_snap) / max(1, len(_entries_snap)), 3
             ),
         }
 
