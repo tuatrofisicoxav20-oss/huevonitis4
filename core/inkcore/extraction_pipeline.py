@@ -276,6 +276,15 @@ class GlyphExtractionPipeline:
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
+        # F10-B — higiene de orphans. Con el pipeline activo por defecto (F6) el
+        # path legacy _run (que purgaba al inicio) ya no corre, así que sin esto
+        # los temporales de extracciones abandonadas (no guardadas) se acumularían
+        # sin límite. Misma estrategia que el legacy: cada extracción reemplaza a
+        # la anterior en la UI (self._extracted = glyphs), así que purgar los
+        # PNG sueltos previos al empezar es seguro. El cleanup selectivo de
+        # save_glyphs_to_bank sigue borrando solo los que SÍ se guardaron.
+        from core.inkcore.extractor import _purge_temp_pngs
+        _purge_temp_pngs(temp_dir)
 
         glyphs: list[GlyphEntry] = []
         debug_accepted: list[tuple] = []
