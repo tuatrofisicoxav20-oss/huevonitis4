@@ -313,13 +313,6 @@ class GlyphExtractionPipeline:
                     debug_discarded.append((fb, crop, char, label_conf))
                     continue
 
-            safe = char if (char.isalnum() or char == "?") else f"punct_{ord(char)}"
-            out_path = temp_dir / f"{safe}_{i:04d}.png"
-            try:
-                crop.save(str(out_path))
-            except Exception:
-                continue
-
             # Quality rica del extractor (sobre el PIL en memoria, sin re-leer disco).
             # align_score=agreement_score → glifos vistos por más detectores
             # ganan un pequeño boost al ponderar la alineación interna.
@@ -334,6 +327,17 @@ class GlyphExtractionPipeline:
 
             if final_q < self.config.min_quality:
                 debug_discarded.append((fb, crop, char, label_conf))
+                continue
+
+            # F10-A — guardar a disco SOLO los glifos que ya pasaron TODOS los
+            # filtros (confianza, letters_only, calidad). Antes se guardaba cada
+            # crop aquí arriba y luego se descartaba por calidad, dejando PNGs
+            # huérfanos en el temp dir.
+            safe = char if (char.isalnum() or char == "?") else f"punct_{ord(char)}"
+            out_path = temp_dir / f"{safe}_{i:04d}.png"
+            try:
+                crop.save(str(out_path))
+            except Exception:
                 continue
 
             # F4 — Gold sólo si está VERIFICADO: hubo consenso entre labelers y la
