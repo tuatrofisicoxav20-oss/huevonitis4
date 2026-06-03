@@ -38,6 +38,27 @@ TARGET_LONG = 2200
 MAX_DESKEW_DEG = 15.0
 
 
+def imread_oriented(path: str):
+    """Lee una imagen como BGR respetando la orientación EXIF (F5).
+
+    cv2.imread ignora el tag de orientación, así que las fotos de celular (que
+    guardan la imagen apaisada + un flag "rotar 90°") entran giradas y los glifos
+    salen acostados. Abrimos con PIL, aplicamos exif_transpose y convertimos a
+    BGR para el resto del pipeline. Si algo falla, cae a cv2.imread.
+    """
+    if not CV2_OK:
+        return None
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")
+        arr = np.asarray(im)[:, :, ::-1]  # RGB → BGR
+        return np.ascontiguousarray(arr)
+    except Exception as exc:  # pragma: no cover - fallback robusto
+        logger.debug("imread_oriented: fallback a cv2.imread (%s)", exc)
+        return cv2.imread(path)
+
+
 class ImagePreprocessor:
     """Preprocesa imágenes BGR de apuntes para extracción de glifos.
 
@@ -160,16 +181,43 @@ class ImagePreprocessor:
 
     def _estimate_skew(self, mask: "np.ndarray", width: int) -> "float | None":
         edges = cv2.Canny(mask, 50, 150)
-        lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=max(50, width // 12))
-        if lines is not None:
-            angles = []
-            for line in lines:
-                theta = float(line[0][1])
-                a = np.degrees(theta) - 90.0
+        # F5 — HoughLinesP da segmentos con extremos: medimos ángulo Y longitud y
+        # descartamos las rayas del cuaderno (casi horizontales y que abarcan casi
+        # todo el ancho), que si no dominan el Hough y sesgan el baseline real del
+        # texto. El texto, fragmentado en letras, no produce segmentos tan largos.
+        angles: list[float] = []
+        linesp = cv2.HoughLinesP(
+            edges, 1, np.pi / 180, threshold=max(50, width // 12),
+            minLineLength=max(20, width // 8), maxLineGap=max(3, width // 40),
+        )
+        if linesp is not None:
+            for seg in linesp[:, 0, :]:
+                x1, y1, x2, y2 = (int(seg[0]), int(seg[1]), int(seg[2]), int(seg[3]))
+                dx, dy = x2 - x1, y2 - y1
+                length = (dx * dx + dy * dy) ** 0.5
+                a = float(np.degrees(np.arctan2(dy, dx)))
+                if a > 90:
+                    a -= 180
+                elif a < -90:
+                    a += 180
+                # Raya de cuaderno: casi horizontal y muy larga → ignorar.
+                if abs(a) < 1.2 and length >= 0.55 * width:
+                    continue
                 if abs(a) <= MAX_DESKEW_DEG:
                     angles.append(a)
             if len(angles) >= 2:
                 return float(np.median(angles))
+        # Fallback: Hough clásico (sin longitud) si lo anterior no dio señal.
+        lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=max(50, width // 12))
+        if lines is not None:
+            cangles = []
+            for line in lines:
+                theta = float(line[0][1])
+                a = np.degrees(theta) - 90.0
+                if abs(a) <= MAX_DESKEW_DEG:
+                    cangles.append(a)
+            if len(cangles) >= 2:
+                return float(np.median(cangles))
         best_angle, best_var = 0.0, -1.0
         for a in np.arange(-MAX_DESKEW_DEG, MAX_DESKEW_DEG + 0.5, 1.0):
             M = cv2.getRotationMatrix2D((mask.shape[1] / 2, mask.shape[0] / 2), a, 1.0)

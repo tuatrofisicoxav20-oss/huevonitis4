@@ -38,7 +38,8 @@ class ExtractionPipelineMixin:
 
     def _run(self, path: str, ref_text: str, opts: "ExtractionOptions") -> list[GlyphEntry]:
         from core.inkcore.extractor import ExtractionOptions, _purge_temp_pngs
-        img = cv2.imread(path)
+        from core.inkcore.extractor_preprocess import imread_oriented
+        img = imread_oriented(path)  # F5 — respeta orientación EXIF de fotos de celular
         if img is None:
             return []
 
@@ -285,7 +286,8 @@ class ExtractionPipelineMixin:
                                     qs = min(qs, 0.40)  # cae a Bronze
                     except Exception as _gate_exc:
                         logger.debug("gate CNN omitido: %s", _gate_exc)
-                tier = "Gold" if qs > 0.75 else "Silver" if qs > 0.48 else "Bronze"
+                from core.inkcore.quality import classify_tier
+                tier = classify_tier(qs)
                 glyphs.append(GlyphEntry(
                     char=char,
                     image_path=str(out_path),

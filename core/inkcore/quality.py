@@ -17,6 +17,58 @@ except ImportError:
     PIL_OK = False
 
 
+# ── Umbrales de tier: FUENTE ÚNICA para todo el extractor ──────────────
+# Cualquier corte Gold/Silver del proyecto debe pasar por classify_tier; no
+# hardcodear estos números en otros módulos (assess_glyph, extraction_pipeline,
+# _extract_pass los consumen desde aquí).
+TIER_GOLD = 0.75
+TIER_SILVER = 0.48
+
+
+def classify_tier(score: float) -> str:
+    """Tier de un glifo por su score final: Gold≥0.75, Silver≥0.48, si no Bronze."""
+    if score >= TIER_GOLD:
+        return "Gold"
+    if score >= TIER_SILVER:
+        return "Silver"
+    return "Bronze"
+
+
+def first_alnum(text: str) -> str:
+    """Primer carácter alfanumérico de una predicción de labeler.
+
+    Normaliza la salida multi-carácter de TrOCR ('ll'→'l', 'rn'→'r', ' a '→'a')
+    para poder compararla con un char esperado. Devuelve '' si no hay ninguno.
+    """
+    for c in (text or ""):
+        if c.isalnum():
+            return c
+    return ""
+
+
+def is_verified(predicted: str, expected: "str | None", has_consensus: bool) -> bool:
+    """¿La predicción del labeler VERIFICA el char esperado de la referencia?
+
+    Exige consenso entre labelers Y que el primer alfanumérico de la predicción
+    coincida (sin distinguir mayúsculas) con el char esperado. Sin char esperado
+    (referencia vacía / glifo sin mapear) o sin consenso → no verificado.
+    """
+    if not has_consensus or not expected:
+        return False
+    p = first_alnum(predicted)
+    return bool(p) and p.lower() == expected.lower()
+
+
+def classify_tier_verified(score: float, verified: bool) -> str:
+    """Tier con verificación cruzada (F4): Gold sólo si la calidad lo permite Y el
+    glifo fue verificado. Sin verificación, el tope es Silver aunque la calidad
+    sea alta — así un Gold siempre es un acierto comprobado, no sólo bonito."""
+    tier = classify_tier(score)
+    if tier == "Gold" and not verified:
+        return "Silver"
+    return tier
+
+
 def _largest_cc_ratio(mask: "np.ndarray") -> float:
     """Fracción de píxeles de tinta que caen en el componente conexo más grande.
 
@@ -77,9 +129,21 @@ def assess_glyph(image_path: str) -> dict:
         ink_coverage = ink / total if total > 0 else 0
         w, h = img.size
         aspect = w / h if h > 0 else 1.0
-        aspect_score = 1.0 - abs(aspect - 0.6) / 1.5
-        aspect_score = max(0.0, min(1.0, aspect_score))
-        size_score = min(1.0, min(w, h) / 30)
+        # F2 — Banda de aspecto ANCHA y tolerante: sin conocer el char esperado no
+        # se debe castigar una 'i'/'l'/puntuación (angostas) ni una 'm'/'w'
+        # (anchas). Dentro de [0.10, 1.80] no se penaliza; sólo fuera: aspecto
+        # extremo (>1.8) sugiere dos letras pegadas o franja de renglón. El
+        # componente además pesa POCO en el score (señal débil frente a la forma).
+        if 0.10 <= aspect <= 1.80:
+            aspect_score = 1.0
+        elif aspect > 1.80:
+            aspect_score = max(0.0, 1.0 - (aspect - 1.80) / 1.5)
+        else:  # línea finísima (aspect < 0.10)
+            aspect_score = max(0.0, aspect / 0.10)
+        # Tamaño por el lado MAYOR del glifo: una 'i'/'l' es angosta pero NO
+        # diminuta (es alta). Medir por min(w,h) la castigaba por angosta; usar el
+        # lado mayor sólo descarta motas de verdad pequeñas.
+        size_score = min(1.0, max(w, h) / 30)
 
         # Solidez: fracción de tinta en el blob conexo dominante. Un glifo bien
         # extraído es 1-2 piezas (cuerpo + diacrítico); un recorte de pura mota o
@@ -87,8 +151,13 @@ def assess_glyph(image_path: str) -> dict:
         # Es la señal que separa "letra real" de "ruido con cobertura decente".
         solidity = _largest_cc_ratio(mask)
 
-        score = (ink_coverage * 0.45 + aspect_score * 0.25
-                 + size_score * 0.15 + solidity * 0.15)
+        # F2 — Pesos: el aspecto pasa a pesar POCO (0.10); ese peso va a la
+        # solidez (forma de letra real = 1-2 piezas), que es la señal fuerte que
+        # separa una letra limpia de ruido. Así una 'i'/'m' limpia ya no queda
+        # bloqueada bajo Gold por su aspecto, sin inflar ruido: las motas y
+        # fragmentos siguen cayendo por los castigos de ink/solidez de abajo.
+        score = (ink_coverage * 0.20 + aspect_score * 0.10
+                 + size_score * 0.20 + solidity * 0.50)
 
         # Castigos para glifos claramente malos → que caigan a Bronze/baja:
         #  • Vacío / casi vacío (pura mancha mínima o nada de tinta).
@@ -102,12 +171,7 @@ def assess_glyph(image_path: str) -> dict:
             score *= 0.40 + 0.60 * (solidity / 0.55)
 
         score = round(min(1.0, max(0.0, score)), 3)
-        if score >= 0.75:
-            tier = "Gold"
-        elif score >= 0.45:
-            tier = "Silver"
-        else:
-            tier = "Bronze"
+        tier = classify_tier(score)
         return {"score": score, "tier": tier, "ink_coverage": round(ink_coverage, 3), "valid": True}
     except Exception as e:
         logger.warning(f"Quality assess failed for {image_path}: {e}")
@@ -135,6 +199,14 @@ def compute_final_quality(
     if label_confidence is not None:
         weight = getattr(config, "label_conf_weight", 0.3)
         if weight > 0:
+            # F3 — boost ACOTADO a [0.85, 1.10]: la confianza del labeler ajusta
+            # poco; no puede por sí sola convertir calidad mediocre en Gold.
             boost = 1.0 + weight * (label_confidence - 0.5)
-            final *= max(0.1, boost)
+            boost = max(0.85, min(1.10, boost))
+            final *= boost
+    # F3 — el boost no fabrica Golds desde calidad POBRE: si la calidad base (la
+    # forma del glifo, sin acuerdo ni confianza) no alcanza siquiera Silver, el
+    # resultado final no puede cruzar el umbral Gold por mucha confianza que haya.
+    if base_quality < TIER_SILVER:
+        final = min(final, TIER_GOLD - 1e-6)
     return min(1.0, max(0.0, final))
