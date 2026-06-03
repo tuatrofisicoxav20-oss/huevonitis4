@@ -133,3 +133,12 @@ def test_sin_consenso_o_sin_referencia_no_verifica():
     assert is_verified("a", "a", False) is False   # sin consenso de labelers
     assert is_verified("a", None, True) is False   # sin char esperado (ref vacía)
     assert is_verified("a", "", True) is False     # referencia vacía
+
+
+# ── Gate de exactitud (endurecimiento contra basura como Gold) ─────────
+def test_gate_geometrico_marca_basura():
+    from core.inkcore.quality import is_geometric_garbage
+    assert is_geometric_garbage(0.15, 0.95) is True   # raya finísima (sw bajo)
+    assert is_geometric_garbage(0.60, 0.40) is True   # fragmento (solidez baja)
+    assert is_geometric_garbage(0.60, 0.95) is False  # letra limpia (trazo + 1 pieza)
+    assert is_geometric_garbage(0.32, 0.55) is False  # justo en el borde → pasa

@@ -59,6 +59,17 @@ def is_verified(predicted: str, expected: "str | None", has_consensus: bool) -> 
     return bool(p) and p.lower() == expected.lower()
 
 
+def is_geometric_garbage(sw_score: float, solidity: float) -> bool:
+    """True si la FORMA delata basura que no debe llegar a Gold aunque puntúe alto.
+
+    Un trazo demasiado fino (sw_score bajo = raya de 1-2 px, típica de una esquina
+    de hoja o un fragmento del trazo) o tinta repartida en pedazos (solidity baja)
+    no es una letra escrita. Es el respaldo del gate cuando el CNN no aplica (ñ) o
+    no está disponible.
+    """
+    return sw_score < 0.32 or solidity < 0.55
+
+
 def classify_tier_verified(score: float, verified: bool) -> str:
     """Tier con verificación cruzada (F4): Gold sólo si la calidad lo permite Y el
     glifo fue verificado. Sin verificación, el tope es Silver aunque la calidad

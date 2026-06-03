@@ -268,26 +268,39 @@ class ExtractionPipelineMixin:
                     continue
 
                 qs = quality["quality_score"]
-                # Gate de calidad por CNN: si el clasificador reconoce el recorte
-                # con confianza como una letra DISTINTA de la esperada, el corte
-                # casi seguro está mal (confusión o basura) → degradar a Bronze
-                # para que el usuario lo revise (no se descarta: en fuentes que el
-                # CNN no conoce conviene no perderlo). Solo aplica a a-z (no ñ).
+                # Gate de EXACTITUD: un glifo sólo llega a Gold si está VERIFICADO.
+                #  • Si el CNN reconoce el recorte como otra letra con confianza →
+                #    Bronze (confusión clara, p.ej. una 'j' con forma de 'z').
+                #  • Si el CNN NO ve la letra esperada en su top-3 → tope Silver,
+                #    aunque la forma sea "limpia": así una raya/fragmento/esquina
+                #    que el modelo no valida deja de salir como Gold (foto mala).
+                #  • Gate geométrico (sin CNN o ñ): un trazo tipo raya/fragmento
+                #    tampoco puede ser Gold.
+                verified_gold = True
                 clf = getattr(self, "_char_classifier", None)
                 if clf is not None and getattr(clf, "available", False):
                     try:
                         from core.inkcore.ai.char_cnn import char_to_label
-                        if char_to_label(char) is not None:
+                        if char_to_label(char) is not None:  # a-z (la ñ no la maneja)
                             topk = clf.predict_topk(crop, k=3)
+                            in_top = bool(topk) and any(c == char.lower() for c, _ in topk)
                             if topk:
-                                in_top = any(c == char.lower() for c, _ in topk)
                                 _top_c, top_p = topk[0]
                                 if not in_top and top_p > 0.55:
-                                    qs = min(qs, 0.40)  # cae a Bronze
+                                    qs = min(qs, 0.40)  # confusión clara → Bronze
+                            # Gold exige que el CNN confirme la letra esperada.
+                            verified_gold = in_top
                     except Exception as _gate_exc:
                         logger.debug("gate CNN omitido: %s", _gate_exc)
-                from core.inkcore.quality import classify_tier
+                # Gate geométrico universal: trazo demasiado fino (raya) o tinta
+                # repartida en pedazos (fragmento) no es una letra escrita → no Gold.
+                from core.inkcore.quality import classify_tier, is_geometric_garbage
+                if is_geometric_garbage(quality.get("sw_score", 1.0),
+                                        quality.get("solidity", 1.0)):
+                    verified_gold = False
                 tier = classify_tier(qs)
+                if tier == "Gold" and not verified_gold:
+                    tier = "Silver"  # alta calidad pero sin verificar → tope Silver
                 glyphs.append(GlyphEntry(
                     char=char,
                     image_path=str(out_path),
