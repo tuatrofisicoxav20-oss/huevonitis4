@@ -41,6 +41,12 @@ TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
 OCR_BACKEND = "tesseract"
 GLYPH_DETECTOR = "classic_cv"
 
+# Alineación asistida por el CNN clasificador de caracteres (juez de cortes).
+# Mejora la separación de letras ligadas en fotos de abecedario y marca las
+# confusiones como Bronze. Requiere el modelo (core/inkcore/ai/models/) y torch;
+# si faltan, degrada solo al pipeline clásico. Se puede forzar con H4_CNN_ALIGN=1.
+USE_CNN_ALIGN = True
+
 MIN_GLYPH_QUALITY = 0.18
 
 BASE_PRICE_PER_PAGE_MXN = 50.0

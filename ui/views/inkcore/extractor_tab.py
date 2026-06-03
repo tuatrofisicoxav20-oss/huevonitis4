@@ -145,6 +145,22 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
         threading.Thread(target=worker, daemon=True).start()
         logger.info("_extract: hilo iniciado")
 
+    def _on_cnn_toggle(self):
+        """Activa/desactiva la IA de cortes en vivo (recarga el clasificador)."""
+        config.USE_CNN_ALIGN = bool(self._use_cnn_var.get())
+        ok = False
+        try:
+            ok = self._pipeline.extractor.reload_char_classifier()
+        except Exception as exc:
+            logger.warning("toggle CNN: %s", exc)
+        if config.USE_CNN_ALIGN and not ok:
+            # Pidió activarla pero no hay modelo/torch → revertir el switch.
+            self.toast("IA no disponible (falta el modelo entrenado o torch)", "warning")
+            self._use_cnn_var.set(False)
+            config.USE_CNN_ALIGN = False
+        else:
+            self.toast(f"IA de cortes {'activada' if ok else 'desactivada'}", "info")
+
     def _on_extracted(self, glyphs: list):
         if not self.winfo_exists():
             return
@@ -160,6 +176,13 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
             line1 = (f"✓ {len(glyphs)} glifos  —  "
                      f"🥇 Gold: {gold}  🥈 Silver: {silver}  🥉 Bronze: {bronze}")
 
+            # Cobertura: qué letras quedaron sin recortar en ESTA foto, para que
+            # el usuario reescriba con más espacio o cargue otra foto que las
+            # incluya (el banco acumula al guardar → flujo multi-imagen).
+            from core.inkcore.alphabet_coverage import coverage_message
+            cov_line = "\n" + coverage_message(
+                [g.char for g in glyphs], scope="Esta foto")
+
             ensemble = getattr(self._pipeline.extractor, "_last_ensemble_result", None)
             extra = ""
             if ensemble is not None:
@@ -173,7 +196,7 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
                          f"fusionados {stats.get('fused_count', 0)} · "
                          f"descartados {discarded} · {total_ms} ms")
             self._extract_status.configure(
-                text=line1 + extra,
+                text=line1 + cov_line + extra,
                 text_color=theme.ACCENT_GREEN,
             )
             self.toast(f"{len(glyphs)} glifos extraídos", "success")

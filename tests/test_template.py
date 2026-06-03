@@ -30,7 +30,9 @@ def _fill_sheet(layout, fill_indices):
             font = ImageFont.load_default()
     for i in fill_indices:
         wx, wy, ww, wh = layout.writing_rect(i)
-        ch = layout.letters[i]
+        ch = layout.cell_letter(i)
+        if ch is None:
+            continue
         # Centrar la letra en el área de escritura, sin tocar bordes.
         draw.text((wx + ww // 2 - 20, wy + wh // 2 - 45), ch,
                   fill="#101010", font=font)
@@ -70,6 +72,47 @@ def test_roundtrip_recupera_todas_las_letras(tmp_path):
     for c, glyph, _q in out:
         alpha = np.asarray(glyph.getchannel("A"))
         assert int((alpha > 50).sum()) > 30, f"glifo '{c}' casi vacío"
+
+
+def test_repeats_1_conserva_layout_original():
+    """repeats=1 (default) debe dar la grilla 4×7 = 28 de siempre."""
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout()
+    assert lay.repeats == 1 and lay.cols == 4 and lay.rows == 7 and lay.n_cells == 28
+    # cell_letter coincide con el mapeo posicional histórico
+    for i in range(len(lay.letters)):
+        assert lay.cell_letter(i) == lay.letters[i]
+    assert lay.cell_letter(27) is None  # casilla sobrante
+
+
+def test_repeats_multi_muestra_geometria():
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout(repeats=2)
+    assert lay.repeats == 2 and lay.cols == 6
+    # 27 letras × 2 = 54 casillas rotuladas → 9 filas con 6 columnas
+    assert lay.rows == 9 and lay.n_cells == 54
+    # casillas consecutivas comparten letra
+    assert lay.cell_letter(0) == "a" and lay.cell_letter(1) == "a"
+    assert lay.cell_letter(2) == "b" and lay.cell_letter(3) == "b"
+    # las casillas siguen siendo usables (no minúsculas)
+    for i in range(lay.n_cells):
+        _wx, _wy, ww, wh = lay.writing_rect(i)
+        assert ww > 20 and wh > 20
+
+
+def test_repeats_extrae_varias_muestras_por_letra(tmp_path):
+    from core.inkcore.template_extract import extract_from_template
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout(repeats=2)
+    # rellenar las 2 casillas de 'a' (0,1) y las 2 de 'c' (4,5)
+    img = _fill_sheet(lay, [0, 1, 4, 5])
+    p = tmp_path / "rep.png"
+    img.save(p)
+    out = extract_from_template(str(p), lay)
+    chars = [c for c, _i, _q in out]
+    assert chars.count("a") == 2, f"esperaba 2 muestras de 'a': {chars}"
+    assert chars.count("c") == 2, f"esperaba 2 muestras de 'c': {chars}"
+    assert set(chars) == {"a", "c"}, chars
 
 
 def test_casillas_vacias_se_omiten(tmp_path):

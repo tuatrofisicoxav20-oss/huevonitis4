@@ -16,6 +16,7 @@ en las mismas coordenadas.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 try:
@@ -35,19 +36,28 @@ class TemplateLayout:
     height: int = 1754
     margin: int = 70
     fiducial: int = 56          # lado del cuadrado marcador de esquina
-    cols: int = 4
-    rows: int = 7               # 4×7 = 28 casillas (27 letras + 1 sobrante)
     label_strip: int = 30       # alto de la franja del rótulo (arriba de la casilla)
     inset: int = 10             # margen interno al recortar (evita bordes/rótulo)
     letters: str = SPANISH_ALPHABET
+    repeats: int = 1            # muestras por letra (casillas consecutivas con la misma letra)
+    cols: int = 0              # 0 = auto en __post_init__ según repeats
 
-    # Área de grilla (entre los marcadores), calculada en __post_init__
+    # Derivados en __post_init__ (no pasar a mano)
+    rows: int = field(default=0)
     grid_x0: int = field(default=0)
     grid_y0: int = field(default=0)
     grid_x1: int = field(default=0)
     grid_y1: int = field(default=0)
 
     def __post_init__(self):
+        # repeats=1 conserva el diseño original (4×7 = 28 casillas); con más
+        # muestras la grilla se densifica para acomodar len(letters)*repeats.
+        if self.repeats < 1:
+            self.repeats = 1
+        if self.cols <= 0:
+            self.cols = 4 if self.repeats == 1 else 6
+        n_needed = len(self.letters) * self.repeats
+        self.rows = max(1, math.ceil(n_needed / self.cols))
         self.grid_x0 = self.margin + 50
         self.grid_y0 = self.margin + 110   # deja lugar para el título arriba
         self.grid_x1 = self.width - self.margin - 50
@@ -57,6 +67,18 @@ class TemplateLayout:
     @property
     def n_cells(self) -> int:
         return self.cols * self.rows
+
+    def cell_letter(self, index: int) -> str | None:
+        """Letra rotulada en la casilla `index`, o None si es casilla libre.
+
+        Con repeats>1 las casillas consecutivas comparten letra: índices
+        0..repeats-1 → primera letra, etc. Las casillas más allá de
+        len(letters)*repeats quedan sin rótulo (sobrantes de la grilla).
+        """
+        li = index // self.repeats
+        if 0 <= li < len(self.letters):
+            return self.letters[li]
+        return None
 
     @property
     def cell_w(self) -> float:
@@ -124,12 +146,19 @@ def build_template_sheet(layout: TemplateLayout | None = None) -> "Image.Image |
     draw.text((lay.margin + 50, lay.margin - 6), "Plantilla de letra — Huevonitis",
               fill="#1A1A2E", font=title_font)
     draw.text((lay.margin + 50, lay.margin + 38),
-              "Escribí UNA letra por casilla, centrada y sin tocar los bordes. "
+              "Escribí una letra por casilla, centrada y sin tocar los bordes. "
               "Tinta oscura, buena luz. Luego sacale una foto derecha.",
               fill="#555555", font=sub_font)
+    if lay.repeats > 1:
+        draw.text((lay.margin + 50, lay.margin + 62),
+                  f"Cada letra tiene {lay.repeats} casillas: escribila {lay.repeats} "
+                  "veces (tu variación natural mejora el banco).",
+                  fill="#777777", font=sub_font)
 
-    # Casillas.
-    label_font = _load_font(22)
+    # Casillas. Con la grilla densa (repeats altos) el rótulo se achica para
+    # no comerse el área de escritura.
+    label_font = _load_font(22 if lay.rows <= 8 else 16)
+    free_font = sub_font if lay.rows <= 8 else _load_font(13)
     for i in range(lay.n_cells):
         x, y, w, h = lay.cell_rect(i)
         # Borde de la casilla (gris claro, fino: fácil de quitar al extraer).
@@ -137,11 +166,11 @@ def build_template_sheet(layout: TemplateLayout | None = None) -> "Image.Image |
         # Franja de rótulo separada del área de escritura por una línea.
         draw.line((x, y + lay.label_strip, x + w, y + lay.label_strip),
                   fill="#D8D8D8", width=1)
-        if i < len(lay.letters):
-            ch = lay.letters[i]
+        ch = lay.cell_letter(i)
+        if ch is not None:
             draw.text((x + 8, y + 4), ch, fill="#9AA0A6", font=label_font)
         else:
-            draw.text((x + 8, y + 4), "(libre)", fill="#C8C8C8", font=sub_font)
+            draw.text((x + 8, y + 4), "(libre)", fill="#C8C8C8", font=free_font)
     return img
 
 

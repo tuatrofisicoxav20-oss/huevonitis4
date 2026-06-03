@@ -267,6 +267,24 @@ class ExtractionPipelineMixin:
                     continue
 
                 qs = quality["quality_score"]
+                # Gate de calidad por CNN: si el clasificador reconoce el recorte
+                # con confianza como una letra DISTINTA de la esperada, el corte
+                # casi seguro está mal (confusión o basura) → degradar a Bronze
+                # para que el usuario lo revise (no se descarta: en fuentes que el
+                # CNN no conoce conviene no perderlo). Solo aplica a a-z (no ñ).
+                clf = getattr(self, "_char_classifier", None)
+                if clf is not None and getattr(clf, "available", False):
+                    try:
+                        from core.inkcore.ai.char_cnn import char_to_label
+                        if char_to_label(char) is not None:
+                            topk = clf.predict_topk(crop, k=3)
+                            if topk:
+                                in_top = any(c == char.lower() for c, _ in topk)
+                                _top_c, top_p = topk[0]
+                                if not in_top and top_p > 0.55:
+                                    qs = min(qs, 0.40)  # cae a Bronze
+                    except Exception as _gate_exc:
+                        logger.debug("gate CNN omitido: %s", _gate_exc)
                 tier = "Gold" if qs > 0.75 else "Silver" if qs > 0.48 else "Bronze"
                 glyphs.append(GlyphEntry(
                     char=char,
