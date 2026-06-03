@@ -288,6 +288,7 @@ class GlyphExtractionPipeline:
 
         glyphs: list[GlyphEntry] = []
         boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
+        accepted_hashes: list[str] = []  # Salto 2 — hash perceptual por glifo
         debug_accepted: list[tuple] = []
         debug_discarded: list[tuple] = []
         # Salto 4 — altura de línea de referencia para normalizar anchos y muestras
@@ -383,7 +384,24 @@ class GlyphExtractionPipeline:
                 detector_sources=list(fb.sources),
             ))
             boxes.append([int(fb.x), int(fb.y), int(fb.w), int(fb.h)])
+            # Salto 2 — hash perceptual (mismo _dhash alpha-aware que usa el banco)
+            # para el consenso entre instancias del mismo char.
+            try:
+                from core.inkcore.bank_hashing import _dhash
+                accepted_hashes.append(_dhash(crop.convert("RGBA")))
+            except Exception:
+                accepted_hashes.append("")
             debug_accepted.append((fb, crop, char, label_conf))
+
+        # Salto 2 — consenso entre instancias del mismo char: baja de tier las
+        # outliers (mala segmentación) aunque hayan pasado calidad+verificación.
+        try:
+            from core.inkcore.glyph_consensus import demote_session_outliers
+            n_dem = demote_session_outliers(glyphs, accepted_hashes)
+            if n_dem:
+                stats["outliers_demoted"] = n_dem
+        except Exception as exc:
+            logger.debug("consenso outliers falló: %s", exc)
 
         stats["glyphs_accepted"] = len(glyphs)
         stats["glyphs_discarded"] = len(debug_discarded)

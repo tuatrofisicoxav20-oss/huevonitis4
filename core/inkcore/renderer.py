@@ -260,9 +260,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
             if is_space:
                 x_cursor += word_space
                 continue
-            glyph_entry = self.bank.get_best_glyph(char.lower())
+            # Salto 2 — variation=True: la escritura manuscrita necesita variar la
+            # instancia por aparición (no robótica). El default determinista
+            # (medoide) es para mostrar "el mejor" en la UI del banco.
+            glyph_entry = self.bank.get_best_glyph(char.lower(), variation=True)
             if glyph_entry is None:
-                glyph_entry = self.bank.get_best_glyph(char)
+                glyph_entry = self.bank.get_best_glyph(char, variation=True)
             if glyph_entry and Path(glyph_entry.image_path).exists():
                 glyph_img = self._load_glyph(glyph_entry.image_path, options)
             else:

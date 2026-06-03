@@ -304,7 +304,17 @@ class GlyphBank:
                 ]
         self.save()
 
-    def get_best_glyph(self, char: str) -> GlyphEntry | None:
+    def get_best_glyph(self, char: str, variation: bool = False) -> GlyphEntry | None:
+        """Mejor glifo para `char`.
+
+        Salto 2 — por defecto (variation=False) devuelve la MEDOIDE del mejor
+        tier disponible: la instancia más central/representativa del grupo (la que
+        minimiza la distancia perceptual al resto), determinista. Con
+        variation=True elige al azar dentro del tier (lo que quiere el renderer
+        para que la letra manuscrita no salga robótica). En ambos casos los
+        outliers ya fueron degradados de tier al extraer, así que ni la variación
+        cae en una mala segmentación si hay mejores.
+        """
         # PERF-03: lookup O(1) en _by_char en vez de scan O(N).
         # F7 — snapshot bajo lock: el hilo de fondo puede estar mutando la lista.
         with _bank_lock:
@@ -312,12 +322,14 @@ class GlyphBank:
         if not candidates:
             return None
         gold = [e for e in candidates if e.tier == "Gold"]
-        if gold:
-            return random.choice(gold)
         silver = [e for e in candidates if e.tier == "Silver"]
-        if silver:
-            return random.choice(silver)
-        return random.choice(candidates)
+        group = gold or silver or candidates
+        if variation:
+            return random.choice(group)
+        # Determinista: medoide por hash perceptual.
+        from core.inkcore.glyph_consensus import medoid_index
+        idx = medoid_index([e.perceptual_hash for e in group])
+        return group[idx]
 
     def get_all(self, char_filter: str = "", tier_filter: str = "") -> list[GlyphEntry]:
         # PERF-03: usar índices cuando hay filtro específico.
