@@ -199,9 +199,12 @@ def extract_from_template(
         # Validación por CNN: si no reconoce la casilla como su letra (ni de
         # lejos), marcarla dudosa bajando el score (solo a-z; la ñ no aplica).
         if clf is not None and char_to_label is not None and char_to_label(ch) is not None:
-            cnn = clf.score(mask, ch)
-            if cnn is not None and cnn < 0.12:
-                score = min(score, 0.45)
+            try:
+                cnn = clf.score(mask, ch)
+                if cnn is not None and cnn < 0.12:
+                    score = min(score, 0.45)
+            except Exception as _exc:
+                logger.debug("validación CNN omitida para '%s': %s", ch, _exc)
         results.append((ch, glyph, score))
     logger.info("extract_from_template: %d/%d casillas con tinta (repeats=%d)",
                 len(results), n_labeled, lay.repeats)

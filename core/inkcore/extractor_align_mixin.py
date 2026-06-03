@@ -230,41 +230,48 @@ class AlignmentMixin:
         # decide solo, como antes.
         clf = getattr(self, "_char_classifier", None)
         if clf is not None and getattr(clf, "available", False):
-            from core.inkcore.extractor_cnn_align import align_by_classifier
-            from core.inkcore.extractor_validation import line_metrics
-            cnn_bounds = align_by_classifier(line_mask, chars, clf, char_w_avg, self._wf)
-            line_m = line_metrics(line_mask)
-            candidates: list[tuple[str, list[int]]] = []
-            if gap_bounds is not None and len(gap_bounds) == n + 1:
-                candidates.append(("gap-segment", gap_bounds))
-            if cnn_bounds is not None and len(cnn_bounds) == n + 1:
-                candidates.append(("cnn-align", cnn_bounds))
-            # Ensemble de segmentación: todas las estrategias compiten y el árbitro
-            # (consistencia estructural) elige la mejor por renglón. Cada una acierta
-            # en regímenes distintos (gaps, ligado, posicional), así que la unión
-            # cubre más casos que cualquiera sola. El costo extra es despreciable
-            # frente al CNN (que ya clasifica ~200 segmentos por línea).
-            extra = [
-                ("hybrid_v2", lambda: self._align_hybrid_v2(vpp, line_mask, x_min, x_max, n, chars)),
-                ("dp_energy", lambda: self._align_dp_energy(vpp, x_min, x_max, n)),
-                ("cc_first", lambda: self._align_cc_first(line_mask, x_min, x_max, n)),
-                ("vpp_only", lambda: self._align_vpp_only(vpp, x_min, x_max, n)),
-                ("inkflow", lambda: self._align_inkflow(vpp, x_min, x_max, chars)),
-            ]
-            for nm, fn in extra:
-                try:
-                    bd = fn()
-                except Exception:
-                    continue
-                if bd is not None and len(bd) == n + 1:
-                    candidates.append((nm, bd))
-            if candidates:
-                name, chosen = max(
-                    candidates,
-                    key=lambda c: self._count_consistent(line_mask, chars, c[1], line_m),
+            # TODO el bloque va protegido: si cualquier parte del ensemble CNN
+            # falla, registramos y caemos al pipeline clásico — nunca devolvemos
+            # 0 glifos por un error de la IA.
+            try:
+                from core.inkcore.extractor_cnn_align import align_by_classifier
+                from core.inkcore.extractor_validation import line_metrics
+                cnn_bounds = align_by_classifier(line_mask, chars, clf, char_w_avg, self._wf)
+                line_m = line_metrics(line_mask)
+                candidates: list[tuple[str, list[int]]] = []
+                if gap_bounds is not None and len(gap_bounds) == n + 1:
+                    candidates.append(("gap-segment", gap_bounds))
+                if cnn_bounds is not None and len(cnn_bounds) == n + 1:
+                    candidates.append(("cnn-align", cnn_bounds))
+                # Ensemble de segmentación: todas las estrategias compiten y el
+                # árbitro (consistencia estructural) elige la mejor por renglón.
+                # Cada una acierta en regímenes distintos (gaps, ligado,
+                # posicional); la unión cubre más casos que cualquiera sola.
+                extra = [
+                    ("hybrid_v2", lambda: self._align_hybrid_v2(vpp, line_mask, x_min, x_max, n, chars)),
+                    ("dp_energy", lambda: self._align_dp_energy(vpp, x_min, x_max, n)),
+                    ("cc_first", lambda: self._align_cc_first(line_mask, x_min, x_max, n)),
+                    ("vpp_only", lambda: self._align_vpp_only(vpp, x_min, x_max, n)),
+                    ("inkflow", lambda: self._align_inkflow(vpp, x_min, x_max, chars)),
+                ]
+                for nm, fn in extra:
+                    try:
+                        bd = fn()
+                    except Exception:
+                        continue
+                    if bd is not None and len(bd) == n + 1:
+                        candidates.append((nm, bd))
+                if candidates:
+                    name, chosen = max(
+                        candidates,
+                        key=lambda c: self._count_consistent(line_mask, chars, c[1], line_m),
+                    )
+                    logger.info("align '%s': %s elegido (%d letras)", text[:40], name, n)
+                    return self._bounds_to_result(line_mask, chars, chosen)
+            except Exception as exc:
+                logger.warning(
+                    "ensemble CNN falló (%s); uso pipeline clásico", exc, exc_info=True,
                 )
-                logger.info("align '%s': %s elegido (%d letras)", text[:40], name, n)
-                return self._bounds_to_result(line_mask, chars, chosen)
 
         if gap_bounds is not None and len(gap_bounds) == n + 1:
             logger.info(
