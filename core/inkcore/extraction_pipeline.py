@@ -250,7 +250,26 @@ class GlyphExtractionPipeline:
         # del extractor, que pondera cobertura asimétrica, ancho de trazo
         # por distance transform, borde, alineación e ink absoluto).
         from core.inkcore.glyph_labelers.voting import vote
-        from core.inkcore.quality import classify_tier, compute_final_quality
+        from core.inkcore.quality import (
+            classify_tier_verified,
+            compute_final_quality,
+            is_verified,
+        )
+
+        # F4 — Mapeo glifo→char esperado por ORDEN DE LECTURA de la referencia,
+        # para verificar la predicción del labeler contra lo que el usuario dijo
+        # que escribió. Se agrupa por línea (banda de y) y se ordena por x.
+        import re as _re
+        ref_chars = list(_re.sub(r"\s+", "", reference_text)) if reference_text else []
+        reading_pos: dict[int, int] = {}
+        if ref_chars and valid_fused:
+            _med_h = float(np.median([fb.h for fb in valid_fused])) or 1.0
+            _order = sorted(
+                range(len(valid_fused)),
+                key=lambda j: (int(valid_fused[j].y / max(1.0, _med_h * 0.6)),
+                               valid_fused[j].x),
+            )
+            reading_pos = {j: pos for pos, j in enumerate(_order)}
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -267,9 +286,9 @@ class GlyphExtractionPipeline:
             }
 
             if crop_preds:
-                char, label_conf, _ = vote(crop_preds, self.config.labeler_voting)
+                char, label_conf, has_consensus = vote(crop_preds, self.config.labeler_voting)
             else:
-                char, label_conf = "?", None
+                char, label_conf, has_consensus = "?", None, False
 
             # Tesseract puede devolver "" o "ab" — normalizamos a 1 char.
             char = (char or "?").strip()
@@ -317,7 +336,15 @@ class GlyphExtractionPipeline:
                 debug_discarded.append((fb, crop, char, label_conf))
                 continue
 
-            tier = classify_tier(final_q)
+            # F4 — Gold sólo si está VERIFICADO: hubo consenso entre labelers y la
+            # predicción coincide con el char esperado de la referencia. Sin
+            # verificación el tope es Silver, por alta que sea la calidad.
+            expected = None
+            _pos = reading_pos.get(i)
+            if _pos is not None and _pos < len(ref_chars):
+                expected = ref_chars[_pos]
+            verified = is_verified(char, expected, has_consensus)
+            tier = classify_tier_verified(final_q, verified)
             glyphs.append(GlyphEntry(
                 char=char,
                 image_path=str(out_path),

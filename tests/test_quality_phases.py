@@ -100,3 +100,36 @@ def test_calidad_bajo_silver_nunca_es_gold():
     from core.inkcore.quality import classify_tier, compute_final_quality
     final = compute_final_quality(0.40, 1.0, 1.0, CfgBig())
     assert classify_tier(final) != "Gold", f"calidad pobre llegó a Gold: {final}"
+
+
+# ── F4 ────────────────────────────────────────────────────────────────
+def test_verificacion_cruzada_rechaza_gold_sin_match():
+    """Caso del plan: labeler predice 'n' pero referencia 'a' → NO Gold."""
+    from core.inkcore.quality import classify_tier_verified, is_verified
+    verified = is_verified("n", "a", True)
+    assert verified is False
+    assert classify_tier_verified(0.95, verified) != "Gold"
+    assert classify_tier_verified(0.95, verified) == "Silver"  # alta calidad → Silver, no Bronze
+
+
+def test_verificacion_acepta_gold_con_match_y_consenso():
+    from core.inkcore.quality import classify_tier_verified, is_verified
+    assert is_verified("a", "a", True) is True
+    assert classify_tier_verified(0.95, is_verified("a", "a", True)) == "Gold"
+
+
+def test_first_alnum_normaliza_trocr_multichar():
+    from core.inkcore.quality import first_alnum, is_verified
+    assert first_alnum("ll") == "l"
+    assert first_alnum(" a ") == "a"
+    assert first_alnum("rn") == "r"
+    assert first_alnum("") == ""
+    # 'll' (TrOCR multi-char) verifica una 'l' esperada
+    assert is_verified("ll", "l", True) is True
+
+
+def test_sin_consenso_o_sin_referencia_no_verifica():
+    from core.inkcore.quality import is_verified
+    assert is_verified("a", "a", False) is False   # sin consenso de labelers
+    assert is_verified("a", None, True) is False   # sin char esperado (ref vacía)
+    assert is_verified("a", "", True) is False     # referencia vacía

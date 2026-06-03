@@ -34,6 +34,41 @@ def classify_tier(score: float) -> str:
     return "Bronze"
 
 
+def first_alnum(text: str) -> str:
+    """Primer carácter alfanumérico de una predicción de labeler.
+
+    Normaliza la salida multi-carácter de TrOCR ('ll'→'l', 'rn'→'r', ' a '→'a')
+    para poder compararla con un char esperado. Devuelve '' si no hay ninguno.
+    """
+    for c in (text or ""):
+        if c.isalnum():
+            return c
+    return ""
+
+
+def is_verified(predicted: str, expected: "str | None", has_consensus: bool) -> bool:
+    """¿La predicción del labeler VERIFICA el char esperado de la referencia?
+
+    Exige consenso entre labelers Y que el primer alfanumérico de la predicción
+    coincida (sin distinguir mayúsculas) con el char esperado. Sin char esperado
+    (referencia vacía / glifo sin mapear) o sin consenso → no verificado.
+    """
+    if not has_consensus or not expected:
+        return False
+    p = first_alnum(predicted)
+    return bool(p) and p.lower() == expected.lower()
+
+
+def classify_tier_verified(score: float, verified: bool) -> str:
+    """Tier con verificación cruzada (F4): Gold sólo si la calidad lo permite Y el
+    glifo fue verificado. Sin verificación, el tope es Silver aunque la calidad
+    sea alta — así un Gold siempre es un acierto comprobado, no sólo bonito."""
+    tier = classify_tier(score)
+    if tier == "Gold" and not verified:
+        return "Silver"
+    return tier
+
+
 def _largest_cc_ratio(mask: "np.ndarray") -> float:
     """Fracción de píxeles de tinta que caen en el componente conexo más grande.
 
