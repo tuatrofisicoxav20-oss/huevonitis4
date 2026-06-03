@@ -76,6 +76,39 @@ class GlyphExtractionPipeline:
             else:
                 logger.warning("Labeler '%s' no disponible: %s", name, l.install_hint())
 
+    def _build_expected_map(self, valid_fused, ref_chars, med_h, box_votes) -> dict:
+        """Salto 3 — mapa {idx_caja: carácter esperado de la referencia}.
+
+        "positional": la k-ésima caja en orden de lectura ↔ el k-ésimo char
+        (greedy, hereda desfases). "dp": alineación global Needleman-Wunsch,
+        robusta a cajas extra/faltantes (costos = ancho vs wf + confianza del
+        labeler). Opt-in vía PipelineConfig.char_alignment.
+        """
+        if not ref_chars or not valid_fused:
+            return {}
+        order = sorted(
+            range(len(valid_fused)),
+            key=lambda j: (int(valid_fused[j].y / max(1.0, med_h * 0.6)),
+                           valid_fused[j].x),
+        )
+        if self.config.char_alignment == "dp":
+            try:
+                from core.inkcore.extractor_align_basic import wf
+                from core.inkcore.glyph_dp_align import nw_align
+                widths = [valid_fused[j].w / med_h for j in order]
+                preds = [box_votes[j][0] for j in order]
+                confs = [box_votes[j][1] for j in order]
+                mapping = nw_align(widths, preds, confs, ref_chars, wf)
+                return {order[k]: ref_chars[v] for k, v in mapping.items()}
+            except Exception as exc:
+                logger.warning("alineación DP falló (%s); caigo a posicional", exc)
+        # Posicional (default / fallback).
+        em: dict[int, str] = {}
+        for pos, j in enumerate(order):
+            if pos < len(ref_chars):
+                em[j] = ref_chars[pos]
+        return em
+
     def extract(self, image_path: str, reference_text: str = "") -> ExtractionResult:
         t_start = time.perf_counter()
         timings: dict = {}
@@ -259,20 +292,32 @@ class GlyphExtractionPipeline:
             is_verified,
         )
 
-        # F4 — Mapeo glifo→char esperado por ORDEN DE LECTURA de la referencia,
-        # para verificar la predicción del labeler contra lo que el usuario dijo
-        # que escribió. Se agrupa por línea (banda de y) y se ordena por x.
+        # F4 — Mapeo glifo→char esperado de la referencia, para verificar la
+        # predicción del labeler contra lo que el usuario dijo que escribió.
         import re as _re
         ref_chars = list(_re.sub(r"\s+", "", reference_text)) if reference_text else []
-        reading_pos: dict[int, int] = {}
-        if ref_chars and valid_fused:
-            _med_h = float(np.median([fb.h for fb in valid_fused])) or 1.0
-            _order = sorted(
-                range(len(valid_fused)),
-                key=lambda j: (int(valid_fused[j].y / max(1.0, _med_h * 0.6)),
-                               valid_fused[j].x),
-            )
-            reading_pos = {j: pos for pos, j in enumerate(_order)}
+
+        # Altura de línea de referencia (Salto 4 para normalizar anchos, y Salto 3
+        # para ordenar las cajas por renglón).
+        med_h = float(np.median([fb.h for fb in valid_fused])) if valid_fused else 1.0
+        med_h = med_h or 1.0
+
+        # Pre-pass: voto de labelers por caja (se reutiliza en el loop y, si la
+        # alineación es DP, para construir el mapa caja→char esperado).
+        box_votes: list[tuple] = []
+        for bi in range(len(valid_fused)):
+            cp = {name: preds[bi] for name, preds in all_preds.items()
+                  if bi < len(preds)}
+            if cp:
+                _c, _lc, _hc = vote(cp, self.config.labeler_voting)
+            else:
+                _c, _lc, _hc = "?", None, False
+            _c = (_c or "?").strip()
+            _c = _c[0] if _c else "?"
+            box_votes.append((_c, _lc, _hc))
+
+        # Salto 3 — mapa caja→carácter esperado: posicional (default) o DP global.
+        expected_map = self._build_expected_map(valid_fused, ref_chars, med_h, box_votes)
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -291,29 +336,13 @@ class GlyphExtractionPipeline:
         accepted_hashes: list[str] = []  # Salto 2 — hash perceptual por glifo
         debug_accepted: list[tuple] = []
         debug_discarded: list[tuple] = []
-        # Salto 4 — altura de línea de referencia para normalizar anchos y muestras
-        # de wf de los glifos VERIFICADOS (consenso + match), que calibran wf().
-        med_h = float(np.median([fb.h for fb in valid_fused])) if valid_fused else 1.0
-        med_h = med_h or 1.0
+        # Salto 4 — muestras de ancho de glifos VERIFICADOS (consenso+match) que
+        # calibran wf().
         wf_samples: list[tuple[str, float]] = []
 
         for i, (fb, crop) in enumerate(zip(valid_fused, crops)):
-            crop_preds = {
-                name: preds[i]
-                for name, preds in all_preds.items()
-                if i < len(preds)
-            }
-
-            if crop_preds:
-                char, label_conf, has_consensus = vote(crop_preds, self.config.labeler_voting)
-            else:
-                char, label_conf, has_consensus = "?", None, False
-
-            # Tesseract puede devolver "" o "ab" — normalizamos a 1 char.
-            char = (char or "?").strip()
-            if not char:
-                char = "?"
-            char = char[0]
+            # Voto pre-computado (ya normalizado a 1 char) — ver pre-pass arriba.
+            char, label_conf, has_consensus = box_votes[i]
 
             if (label_conf is not None
                     and label_conf < self.config.min_label_confidence):
@@ -362,10 +391,7 @@ class GlyphExtractionPipeline:
             # F4 — Gold sólo si está VERIFICADO: hubo consenso entre labelers y la
             # predicción coincide con el char esperado de la referencia. Sin
             # verificación el tope es Silver, por alta que sea la calidad.
-            expected = None
-            _pos = reading_pos.get(i)
-            if _pos is not None and _pos < len(ref_chars):
-                expected = ref_chars[_pos]
+            expected = expected_map.get(i)
             verified = is_verified(char, expected, has_consensus)
             tier = classify_tier_verified(final_q, verified)
             # Salto 4 — solo aprendemos anchos de glifos VERIFICADOS (alta

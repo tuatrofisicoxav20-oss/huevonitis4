@@ -25,6 +25,12 @@ class PipelineConfig:
     )
     labeler_voting: Literal["majority", "highest_conf", "consensus"] = "consensus"
 
+    # Salto 3 — estrategia de alineación caja↔carácter de la referencia:
+    #   "positional" (default): la i-ésima caja en orden de lectura ↔ i-ésimo char.
+    #   "dp": Needleman-Wunsch global (robusto a cajas extra/faltantes). Opt-in
+    #   hasta validar con run_eval sobre ground-truth real cuál gana.
+    char_alignment: Literal["positional", "dp"] = "positional"
+
     min_quality: float = 0.18
     min_label_confidence: float = 0.0
     label_conf_weight: float = 0.3
