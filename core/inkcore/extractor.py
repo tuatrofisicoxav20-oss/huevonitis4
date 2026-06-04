@@ -26,6 +26,22 @@ from core.models import GlyphEntry
 logger = logging.getLogger(__name__)
 
 
+def _build_default_pipeline_config():
+    """Paso 3 (5ta tanda) — FUENTE ÚNICA DE VERDAD del detector.
+
+    El pipeline por defecto deriva sus detectores de config.GLYPH_DETECTOR (lo que
+    el usuario elige en Configuración). Antes el pipeline usaba siempre classic_cv
+    hardcodeado e ignoraba ese ajuste. classic_cv queda SIEMPRE como base; si el
+    usuario configuró otro detector, se fusiona con classic_cv (Salto 1: el
+    neuronal complementa, no reemplaza). Se construye fresco en cada extracción,
+    así que cambiar el detector en Config (o reload_extractor) afecta al pipeline.
+    """
+    from core.inkcore.extraction_pipeline import PipelineConfig
+    det = getattr(config, "GLYPH_DETECTOR", "classic_cv") or "classic_cv"
+    detectors = ["classic_cv"] if det == "classic_cv" else [det, "classic_cv"]
+    return PipelineConfig(detectors=detectors)
+
+
 def _purge_temp_pngs(temp_dir: Path) -> int:
     """Borra los PNG residuales de _temp_extract antes de una extracción nueva.
 
@@ -197,7 +213,7 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
                 from core.inkcore.extraction_pipeline import (
                     GlyphExtractionPipeline, PipelineConfig,
                 )
-                cfg = opts.pipeline_config or PipelineConfig()
+                cfg = opts.pipeline_config or _build_default_pipeline_config()
                 pipeline = GlyphExtractionPipeline(cfg)
                 result = pipeline.extract(image_path, reference_text)
                 self._last_ensemble_result = result
