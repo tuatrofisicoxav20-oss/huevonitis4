@@ -39,9 +39,14 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
 
     def _load_settings(self) -> dict:
         # Base con los valores live de config (para que los dropdowns muestren el backend activo)
+        _extra = list(getattr(config, "GLYPH_DETECTORS_EXTRA", []) or [])
         base: dict = {
             "ocr_backend": config.OCR_BACKEND,
             "glyph_detector": config.GLYPH_DETECTOR,
+            # Fase 2 — fusión multi-detector. El _ui es un single-select (un solo
+            # detector neuronal extra); se convierte a la lista persistida al guardar.
+            "glyph_detector_fusion": getattr(config, "GLYPH_DETECTOR_FUSION", "cascade"),
+            "glyph_detectors_extra_ui": _extra[0] if _extra else "(ninguno)",
         }
         if config.SETTINGS_FILE.exists():
             try:
@@ -87,12 +92,17 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
 
         ocr_opts = sorted(_ocr_avail) or ["tesseract"]
         det_opts = sorted(_det_avail) or ["classic_cv"]
+        # Fase 2 — detectores neuronales disponibles para fusionar con classic_cv.
+        neural_opts = ["(ninguno)", *sorted(_det_avail - {"classic_cv"})]
 
         self._section(scroll, "✍️ InkCore", [
             ("Ruta de Tesseract", "tesseract_path", "entry", None),
             ("Calidad mínima de glifo (0-1)", "min_glyph_quality", "entry", None),
             ("Backend OCR", "ocr_backend", "menu", ocr_opts),
             ("Detector de glifos", "glyph_detector", "menu", det_opts),
+            ("Detector neuronal extra", "glyph_detectors_extra_ui", "menu", neural_opts),
+            ("Fusión de detectores", "glyph_detector_fusion", "menu",
+             ["cascade", "union", "intersection"]),
         ])
 
         # Tooltip para backends opcionales no instalados
@@ -199,6 +209,8 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
         # Guardar valores previos ANTES de leer los widgets (para comparar después)
         prev_ocr = self._settings.get("ocr_backend", config.OCR_BACKEND)
         prev_det = self._settings.get("glyph_detector", config.GLYPH_DETECTOR)
+        prev_fusion = self._settings.get("glyph_detector_fusion", config.GLYPH_DETECTOR_FUSION)
+        prev_extra_ui = self._settings.get("glyph_detectors_extra_ui", "(ninguno)")
 
         errors = []
         for key, (ftype, w) in self._field_widgets.items():
@@ -236,6 +248,13 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
             self.toast("Error: " + "; ".join(errors), "error")
             return
 
+        # Fase 2 — convertir el single-select de detector neuronal extra a la
+        # lista persistida que lee config.GLYPH_DETECTORS_EXTRA.
+        extra_ui = self._settings.get("glyph_detectors_extra_ui", "(ninguno)")
+        self._settings["glyph_detectors_extra"] = (
+            [] if extra_ui in ("(ninguno)", "") else [extra_ui]
+        )
+
         theme_val = self._settings.get("theme", "Oscuro")
         mode_map = {"Oscuro": "dark", "Claro": "light", "Sistema": "system"}
         ctk_mode = mode_map.get(theme_val, "dark")
@@ -244,6 +263,14 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
         self._save_settings()
         _apply_settings_to_config(self._settings)
         self._notify_backends(prev_ocr, prev_det)
+        # Fase 2 — recargar el extractor también si cambió la fusión o el extra,
+        # no sólo el detector base (todos afectan _build_default_pipeline_config).
+        new_fusion = self._settings.get("glyph_detector_fusion", prev_fusion)
+        new_extra_ui = self._settings.get("glyph_detectors_extra_ui", prev_extra_ui)
+        if (new_fusion != prev_fusion or new_extra_ui != prev_extra_ui) and \
+                hasattr(self.app, "inkcore"):
+            with contextlib.suppress(Exception):
+                self.app.inkcore.reload_extractor()
         self.toast("Configuración guardada — reinicia la app para aplicar el tema", "success")
 
 
@@ -270,6 +297,14 @@ def _apply_settings_to_config(settings: dict) -> None:
     val = settings.get("glyph_detector", "")
     if val and isinstance(val, str):
         config.GLYPH_DETECTOR = val
+
+    # Fase 2 — fusión multi-detector. Inválido → se ignora (queda el default).
+    val = settings.get("glyph_detector_fusion", "")
+    if isinstance(val, str) and val in ("union", "intersection", "cascade"):
+        config.GLYPH_DETECTOR_FUSION = val
+    val = settings.get("glyph_detectors_extra")
+    if isinstance(val, list):
+        config.GLYPH_DETECTORS_EXTRA = [x for x in val if isinstance(x, str) and x]
 
     with contextlib.suppress(ValueError, TypeError):
         v = float(settings.get("min_glyph_quality", ""))
