@@ -362,6 +362,23 @@ class GlyphBank:
             ),
         }
 
+    def variant_distribution(self, tier_filter: str = "") -> dict[str, int]:
+        """Fase 5 — variantes por carácter en el banco (instrumentación).
+
+        Devuelve {char: nº de instancias}. El render usa get_best_glyph(variation=
+        True), que elige al azar dentro del tier: con 1 sola variante el texto sale
+        idéntico repetido. Este conteo deja ver si los chars frecuentes alcanzan el
+        objetivo de ≥5 variantes. tier_filter opcional ("Gold"/"Silver"/...) para
+        contar solo un tier."""
+        with _bank_lock:
+            entries = list(self._entries)
+        dist: dict[str, int] = {}
+        for e in entries:
+            if tier_filter and e.tier != tier_filter:
+                continue
+            dist[e.char] = dist.get(e.char, 0) + 1
+        return dict(sorted(dist.items(), key=lambda kv: kv[1], reverse=True))
+
     def get_review_queue(self) -> list[GlyphEntry]:
         """Devuelve glifos que necesitan revisión (Bronze o quality < 0.50)."""
         # F7/Fase 1 — snapshot bajo lock: el hilo de fondo muta _entries y sin
