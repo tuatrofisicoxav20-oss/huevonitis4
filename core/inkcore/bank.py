@@ -304,7 +304,17 @@ class GlyphBank:
                 ]
         self.save()
 
-    def get_best_glyph(self, char: str) -> GlyphEntry | None:
+    def get_best_glyph(self, char: str, variation: bool = False) -> GlyphEntry | None:
+        """Mejor glifo para `char`.
+
+        Salto 2 — por defecto (variation=False) devuelve la MEDOIDE del mejor
+        tier disponible: la instancia más central/representativa del grupo (la que
+        minimiza la distancia perceptual al resto), determinista. Con
+        variation=True elige al azar dentro del tier (lo que quiere el renderer
+        para que la letra manuscrita no salga robótica). En ambos casos los
+        outliers ya fueron degradados de tier al extraer, así que ni la variación
+        cae en una mala segmentación si hay mejores.
+        """
         # PERF-03: lookup O(1) en _by_char en vez de scan O(N).
         # F7 — snapshot bajo lock: el hilo de fondo puede estar mutando la lista.
         with _bank_lock:
@@ -312,12 +322,14 @@ class GlyphBank:
         if not candidates:
             return None
         gold = [e for e in candidates if e.tier == "Gold"]
-        if gold:
-            return random.choice(gold)
         silver = [e for e in candidates if e.tier == "Silver"]
-        if silver:
-            return random.choice(silver)
-        return random.choice(candidates)
+        group = gold or silver or candidates
+        if variation:
+            return random.choice(group)
+        # Determinista: medoide por hash perceptual.
+        from core.inkcore.glyph_consensus import medoid_index
+        idx = medoid_index([e.perceptual_hash for e in group])
+        return group[idx]
 
     def get_all(self, char_filter: str = "", tier_filter: str = "") -> list[GlyphEntry]:
         # PERF-03: usar índices cuando hay filtro específico.
@@ -350,10 +362,31 @@ class GlyphBank:
             ),
         }
 
+    def variant_distribution(self, tier_filter: str = "") -> dict[str, int]:
+        """Fase 5 — variantes por carácter en el banco (instrumentación).
+
+        Devuelve {char: nº de instancias}. El render usa get_best_glyph(variation=
+        True), que elige al azar dentro del tier: con 1 sola variante el texto sale
+        idéntico repetido. Este conteo deja ver si los chars frecuentes alcanzan el
+        objetivo de ≥5 variantes. tier_filter opcional ("Gold"/"Silver"/...) para
+        contar solo un tier."""
+        with _bank_lock:
+            entries = list(self._entries)
+        dist: dict[str, int] = {}
+        for e in entries:
+            if tier_filter and e.tier != tier_filter:
+                continue
+            dist[e.char] = dist.get(e.char, 0) + 1
+        return dict(sorted(dist.items(), key=lambda kv: kv[1], reverse=True))
+
     def get_review_queue(self) -> list[GlyphEntry]:
         """Devuelve glifos que necesitan revisión (Bronze o quality < 0.50)."""
+        # F7/Fase 1 — snapshot bajo lock: el hilo de fondo muta _entries y sin
+        # esto se arriesga "list changed size during iteration".
+        with _bank_lock:
+            _entries_snap = list(self._entries)
         return [
-            e for e in self._entries
+            e for e in _entries_snap
             if e.tier == "Bronze" or e.quality_score < 0.50
         ]
 
@@ -398,7 +431,12 @@ class GlyphBank:
 
     def get_bank_report(self) -> dict:
         """Devuelve estadísticas completas del banco para el informe."""
-        return build_bank_report(self._entries, len(self.get_review_queue()))
+        # F7/Fase 1 — snapshot bajo lock antes de agregar (no pasar la lista viva
+        # a build_bank_report mientras el hilo de fondo la muta). get_review_queue
+        # ya toma su propio snapshot, así que se llama fuera del with.
+        with _bank_lock:
+            _entries_snap = list(self._entries)
+        return build_bank_report(_entries_snap, len(self.get_review_queue()))
 
     # Serialización movida a bank_serial.py en v4.2; estos métodos delegan ahí
     # (se conservan como wrappers para no romper callers/subclases que los usen).

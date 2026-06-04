@@ -26,6 +26,58 @@ from core.models import GlyphEntry
 logger = logging.getLogger(__name__)
 
 
+def _build_default_pipeline_config():
+    """Paso 3 (5ta tanda) + Fase 2 — FUENTE ÚNICA DE VERDAD del detector.
+
+    El pipeline por defecto deriva sus detectores de la config (lo que el usuario
+    elige en Configuración). classic_cv queda SIEMPRE como base; el detector
+    configurado (si no es classic_cv) y los de config.GLYPH_DETECTORS_EXTRA se
+    suman como complemento neuronal (el neuronal complementa, no reemplaza). Los
+    detectores no instalados se omiten con un log (no error). La estrategia de
+    fusión sale de config.GLYPH_DETECTOR_FUSION.
+
+    Retrocompatibilidad: con un solo detector la fusión es no-op, así que el caso
+    classic_cv-solo produce exactamente la misma PipelineConfig que antes. Se
+    construye fresco en cada extracción, así que cambiar la config (o
+    reload_extractor) afecta al pipeline.
+    """
+    from core.inkcore import glyph_detectors
+    from core.inkcore.extraction_pipeline import PipelineConfig
+
+    det = getattr(config, "GLYPH_DETECTOR", "classic_cv") or "classic_cv"
+
+    # Base + complementos pedidos (el detector configurado no-classic + extras).
+    detectors = ["classic_cv"]
+    requested = ([det] if det != "classic_cv" else []) + list(
+        getattr(config, "GLYPH_DETECTORS_EXTRA", []) or []
+    )
+
+    available = glyph_detectors.get_available()
+    for name in requested:
+        if name in detectors:
+            continue
+        if available.get(name):
+            detectors.append(name)
+        else:
+            logger.info(
+                "_build_default_pipeline_config: detector '%s' no instalado; se omite",
+                name,
+            )
+
+    # Un solo detector → fusión irrelevante: devolvemos la config legacy idéntica.
+    if len(detectors) == 1:
+        return PipelineConfig(detectors=detectors)
+
+    valid = ("union", "intersection", "cascade")
+    fusion = getattr(config, "GLYPH_DETECTOR_FUSION", "cascade")
+    if fusion not in valid:
+        logger.warning(
+            "_build_default_pipeline_config: fusión '%s' inválida; uso 'cascade'", fusion
+        )
+        fusion = "cascade"
+    return PipelineConfig(detectors=detectors, detector_fusion=fusion)
+
+
 def _purge_temp_pngs(temp_dir: Path) -> int:
     """Borra los PNG residuales de _temp_extract antes de una extracción nueva.
 
@@ -86,9 +138,14 @@ class ExtractionOptions:
     rotation_deg: float = 0.0
     min_quality: float = QUALITY_MIN
     max_per_char: int = 10
-    # Pipeline ensemble (B8) — False por defecto para mantener backward compat
-    use_pipeline: bool = False
+    # Pipeline ensemble — F6: ACTIVADO por defecto. El ensemble (detectores +
+    # labelers + voting con consenso) es el camino que verifica cada glifo; el
+    # legacy queda como fallback automático si el pipeline falla o da 0 glifos.
+    use_pipeline: bool = True
     pipeline_config: "object | None" = None
+    # Quinta tanda Paso 2 — override manual de orientación (0/90/180/270). Si es
+    # None, se intenta OSD por contenido (requiere osd.traineddata).
+    manual_orientation: "int | None" = None
 
 
 class BBox:
@@ -192,11 +249,18 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
                 from core.inkcore.extraction_pipeline import (
                     GlyphExtractionPipeline, PipelineConfig,
                 )
-                cfg = opts.pipeline_config or PipelineConfig()
+                cfg = opts.pipeline_config or _build_default_pipeline_config()
                 pipeline = GlyphExtractionPipeline(cfg)
                 result = pipeline.extract(image_path, reference_text)
                 self._last_ensemble_result = result
-                return result.glyphs
+                if result.glyphs:
+                    return result.glyphs
+                # F6 — fallback por 0 glifos: si el ensemble no extrajo nada
+                # (p.ej. ningún labeler instalado o todo descartado), caemos al
+                # path legacy en vez de devolver vacío.
+                logger.info(
+                    "Pipeline ensemble devolvió 0 glifos; cayendo a legacy"
+                )
             except Exception as exc:
                 logger.error("Pipeline ensemble falló, cayendo a legacy: %s", exc,
                              exc_info=True)

@@ -76,6 +76,39 @@ class GlyphExtractionPipeline:
             else:
                 logger.warning("Labeler '%s' no disponible: %s", name, l.install_hint())
 
+    def _build_expected_map(self, valid_fused, ref_chars, med_h, box_votes) -> dict:
+        """Salto 3 — mapa {idx_caja: carácter esperado de la referencia}.
+
+        "positional": la k-ésima caja en orden de lectura ↔ el k-ésimo char
+        (greedy, hereda desfases). "dp": alineación global Needleman-Wunsch,
+        robusta a cajas extra/faltantes (costos = ancho vs wf + confianza del
+        labeler). Opt-in vía PipelineConfig.char_alignment.
+        """
+        if not ref_chars or not valid_fused:
+            return {}
+        order = sorted(
+            range(len(valid_fused)),
+            key=lambda j: (int(valid_fused[j].y / max(1.0, med_h * 0.6)),
+                           valid_fused[j].x),
+        )
+        if self.config.char_alignment == "dp":
+            try:
+                from core.inkcore.extractor_align_basic import wf
+                from core.inkcore.glyph_dp_align import nw_align
+                widths = [valid_fused[j].w / med_h for j in order]
+                preds = [box_votes[j][0] for j in order]
+                confs = [box_votes[j][1] for j in order]
+                mapping = nw_align(widths, preds, confs, ref_chars, wf)
+                return {order[k]: ref_chars[v] for k, v in mapping.items()}
+            except Exception as exc:
+                logger.warning("alineación DP falló (%s); caigo a posicional", exc)
+        # Posicional (default / fallback).
+        em: dict[int, str] = {}
+        for pos, j in enumerate(order):
+            if pos < len(ref_chars):
+                em[j] = ref_chars[pos]
+        return em
+
     def extract(self, image_path: str, reference_text: str = "") -> ExtractionResult:
         t_start = time.perf_counter()
         timings: dict = {}
@@ -87,9 +120,14 @@ class GlyphExtractionPipeline:
         except ImportError:
             return ExtractionResult(glyphs=[], stats={"error": "cv2 no disponible"})
 
-        img_bgr = cv2.imread(image_path)
+        # F5/F6 — respetar orientación EXIF también en el pipeline ensemble
+        # (cv2.imread la ignora; fotos de celular entrarían acostadas).
+        from core.inkcore.extractor_preprocess import imread_oriented, orient_by_content
+        img_bgr = imread_oriented(image_path)
         if img_bgr is None:
             return ExtractionResult(glyphs=[], stats={"error": f"no se pudo leer {image_path}"})
+        # Paso 2 (5ta tanda) — orientación por contenido/OSD o manual antes del deskew.
+        img_bgr = orient_by_content(img_bgr, self.config.manual_orientation)
 
         # 1. Preprocesar (reutiliza pipeline del GlyphExtractor)
         from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
@@ -256,45 +294,57 @@ class GlyphExtractionPipeline:
             is_verified,
         )
 
-        # F4 — Mapeo glifo→char esperado por ORDEN DE LECTURA de la referencia,
-        # para verificar la predicción del labeler contra lo que el usuario dijo
-        # que escribió. Se agrupa por línea (banda de y) y se ordena por x.
+        # F4 — Mapeo glifo→char esperado de la referencia, para verificar la
+        # predicción del labeler contra lo que el usuario dijo que escribió.
         import re as _re
         ref_chars = list(_re.sub(r"\s+", "", reference_text)) if reference_text else []
-        reading_pos: dict[int, int] = {}
-        if ref_chars and valid_fused:
-            _med_h = float(np.median([fb.h for fb in valid_fused])) or 1.0
-            _order = sorted(
-                range(len(valid_fused)),
-                key=lambda j: (int(valid_fused[j].y / max(1.0, _med_h * 0.6)),
-                               valid_fused[j].x),
-            )
-            reading_pos = {j: pos for pos, j in enumerate(_order)}
+
+        # Altura de línea de referencia (Salto 4 para normalizar anchos, y Salto 3
+        # para ordenar las cajas por renglón).
+        med_h = float(np.median([fb.h for fb in valid_fused])) if valid_fused else 1.0
+        med_h = med_h or 1.0
+
+        # Pre-pass: voto de labelers por caja (se reutiliza en el loop y, si la
+        # alineación es DP, para construir el mapa caja→char esperado).
+        box_votes: list[tuple] = []
+        for bi in range(len(valid_fused)):
+            cp = {name: preds[bi] for name, preds in all_preds.items()
+                  if bi < len(preds)}
+            if cp:
+                _c, _lc, _hc = vote(cp, self.config.labeler_voting)
+            else:
+                _c, _lc, _hc = "?", None, False
+            _c = (_c or "?").strip()
+            _c = _c[0] if _c else "?"
+            box_votes.append((_c, _lc, _hc))
+
+        # Salto 3 — mapa caja→carácter esperado: posicional (default) o DP global.
+        expected_map = self._build_expected_map(valid_fused, ref_chars, med_h, box_votes)
 
         temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
+        # F10-B — higiene de orphans. Con el pipeline activo por defecto (F6) el
+        # path legacy _run (que purgaba al inicio) ya no corre, así que sin esto
+        # los temporales de extracciones abandonadas (no guardadas) se acumularían
+        # sin límite. Misma estrategia que el legacy: cada extracción reemplaza a
+        # la anterior en la UI (self._extracted = glyphs), así que purgar los
+        # PNG sueltos previos al empezar es seguro. El cleanup selectivo de
+        # save_glyphs_to_bank sigue borrando solo los que SÍ se guardaron.
+        from core.inkcore.extractor import _purge_temp_pngs
+        _purge_temp_pngs(temp_dir)
 
         glyphs: list[GlyphEntry] = []
+        boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
+        accepted_hashes: list[str] = []  # Salto 2 — hash perceptual por glifo
         debug_accepted: list[tuple] = []
         debug_discarded: list[tuple] = []
+        # Salto 4 — muestras de ancho de glifos VERIFICADOS (consenso+match) que
+        # calibran wf().
+        wf_samples: list[tuple[str, float]] = []
 
         for i, (fb, crop) in enumerate(zip(valid_fused, crops)):
-            crop_preds = {
-                name: preds[i]
-                for name, preds in all_preds.items()
-                if i < len(preds)
-            }
-
-            if crop_preds:
-                char, label_conf, has_consensus = vote(crop_preds, self.config.labeler_voting)
-            else:
-                char, label_conf, has_consensus = "?", None, False
-
-            # Tesseract puede devolver "" o "ab" — normalizamos a 1 char.
-            char = (char or "?").strip()
-            if not char:
-                char = "?"
-            char = char[0]
+            # Voto pre-computado (ya normalizado a 1 char) — ver pre-pass arriba.
+            char, label_conf, has_consensus = box_votes[i]
 
             if (label_conf is not None
                     and label_conf < self.config.min_label_confidence):
@@ -313,13 +363,6 @@ class GlyphExtractionPipeline:
                     debug_discarded.append((fb, crop, char, label_conf))
                     continue
 
-            safe = char if (char.isalnum() or char == "?") else f"punct_{ord(char)}"
-            out_path = temp_dir / f"{safe}_{i:04d}.png"
-            try:
-                crop.save(str(out_path))
-            except Exception:
-                continue
-
             # Quality rica del extractor (sobre el PIL en memoria, sin re-leer disco).
             # align_score=agreement_score → glifos vistos por más detectores
             # ganan un pequeño boost al ponderar la alineación interna.
@@ -336,15 +379,27 @@ class GlyphExtractionPipeline:
                 debug_discarded.append((fb, crop, char, label_conf))
                 continue
 
+            # F10-A — guardar a disco SOLO los glifos que ya pasaron TODOS los
+            # filtros (confianza, letters_only, calidad). Antes se guardaba cada
+            # crop aquí arriba y luego se descartaba por calidad, dejando PNGs
+            # huérfanos en el temp dir.
+            safe = char if (char.isalnum() or char == "?") else f"punct_{ord(char)}"
+            out_path = temp_dir / f"{safe}_{i:04d}.png"
+            try:
+                crop.save(str(out_path))
+            except Exception:
+                continue
+
             # F4 — Gold sólo si está VERIFICADO: hubo consenso entre labelers y la
             # predicción coincide con el char esperado de la referencia. Sin
             # verificación el tope es Silver, por alta que sea la calidad.
-            expected = None
-            _pos = reading_pos.get(i)
-            if _pos is not None and _pos < len(ref_chars):
-                expected = ref_chars[_pos]
+            expected = expected_map.get(i)
             verified = is_verified(char, expected, has_consensus)
             tier = classify_tier_verified(final_q, verified)
+            # Salto 4 — solo aprendemos anchos de glifos VERIFICADOS (alta
+            # confianza); el char es el confirmado y la caja es fiable.
+            if verified and char.isalnum():
+                wf_samples.append((char, fb.w / med_h))
             glyphs.append(GlyphEntry(
                 char=char,
                 image_path=str(out_path),
@@ -356,10 +411,36 @@ class GlyphExtractionPipeline:
                 label_confidence=label_conf,
                 detector_sources=list(fb.sources),
             ))
+            boxes.append([int(fb.x), int(fb.y), int(fb.w), int(fb.h)])
+            # Salto 2 — hash perceptual (mismo _dhash alpha-aware que usa el banco)
+            # para el consenso entre instancias del mismo char.
+            try:
+                from core.inkcore.bank_hashing import _dhash
+                accepted_hashes.append(_dhash(crop.convert("RGBA")))
+            except Exception:
+                accepted_hashes.append("")
             debug_accepted.append((fb, crop, char, label_conf))
+
+        # Salto 2 — consenso entre instancias del mismo char: baja de tier las
+        # outliers (mala segmentación) aunque hayan pasado calidad+verificación.
+        try:
+            from core.inkcore.glyph_consensus import demote_session_outliers
+            n_dem = demote_session_outliers(glyphs, accepted_hashes)
+            if n_dem:
+                stats["outliers_demoted"] = n_dem
+        except Exception as exc:
+            logger.debug("consenso outliers falló: %s", exc)
 
         stats["glyphs_accepted"] = len(glyphs)
         stats["glyphs_discarded"] = len(debug_discarded)
+        # Salto 4 — persistir las muestras de ancho de los glifos verificados.
+        if wf_samples:
+            try:
+                from core.inkcore import wf_calibration
+                wf_calibration.record_many(wf_samples)
+                stats["wf_samples_learned"] = len(wf_samples)
+            except Exception as exc:
+                logger.debug("wf_calibration record falló: %s", exc)
         timings["total_ms"] = int((time.perf_counter() - t_start) * 1000)
 
         # 7. Debug overlay
@@ -378,6 +459,7 @@ class GlyphExtractionPipeline:
         )
         return ExtractionResult(
             glyphs=glyphs,
+            boxes=boxes,
             debug_image_path=debug_path,
             stats=stats,
             timings_ms=timings,

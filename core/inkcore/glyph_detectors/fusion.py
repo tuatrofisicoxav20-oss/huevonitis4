@@ -121,46 +121,106 @@ def _fuse_union(detections: dict[str, list], iou_thr: float,
 
 def _fuse_intersection(detections: dict[str, list], iou_thr: float,
                        n_detectors: int) -> list[FusedBBox]:
-    """Intersección: solo sobrevive una caja si TODOS los detectores la vieron."""
+    """Intersección por CONSENSO SIMÉTRICO: un bbox sobrevive si lo vieron al
+    menos ceil(n/2) detectores distintos.
+
+    F8 — el criterio viejo anclaba arbitrariamente en det_names[0] y exigía que
+    TODOS los detectores coincidieran; si ese ancla no detectaba nada, el método
+    devolvía vacío aunque el resto coincidiera. Ahora agrupamos todas las cajas
+    por IoU (igual que union) y conservamos las que alcanzan el quórum, sin
+    privilegiar a ningún detector.
+    """
     if n_detectors <= 1:
         return _fuse_union(detections, iou_thr, n_detectors)
 
-    det_names = list(detections.keys())
-    # Anclar en el primer detector, luego verificar que cada otro también lo ve
-    anchor_name = det_names[0]
-    anchor_boxes = detections[anchor_name]
-
-    result: list[FusedBBox] = []
-    for ab in anchor_boxes:
-        matched_by: list[str] = [anchor_name]
-        final_box = FusedBBox(x=ab.x, y=ab.y, w=ab.w, h=ab.h, sources=[anchor_name])
-        for other_name in det_names[1:]:
-            other_boxes = detections[other_name]
-            best_iou = 0.0
-            best_b = None
-            for ob in other_boxes:
-                v = _bbox_iou(ab, ob)
-                if v > best_iou:
-                    best_iou = v
-                    best_b = ob
-            if best_iou >= iou_thr and best_b is not None:
-                matched_by.append(other_name)
-                final_box = _merge_bbox(final_box, best_b.x, best_b.y,
-                                        best_b.w, best_b.h, other_name)
-
-        if len(matched_by) == n_detectors:
-            final_box.agreement_score = 1.0
-            result.append(final_box)
-
+    import math
+    quorum = math.ceil(n_detectors / 2)
+    groups = _fuse_union(detections, iou_thr, n_detectors)
+    result = [g for g in groups if len(set(g.sources)) >= quorum]
     result.sort(key=lambda b: (b.y, b.x))
     return result
 
 
 def _fuse_cascade(detections: dict[str, list], iou_thr: float,
                   n_detectors: int) -> list[FusedBBox]:
-    """Cascade: el primer detector marca regiones primarias.
-    El segundo solo llena los huecos (columnas sin detección primaria).
-    Útil para usar CRAFT como complemento de classic_cv.
+    """Cascade. Dos modos según qué detectores hay (Fase 4):
+
+    (A) classic_cv + neuronal(es) → REGIÓN-MÁSCARA. classic_cv aporta los cortes
+        FINOS de carácter; las cajas neuronales (que tienden a agrupar por
+        palabra/línea, no por carácter) definen las REGIONES de texto válidas. Se
+        conservan las cajas de classic_cv que caen dentro de alguna región
+        neuronal y se descartan las de fuera (filtra ruido de fondo). Las cajas
+        neuronales NO se emiten como glifos (una caja de palabra no es un glifo
+        usable). Esta es la semántica que pide el plan de precisión.
+
+    (B) sin classic_cv → RELLENO DE HUECOS (legacy). El primer detector marca las
+        regiones primarias y el segundo solo llena las zonas sin primaria. Se
+        conserva para detectores char-level genéricos (p. ej. un CRAFT a nivel
+        carácter) y para no romper el contrato histórico.
+
+    Seguridad (modo A): si el neuronal no devolvió regiones, o el filtro dejaría
+    TODO fuera, se cae a classic_cv sin filtrar — preferimos no perder caracteres
+    reales a un filtrado agresivo (filosofía conservadora del proyecto).
+    """
+    det_names = list(detections.keys())
+    if not det_names:
+        return []
+    if "classic_cv" in detections and len(det_names) >= 2:
+        return _fuse_cascade_region_mask(detections, n_detectors)
+    return _fuse_cascade_gapfill(detections, iou_thr, n_detectors)
+
+
+def _fuse_cascade_region_mask(detections: dict[str, list],
+                              n_detectors: int) -> list[FusedBBox]:
+    """Modo A — cajas neuronales como máscara de región, classic_cv como caracteres."""
+    char_boxes = detections.get("classic_cv", [])
+    region_boxes = [
+        b for name, bxs in detections.items() if name != "classic_cv" for b in bxs
+    ]
+
+    def _as_fused(boxes):
+        return sorted(
+            [FusedBBox(x=b.x, y=b.y, w=b.w, h=b.h, sources=["classic_cv"],
+                       agreement_score=1.0 / n_detectors) for b in boxes],
+            key=lambda b: (b.y, b.x),
+        )
+
+    # Sin caracteres o sin regiones neuronales → no filtrar (conservador).
+    if not char_boxes or not region_boxes:
+        return _as_fused(char_boxes)
+
+    kept_boxes = []
+    for b in char_boxes:
+        area_b = max(1, b.w * b.h)
+        inside = False
+        for r in region_boxes:
+            ix1 = max(b.x, r.x)
+            iy1 = max(b.y, r.y)
+            ix2 = min(b.x + b.w, r.x + r.w)
+            iy2 = min(b.y + b.h, r.y + r.h)
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue
+            # ≥50% del área del CARÁCTER dentro de la región de texto = "dentro".
+            if (ix2 - ix1) * (iy2 - iy1) / area_b >= 0.5:
+                inside = True
+                break
+        if inside:
+            kept_boxes.append(b)
+
+    if not kept_boxes:
+        logger.warning(
+            "cascade región-máscara: el filtro descartó TODAS las cajas de "
+            "classic_cv; devuelvo sin filtrar (fallback conservador)"
+        )
+        return _as_fused(char_boxes)
+    return _as_fused(kept_boxes)
+
+
+def _fuse_cascade_gapfill(detections: dict[str, list], iou_thr: float,
+                          n_detectors: int) -> list[FusedBBox]:
+    """Modo B (legacy) — el primer detector marca regiones primarias.
+    El segundo solo llena los huecos (zonas sin detección primaria).
+    Útil para usar un detector char-level genérico como complemento.
     """
     det_names = list(detections.keys())
     if not det_names:
@@ -174,23 +234,29 @@ def _fuse_cascade(detections: dict[str, list], iou_thr: float,
     if len(det_names) < 2:
         return sorted(primary, key=lambda b: (b.y, b.x))
 
-    # Encontrar "huecos" horizontales donde el primario no detectó nada.
-    # Un hueco es un rango X sin cobertura del primario.
-    if primary:
-        covered_x: set[int] = set()
-        for b in primary:
-            for x in range(b.x, b.x + b.w):
-                covered_x.add(x)
-    else:
-        covered_x = set()
-
+    # F8 — Un bbox secundario "llena un hueco" solo si NO solapa (en 2D) con
+    # ningún bbox primario. El criterio viejo usaba un set de columnas X de TODO
+    # el renglón sin considerar Y: en texto multi-línea una letra de la línea 2
+    # que cae en la misma columna X que algo de la línea 1 se marcaba "cubierta"
+    # y se descartaba (la cascade colapsaba todas las líneas en un eje X común).
+    # Además el set-por-píxel era O(ancho_total). Ahora comparamos por intervalos
+    # con la fracción de ÁREA del secundario que cae dentro de cada primario.
     secondary_name = det_names[1]
     secondary_fills: list[FusedBBox] = []
     for b in detections[secondary_name]:
-        # Solo añadir si la mayor parte del bbox está en un hueco
-        overlap = sum(1 for x in range(b.x, b.x + b.w) if x in covered_x)
-        coverage = overlap / max(1, b.w)
-        if coverage < 0.3:  # < 30% solapado con primario → es un hueco real
+        area_b = max(1, b.w * b.h)
+        max_cov = 0.0
+        for p in primary:
+            ix1 = max(b.x, p.x)
+            iy1 = max(b.y, p.y)
+            ix2 = min(b.x + b.w, p.x + p.w)
+            iy2 = min(b.y + b.h, p.y + p.h)
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue  # sin solapamiento real (distinta línea o distinta zona)
+            cov = (ix2 - ix1) * (iy2 - iy1) / area_b
+            if cov > max_cov:
+                max_cov = cov
+        if max_cov < 0.3:  # < 30% del secundario solapa un primario → hueco real
             secondary_fills.append(
                 FusedBBox(x=b.x, y=b.y, w=b.w, h=b.h,
                           sources=[secondary_name],

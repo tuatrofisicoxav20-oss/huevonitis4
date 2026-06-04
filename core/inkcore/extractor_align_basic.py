@@ -25,7 +25,20 @@ MIN_COMP_AREA = 10
 
 
 def wf(ch: str) -> float:
-    """Factor de ancho esperado por carácter (escritura manual española)."""
+    """Factor de ancho esperado por carácter (escritura manual española).
+
+    Salto 4 — primero consulta el ancho APRENDIDO de la letra del usuario
+    (wf_usuario.json, vía wf_calibration). Si hay suficientes muestras
+    verificadas para este carácter, usa la mediana aprendida; si no, cae a la
+    tabla fija de abajo.
+    """
+    try:
+        from core.inkcore import wf_calibration
+        learned = wf_calibration.learned_wf(ch)
+        if learned is not None:
+            return learned
+    except Exception:
+        pass  # ante cualquier fallo de calibración, usar la tabla fija
     if ch in ".,;:!¡|`'\"":
         return 0.28
     if ch in "iltI1íì":

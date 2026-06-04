@@ -17,8 +17,23 @@ class PipelineConfig:
     detector_fusion: Literal["union", "intersection", "cascade"] = "union"
     iou_dedup_threshold: float = 0.5
 
-    labelers: list[str] = field(default_factory=list)
-    labeler_voting: Literal["majority", "highest_conf", "consensus"] = "highest_conf"
+    # F6 — defaults del ensemble: ambos labelers + voting por CONSENSO. El
+    # consenso es lo que habilita la verificación cruzada (Gold sólo si ambos
+    # labelers coinciden). Los labelers no instalados se omiten con un warning.
+    labelers: list[str] = field(
+        default_factory=lambda: ["tesseract_labeler", "trocr_labeler"]
+    )
+    labeler_voting: Literal["majority", "highest_conf", "consensus"] = "consensus"
+
+    # Salto 3 — estrategia de alineación caja↔carácter de la referencia:
+    #   "positional" (default): la i-ésima caja en orden de lectura ↔ i-ésimo char.
+    #   "dp": Needleman-Wunsch global (robusto a cajas extra/faltantes). Opt-in
+    #   hasta validar con run_eval sobre ground-truth real cuál gana.
+    char_alignment: Literal["positional", "dp"] = "positional"
+
+    # Quinta tanda Paso 2 — override manual de orientación (0/90/180/270); None =
+    # intentar OSD por contenido (requiere osd.traineddata).
+    manual_orientation: int | None = None
 
     min_quality: float = 0.18
     min_label_confidence: float = 0.0
@@ -48,3 +63,8 @@ class ExtractionResult:
     debug_image_path: str | None = None
     stats: dict = field(default_factory=dict)
     timings_ms: dict = field(default_factory=dict)
+    # Salto 0 (eval) — cajas predichas alineadas 1:1 con `glyphs`, en coords de la
+    # imagen ya preprocesada (la misma sobre la que corre la detección). Cada
+    # entrada es [x, y, w, h]. Permite calcular IoU contra el ground-truth sin
+    # tocar el modelo persistido GlyphEntry.
+    boxes: list = field(default_factory=list)

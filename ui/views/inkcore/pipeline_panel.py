@@ -41,7 +41,7 @@ class PipelinePanelMixin:
         use_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(use_row, text="Usar pipeline ensemble",
                      font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(side="left")
-        self._use_pipeline_var = ctk.BooleanVar(value=False)
+        self._use_pipeline_var = ctk.BooleanVar(value=True)  # F6: ensemble por defecto
         ctk.CTkSwitch(use_row, text="", variable=self._use_pipeline_var,
                       onvalue=True, offvalue=False,
                       progress_color=theme.ACCENT_ORANGE,
@@ -109,7 +109,7 @@ class PipelinePanelMixin:
         ctk.CTkLabel(vote_row, text="Voto:",
                      font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
                      width=60).pack(side="left")
-        self._vote_var = ctk.StringVar(value="highest_conf")
+        self._vote_var = ctk.StringVar(value="consensus")  # F6: verificación cruzada
         ctk.CTkOptionMenu(
             vote_row, values=["highest_conf", "majority", "consensus"],
             variable=self._vote_var,

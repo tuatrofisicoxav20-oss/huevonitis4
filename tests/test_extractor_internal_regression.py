@@ -173,3 +173,36 @@ def test_autocrop_returns_same_or_smaller(tmp_path, monkeypatch):
     result = ext._autocrop(img)
     assert result.shape[0] <= img.shape[0]
     assert result.shape[1] <= img.shape[1]
+
+
+@pytest.mark.skipif(not CV2_OK, reason="cv2 no disponible")
+def test_segment_words_single_char_offset(tmp_path, monkeypatch):
+    """F4b — las coords de una palabra de 1 carácter deben quedar trasladadas por
+    el offset wx1 (dentro de [wx1, wx2]), igual que las multi-carácter.
+
+    El branch de 1 char no debe devolver coords relativas a la palabra: si lo
+    hiciera, en frases con palabras de 1 letra (y, o, a) la caja caería sobre la
+    palabra vecina.
+    """
+    import config
+    monkeypatch.setattr(config, "TIPOGRAFIA_DIR", tmp_path / "tipo")
+    config.ensure_dirs()
+
+    from core.inkcore.extractor import GlyphExtractor
+    ext = GlyphExtractor()
+
+    # Renglón de 30px de alto, 200px de ancho, con tinta en la zona [120,140).
+    line_mask = np.zeros((30, 200), dtype=np.uint8)
+    line_mask[5:25, 122:138] = 255
+
+    words = ["y"]                 # una sola palabra de 1 carácter
+    wx1, wx2 = 120, 140
+    word_bounds = [wx1, wx2]
+
+    result = ext._segment_words(words, word_bounds, line_mask, line_h=30.0)
+    assert len(result) == 1
+    box, ch, _score = result[0]
+    assert ch == "y"
+    # La caja debe vivir dentro de la palabra, NO en x≈0 (relativo).
+    assert wx1 <= box.x, f"box.x={box.x} no aplicó el offset wx1={wx1}"
+    assert box.x + box.w <= wx2, f"box derecho {box.x + box.w} excede wx2={wx2}"

@@ -1,0 +1,6 @@
+{
+  "_INSTRUCCIONES": "RELLENAR CON CAJAS REALES. Este ground-truth está VACÍO a propósito (no inventamos anotaciones). Para que las métricas signifiquen algo: 1) corré `python -m tools.eval.run_eval tools/eval/eval_dataset/ejemplo_sintetico.png` una vez; eso genera `ejemplo_sintetico.preprocessed.png` y un `ejemplo_sintetico.pred.json`. 2) Anotá las cajas REALES sobre la imagen .preprocessed.png (ese es el espacio de coordenadas correcto). 3) Llená el array `chars` de abajo y, si querés, `reference_text`.",
+  "image": "ejemplo_sintetico.png",
+  "reference_text": "",
+  "chars": []
+}

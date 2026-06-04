@@ -46,9 +46,20 @@
 # Etiquetado automático de glifos (banco de tipografía)
 # -----------------------------------------------------------------------------
 
-# TrOCR de Microsoft — escrito a mano, descarga ~400 MB en primera ejecución.
+# TrOCR de Microsoft — etiquetado de letra manuscrita (sube la PRECISIÓN de Gold:
+# tesseract es de imprenta y rara vez acuerda con la letra suelta; TrOCR sí, así
+# que habilita más consenso real). Comandos exactos (torch desde el índice CPU de
+# PyTorch para un i5 sin GPU):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install transformers
+# Modelo configurable en Configuración → "Modelo TrOCR" (config.TROCR_MODEL):
+#   microsoft/trocr-small-handwritten  (~170 MB) — para CPU lento, si base pesa.
+#   microsoft/trocr-base-handwritten   (~400 MB) — DEFAULT recomendado.
+#   microsoft/trocr-large-handwritten  (~1.3 GB) — máxima calidad, RAM alta.
+# Se descarga la 1ª vez a config.MODELS_DIR/trocr y queda offline en disco; la
+# caché en memoria (ModelCache) evita recargarlo dentro de una misma sesión.
 # transformers>=4.40
-# torch>=2.0                 # CPU; torch-cuda-XX para GPU
+# torch>=2.0                 # ver comando CPU arriba; torch-cuda-XX para GPU
 
 # -----------------------------------------------------------------------------
 # Lectura de PDFs
