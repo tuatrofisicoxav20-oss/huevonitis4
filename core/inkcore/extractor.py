@@ -27,19 +27,55 @@ logger = logging.getLogger(__name__)
 
 
 def _build_default_pipeline_config():
-    """Paso 3 (5ta tanda) — FUENTE ÚNICA DE VERDAD del detector.
+    """Paso 3 (5ta tanda) + Fase 2 — FUENTE ÚNICA DE VERDAD del detector.
 
-    El pipeline por defecto deriva sus detectores de config.GLYPH_DETECTOR (lo que
-    el usuario elige en Configuración). Antes el pipeline usaba siempre classic_cv
-    hardcodeado e ignoraba ese ajuste. classic_cv queda SIEMPRE como base; si el
-    usuario configuró otro detector, se fusiona con classic_cv (Salto 1: el
-    neuronal complementa, no reemplaza). Se construye fresco en cada extracción,
-    así que cambiar el detector en Config (o reload_extractor) afecta al pipeline.
+    El pipeline por defecto deriva sus detectores de la config (lo que el usuario
+    elige en Configuración). classic_cv queda SIEMPRE como base; el detector
+    configurado (si no es classic_cv) y los de config.GLYPH_DETECTORS_EXTRA se
+    suman como complemento neuronal (el neuronal complementa, no reemplaza). Los
+    detectores no instalados se omiten con un log (no error). La estrategia de
+    fusión sale de config.GLYPH_DETECTOR_FUSION.
+
+    Retrocompatibilidad: con un solo detector la fusión es no-op, así que el caso
+    classic_cv-solo produce exactamente la misma PipelineConfig que antes. Se
+    construye fresco en cada extracción, así que cambiar la config (o
+    reload_extractor) afecta al pipeline.
     """
+    from core.inkcore import glyph_detectors
     from core.inkcore.extraction_pipeline import PipelineConfig
+
     det = getattr(config, "GLYPH_DETECTOR", "classic_cv") or "classic_cv"
-    detectors = ["classic_cv"] if det == "classic_cv" else [det, "classic_cv"]
-    return PipelineConfig(detectors=detectors)
+
+    # Base + complementos pedidos (el detector configurado no-classic + extras).
+    detectors = ["classic_cv"]
+    requested = ([det] if det != "classic_cv" else []) + list(
+        getattr(config, "GLYPH_DETECTORS_EXTRA", []) or []
+    )
+
+    available = glyph_detectors.get_available()
+    for name in requested:
+        if name in detectors:
+            continue
+        if available.get(name):
+            detectors.append(name)
+        else:
+            logger.info(
+                "_build_default_pipeline_config: detector '%s' no instalado; se omite",
+                name,
+            )
+
+    # Un solo detector → fusión irrelevante: devolvemos la config legacy idéntica.
+    if len(detectors) == 1:
+        return PipelineConfig(detectors=detectors)
+
+    valid = ("union", "intersection", "cascade")
+    fusion = getattr(config, "GLYPH_DETECTOR_FUSION", "cascade")
+    if fusion not in valid:
+        logger.warning(
+            "_build_default_pipeline_config: fusión '%s' inválida; uso 'cascade'", fusion
+        )
+        fusion = "cascade"
+    return PipelineConfig(detectors=detectors, detector_fusion=fusion)
 
 
 def _purge_temp_pngs(temp_dir: Path) -> int:
