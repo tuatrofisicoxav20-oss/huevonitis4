@@ -22,6 +22,8 @@ Las métricas salen de `python -m tools.eval.run_eval <imgs> --label <fase>`:
 | fase | fecha | IoU | char-acc | gold-prec | detectores | labelers | notas |
 |------|-------|-----|----------|-----------|------------|----------|-------|
 | 0 (baseline) | 2026-06-04 | n/m | n/m | n/m | classic_cv | tesseract(+trocr si instalado) | aparato de medición listo; falta GT real anotado |
+| 1 (locking) | 2026-06-04 | n/m | n/m | n/m | classic_cv | — | fix de concurrencia, no afecta exactitud. Rollback: `git revert 5ab96ab` |
+| 2 (fusión config) | 2026-06-04 | = baseline | = baseline | = baseline | classic_cv (default) | — | solo plumbing; con GLYPH_DETECTORS_EXTRA=[] el comportamiento es idéntico (247 tests verdes). Rollback: `git revert d1a86c3 7c86405 5032430 c16e713` |
 
 ## Comando de rollback por fase
 
@@ -32,6 +34,47 @@ git log --oneline            # localizar el/los commit(s) de la fase
 git revert <sha>             # revertir sin reescribir historia
 ```
 
-## Protocolo de medición (se completa al instalar deps / anotar GT)
+## Protocolo de medición — EasyOCR cascade vs union (Fase 4)
 
-Ver más abajo conforme avancen las fases 3, 4 y 5.
+**Bloqueante:** necesita `eval_dataset/*.gt.json` anotado (ver README). Con GT, el
+experimento decide el default POR NÚMERO, no por intuición. EasyOCR ya está
+instalado en este equipo; si no lo estuviera:
+
+```bash
+pip install torchvision --index-url https://download.pytorch.org/whl/cpu  # NMS
+pip install easyocr
+```
+
+Correr los 3 casos y comparar IoU / char-acc / gold-prec:
+
+```bash
+# 1) Base: classic_cv solo (default actual)
+#    settings.json: {"glyph_detectors_extra": []}
+python -m tools.eval.run_eval tools/eval/eval_dataset/*.png --label base_classic
+
+# 2) classic_cv + easyocr, fusión cascade (región-máscara)
+#    settings.json: {"glyph_detectors_extra": ["easyocr"], "glyph_detector_fusion": "cascade"}
+python -m tools.eval.run_eval tools/eval/eval_dataset/*.png --label easyocr_cascade
+
+# 3) classic_cv + easyocr, fusión union
+#    settings.json: {"glyph_detectors_extra": ["easyocr"], "glyph_detector_fusion": "union"}
+python -m tools.eval.run_eval tools/eval/eval_dataset/*.png --label easyocr_union
+```
+
+**Decisión:** el que dé mayor char-acc y gold-prec (a IoU comparable) gana y se
+fija en `config.GLYPH_DETECTORS_EXTRA` / `GLYPH_DETECTOR_FUSION`. Hasta entonces
+el default queda conservador (`GLYPH_DETECTORS_EXTRA=[]`).
+
+> ⚠ Expectativa templada (nota medida 2026-06 en requirements-optional.txt):
+> EasyOCR/CRAFT agrupan por línea/palabra (2–4 cajas por hoja), NO por carácter.
+> Por eso el modo cascade aquí usa esas cajas como MÁSCARA DE REGIÓN (filtra ruido
+> de classic_cv fuera del texto), no como fuente de glifos. El cuello de botella
+> real sigue siendo la segmentación de classic_cv, no la detección. La ganancia
+> esperada de easyocr es sobre todo en gold-prec (menos basura marcada), no en
+> número de glifos.
+
+| caso | IoU | char-acc | gold-prec | n_pred medio | notas |
+|------|-----|----------|-----------|--------------|-------|
+| base_classic | (pendiente GT) | | | | |
+| easyocr_cascade | (pendiente GT) | | | | |
+| easyocr_union | (pendiente GT) | | | | |
