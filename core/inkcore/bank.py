@@ -364,8 +364,12 @@ class GlyphBank:
 
     def get_review_queue(self) -> list[GlyphEntry]:
         """Devuelve glifos que necesitan revisión (Bronze o quality < 0.50)."""
+        # F7/Fase 1 — snapshot bajo lock: el hilo de fondo muta _entries y sin
+        # esto se arriesga "list changed size during iteration".
+        with _bank_lock:
+            _entries_snap = list(self._entries)
         return [
-            e for e in self._entries
+            e for e in _entries_snap
             if e.tier == "Bronze" or e.quality_score < 0.50
         ]
 
@@ -410,7 +414,12 @@ class GlyphBank:
 
     def get_bank_report(self) -> dict:
         """Devuelve estadísticas completas del banco para el informe."""
-        return build_bank_report(self._entries, len(self.get_review_queue()))
+        # F7/Fase 1 — snapshot bajo lock antes de agregar (no pasar la lista viva
+        # a build_bank_report mientras el hilo de fondo la muta). get_review_queue
+        # ya toma su propio snapshot, así que se llama fuera del with.
+        with _bank_lock:
+            _entries_snap = list(self._entries)
+        return build_bank_report(_entries_snap, len(self.get_review_queue()))
 
     # Serialización movida a bank_serial.py en v4.2; estos métodos delegan ahí
     # (se conservan como wrappers para no romper callers/subclases que los usen).
