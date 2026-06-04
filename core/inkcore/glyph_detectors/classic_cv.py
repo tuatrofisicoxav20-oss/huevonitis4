@@ -34,11 +34,19 @@ class ClassicCVDetector(GlyphDetector):
         try:
             from core.inkcore.extractor import BBox
             gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-            enhanced = clahe.apply(gray)
-            _, mask = cv2.threshold(
-                enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-            )
+            # Salto 5 — multibinarización: Otsu solo se invierte en bajo contraste
+            # (marca toda la página como tinta → 1 blob). best_binary elige por
+            # contenido la candidata más sana (descarta degeneradas, maximiza
+            # componentes tipo-letra). Cae a Otsu+CLAHE si el módulo no está.
+            try:
+                from core.inkcore.binarization import best_binary
+                _, mask = best_binary(gray)
+            except Exception:
+                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                enhanced = clahe.apply(gray)
+                _, mask = cv2.threshold(
+                    enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+                )
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
 

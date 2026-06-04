@@ -2,3 +2,6 @@
 results/
 *.preprocessed.png
 *.pred.json
+# Datos personales del usuario (fotos reales de su letra) — no versionar
+eval_dataset/muestra*
+
