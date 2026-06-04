@@ -56,6 +56,16 @@ GLYPH_DETECTOR_FUSION = "cascade"
 GLYPH_DETECTORS_EXTRA: list[str] = []
 _VALID_FUSION = ("union", "intersection", "cascade")
 
+# Fase 3 — modelo de TrOCR para etiquetar letra manuscrita. Configurable según
+# RAM/CPU: small (~170 MB, para CPU lento), base (~400 MB, recomendado), large
+# (~1.3 GB, máxima calidad). Se descarga la 1ª vez y queda cacheado en disco.
+TROCR_MODEL = "microsoft/trocr-base-handwritten"
+_VALID_TROCR_MODELS = (
+    "microsoft/trocr-small-handwritten",
+    "microsoft/trocr-base-handwritten",
+    "microsoft/trocr-large-handwritten",
+)
+
 # Alineación asistida por el CNN clasificador de caracteres (juez de cortes).
 # Mejora la separación de letras ligadas en fotos de abecedario y marca las
 # confusiones como Bronze. Requiere el modelo (core/inkcore/ai/models/) y torch;
@@ -85,7 +95,7 @@ def load_settings() -> None:
     """Override module-level defaults from SETTINGS_FILE if present and valid."""
     global BASE_PRICE_PER_PAGE_MXN, AUTOSAVE_INTERVAL_MS, TESSERACT_CMD
     global OCR_BACKEND, GLYPH_DETECTOR, MIN_GLYPH_QUALITY
-    global GLYPH_DETECTOR_FUSION, GLYPH_DETECTORS_EXTRA
+    global GLYPH_DETECTOR_FUSION, GLYPH_DETECTORS_EXTRA, TROCR_MODEL
     if not SETTINGS_FILE.exists():
         return
     try:
@@ -115,6 +125,9 @@ def load_settings() -> None:
     val = s.get("glyph_detectors_extra")
     if isinstance(val, list):
         GLYPH_DETECTORS_EXTRA = [x for x in val if isinstance(x, str) and x]
+    val = s.get("trocr_model", "")
+    if isinstance(val, str) and val in _VALID_TROCR_MODELS:
+        TROCR_MODEL = val
     with contextlib.suppress(KeyError, ValueError, TypeError):
         v = float(s["min_glyph_quality"])
         if 0.0 <= v <= 1.0:

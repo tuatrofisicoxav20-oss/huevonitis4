@@ -47,6 +47,7 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
             # detector neuronal extra); se convierte a la lista persistida al guardar.
             "glyph_detector_fusion": getattr(config, "GLYPH_DETECTOR_FUSION", "cascade"),
             "glyph_detectors_extra_ui": _extra[0] if _extra else "(ninguno)",
+            "trocr_model": getattr(config, "TROCR_MODEL", "microsoft/trocr-base-handwritten"),
         }
         if config.SETTINGS_FILE.exists():
             try:
@@ -103,6 +104,11 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
             ("Detector neuronal extra", "glyph_detectors_extra_ui", "menu", neural_opts),
             ("Fusión de detectores", "glyph_detector_fusion", "menu",
              ["cascade", "union", "intersection"]),
+            ("Modelo TrOCR (letra manuscrita)", "trocr_model", "menu", [
+                "microsoft/trocr-base-handwritten",
+                "microsoft/trocr-small-handwritten",
+                "microsoft/trocr-large-handwritten",
+            ]),
         ])
 
         # Tooltip para backends opcionales no instalados
@@ -305,6 +311,10 @@ def _apply_settings_to_config(settings: dict) -> None:
     val = settings.get("glyph_detectors_extra")
     if isinstance(val, list):
         config.GLYPH_DETECTORS_EXTRA = [x for x in val if isinstance(x, str) and x]
+    # Fase 3 — modelo de TrOCR (sólo valores válidos conocidos).
+    val = settings.get("trocr_model", "")
+    if isinstance(val, str) and val in config._VALID_TROCR_MODELS:
+        config.TROCR_MODEL = val
 
     with contextlib.suppress(ValueError, TypeError):
         v = float(settings.get("min_glyph_quality", ""))

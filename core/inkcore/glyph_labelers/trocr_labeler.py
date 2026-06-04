@@ -39,8 +39,11 @@ class TrOCRLabeler(GlyphLabeler):
     name = "trocr_labeler"
     available = _TRANSFORMERS_OK and _TORCH_OK
 
-    def __init__(self, model_name: str = _DEFAULT_MODEL):
-        self.model_name = model_name
+    def __init__(self, model_name: str | None = None):
+        # None → resolver desde config en runtime (no en tiempo de import, para
+        # que cambiar TROCR_MODEL en Configuración tenga efecto sin reiniciar).
+        self.model_name = model_name or getattr(config, "TROCR_MODEL", _DEFAULT_MODEL) \
+            or _DEFAULT_MODEL
         self._processor = None
         self._model = None
 
