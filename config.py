@@ -41,6 +41,21 @@ TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
 OCR_BACKEND = "tesseract"
 GLYPH_DETECTOR = "classic_cv"
 
+# Fase 2 — fusión multi-detector. Cuando hay más de un detector (classic_cv +
+# alguno neuronal), esta estrategia decide cómo se combinan sus cajas:
+#   "union"        — junta todas las cajas (puede duplicar cada letra).
+#   "intersection" — sólo cajas con consenso entre detectores.
+#   "cascade"      — Y-aware: las cajas neuronales definen la región de texto y
+#                    classic_cv aporta los cortes finos de carácter dentro.
+# cascade suele ganar al combinar neuronal (cajas de palabra) con classic_cv
+# (cajas de carácter). Configurable y medible con run_eval (Fase 4).
+GLYPH_DETECTOR_FUSION = "cascade"
+# Detectores neuronales a fusionar con classic_cv cuando estén instalados
+# (p. ej. ["easyocr"]). Los no disponibles se omiten con un log. Vacío = sólo
+# classic_cv (default conservador hasta que la medición confirme que suman).
+GLYPH_DETECTORS_EXTRA: list[str] = []
+_VALID_FUSION = ("union", "intersection", "cascade")
+
 # Alineación asistida por el CNN clasificador de caracteres (juez de cortes).
 # Mejora la separación de letras ligadas en fotos de abecedario y marca las
 # confusiones como Bronze. Requiere el modelo (core/inkcore/ai/models/) y torch;
@@ -70,6 +85,7 @@ def load_settings() -> None:
     """Override module-level defaults from SETTINGS_FILE if present and valid."""
     global BASE_PRICE_PER_PAGE_MXN, AUTOSAVE_INTERVAL_MS, TESSERACT_CMD
     global OCR_BACKEND, GLYPH_DETECTOR, MIN_GLYPH_QUALITY
+    global GLYPH_DETECTOR_FUSION, GLYPH_DETECTORS_EXTRA
     if not SETTINGS_FILE.exists():
         return
     try:
@@ -92,6 +108,13 @@ def load_settings() -> None:
     val = s.get("glyph_detector", "")
     if isinstance(val, str) and val:
         GLYPH_DETECTOR = val
+    # Fase 2 — fusión multi-detector. Valores inválidos caen al default sin romper.
+    val = s.get("glyph_detector_fusion", "")
+    if isinstance(val, str) and val in _VALID_FUSION:
+        GLYPH_DETECTOR_FUSION = val
+    val = s.get("glyph_detectors_extra")
+    if isinstance(val, list):
+        GLYPH_DETECTORS_EXTRA = [x for x in val if isinstance(x, str) and x]
     with contextlib.suppress(KeyError, ValueError, TypeError):
         v = float(s["min_glyph_quality"])
         if 0.0 <= v <= 1.0:
