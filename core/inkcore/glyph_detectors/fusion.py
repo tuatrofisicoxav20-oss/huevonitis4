@@ -143,9 +143,84 @@ def _fuse_intersection(detections: dict[str, list], iou_thr: float,
 
 def _fuse_cascade(detections: dict[str, list], iou_thr: float,
                   n_detectors: int) -> list[FusedBBox]:
-    """Cascade: el primer detector marca regiones primarias.
-    El segundo solo llena los huecos (columnas sin detección primaria).
-    Útil para usar CRAFT como complemento de classic_cv.
+    """Cascade. Dos modos según qué detectores hay (Fase 4):
+
+    (A) classic_cv + neuronal(es) → REGIÓN-MÁSCARA. classic_cv aporta los cortes
+        FINOS de carácter; las cajas neuronales (que tienden a agrupar por
+        palabra/línea, no por carácter) definen las REGIONES de texto válidas. Se
+        conservan las cajas de classic_cv que caen dentro de alguna región
+        neuronal y se descartan las de fuera (filtra ruido de fondo). Las cajas
+        neuronales NO se emiten como glifos (una caja de palabra no es un glifo
+        usable). Esta es la semántica que pide el plan de precisión.
+
+    (B) sin classic_cv → RELLENO DE HUECOS (legacy). El primer detector marca las
+        regiones primarias y el segundo solo llena las zonas sin primaria. Se
+        conserva para detectores char-level genéricos (p. ej. un CRAFT a nivel
+        carácter) y para no romper el contrato histórico.
+
+    Seguridad (modo A): si el neuronal no devolvió regiones, o el filtro dejaría
+    TODO fuera, se cae a classic_cv sin filtrar — preferimos no perder caracteres
+    reales a un filtrado agresivo (filosofía conservadora del proyecto).
+    """
+    det_names = list(detections.keys())
+    if not det_names:
+        return []
+    if "classic_cv" in detections and len(det_names) >= 2:
+        return _fuse_cascade_region_mask(detections, n_detectors)
+    return _fuse_cascade_gapfill(detections, iou_thr, n_detectors)
+
+
+def _fuse_cascade_region_mask(detections: dict[str, list],
+                              n_detectors: int) -> list[FusedBBox]:
+    """Modo A — cajas neuronales como máscara de región, classic_cv como caracteres."""
+    char_boxes = detections.get("classic_cv", [])
+    region_boxes = [
+        b for name, bxs in detections.items() if name != "classic_cv" for b in bxs
+    ]
+
+    def _as_fused(boxes):
+        return sorted(
+            [FusedBBox(x=b.x, y=b.y, w=b.w, h=b.h, sources=["classic_cv"],
+                       agreement_score=1.0 / n_detectors) for b in boxes],
+            key=lambda b: (b.y, b.x),
+        )
+
+    # Sin caracteres o sin regiones neuronales → no filtrar (conservador).
+    if not char_boxes or not region_boxes:
+        return _as_fused(char_boxes)
+
+    kept_boxes = []
+    for b in char_boxes:
+        area_b = max(1, b.w * b.h)
+        inside = False
+        for r in region_boxes:
+            ix1 = max(b.x, r.x)
+            iy1 = max(b.y, r.y)
+            ix2 = min(b.x + b.w, r.x + r.w)
+            iy2 = min(b.y + b.h, r.y + r.h)
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue
+            # ≥50% del área del CARÁCTER dentro de la región de texto = "dentro".
+            if (ix2 - ix1) * (iy2 - iy1) / area_b >= 0.5:
+                inside = True
+                break
+        if inside:
+            kept_boxes.append(b)
+
+    if not kept_boxes:
+        logger.warning(
+            "cascade región-máscara: el filtro descartó TODAS las cajas de "
+            "classic_cv; devuelvo sin filtrar (fallback conservador)"
+        )
+        return _as_fused(char_boxes)
+    return _as_fused(kept_boxes)
+
+
+def _fuse_cascade_gapfill(detections: dict[str, list], iou_thr: float,
+                          n_detectors: int) -> list[FusedBBox]:
+    """Modo B (legacy) — el primer detector marca regiones primarias.
+    El segundo solo llena los huecos (zonas sin detección primaria).
+    Útil para usar un detector char-level genérico como complemento.
     """
     det_names = list(detections.keys())
     if not det_names:

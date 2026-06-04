@@ -131,6 +131,52 @@ def test_fuse_cascade_secondary_not_duplicate():
     assert len(result) == 1
 
 
+def test_cascade_region_mask_descarta_ruido_fuera_de_region():
+    """Fase 4 — con classic_cv + neuronal, cascade filtra cajas de classic_cv
+    que caen fuera de toda región neuronal (ruido de fondo)."""
+    from core.inkcore.glyph_detectors.fusion import fuse
+    dets = {
+        # classic_cv: 2 caracteres dentro de la palabra + 1 mancha de ruido lejos.
+        "classic_cv": [
+            _make_bbox(5, 5, 8, 12),    # dentro de la región
+            _make_bbox(15, 5, 8, 12),   # dentro de la región
+            _make_bbox(200, 200, 8, 12),  # RUIDO: fuera de toda región
+        ],
+        # easyocr: una caja de palabra que cubre los 2 caracteres reales.
+        "easyocr": [_make_bbox(0, 0, 40, 20)],
+    }
+    result = fuse(dets, strategy="cascade", iou_threshold=0.5)
+    # Quedan los 2 caracteres dentro de la región; el ruido se descarta.
+    assert len(result) == 2
+    # Las cajas neuronales NO se emiten como glifos (no debe aparecer la 40x20).
+    assert all(b.w < 30 for b in result)
+
+
+def test_cascade_region_mask_sin_region_no_filtra():
+    """Si el neuronal no devolvió regiones, no se filtra (conservador)."""
+    from core.inkcore.glyph_detectors.fusion import fuse
+    dets = {
+        "classic_cv": [_make_bbox(5, 5, 8, 12), _make_bbox(200, 200, 8, 12)],
+        "easyocr": [],  # el neuronal no detectó nada
+    }
+    result = fuse(dets, strategy="cascade", iou_threshold=0.5)
+    # Sin regiones → se conservan TODAS las cajas de classic_cv.
+    assert len(result) == 2
+
+
+def test_cascade_region_mask_fallback_si_filtra_todo():
+    """Si el filtro dejaría TODO fuera (regiones mal puestas), devuelve classic_cv
+    sin filtrar en vez de vacío."""
+    from core.inkcore.glyph_detectors.fusion import fuse
+    dets = {
+        "classic_cv": [_make_bbox(5, 5, 8, 12), _make_bbox(15, 5, 8, 12)],
+        # región neuronal en otra zona: ningún carácter cae dentro.
+        "easyocr": [_make_bbox(500, 500, 40, 20)],
+    }
+    result = fuse(dets, strategy="cascade", iou_threshold=0.5)
+    assert len(result) == 2  # fallback: no perdemos caracteres reales
+
+
 def test_fuse_cascade_multiline_same_column():
     """F8 — caso multi-línea: dos letras de líneas distintas comparten columna X.
 
