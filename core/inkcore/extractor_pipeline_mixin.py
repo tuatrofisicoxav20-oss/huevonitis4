@@ -38,10 +38,13 @@ class ExtractionPipelineMixin:
 
     def _run(self, path: str, ref_text: str, opts: "ExtractionOptions") -> list[GlyphEntry]:
         from core.inkcore.extractor import ExtractionOptions, _purge_temp_pngs
-        from core.inkcore.extractor_preprocess import imread_oriented
+        from core.inkcore.extractor_preprocess import imread_oriented, orient_by_content
         img = imread_oriented(path)  # F5 — respeta orientación EXIF de fotos de celular
         if img is None:
             return []
+        # Paso 2 (5ta tanda) — orientación por contenido/OSD o manual: WhatsApp borra
+        # el EXIF al rotar; esto endereza 90/180/270 ANTES del deskew fino.
+        img = orient_by_content(img, getattr(opts, "manual_orientation", None))
 
         img = self._apply_manual(img, opts)
         img = self._scale(img)

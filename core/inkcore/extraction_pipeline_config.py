@@ -31,6 +31,10 @@ class PipelineConfig:
     #   hasta validar con run_eval sobre ground-truth real cuál gana.
     char_alignment: Literal["positional", "dp"] = "positional"
 
+    # Quinta tanda Paso 2 — override manual de orientación (0/90/180/270); None =
+    # intentar OSD por contenido (requiere osd.traineddata).
+    manual_orientation: int | None = None
+
     min_quality: float = 0.18
     min_label_confidence: float = 0.0
     label_conf_weight: float = 0.3

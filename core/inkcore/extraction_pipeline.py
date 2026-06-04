@@ -122,10 +122,12 @@ class GlyphExtractionPipeline:
 
         # F5/F6 — respetar orientación EXIF también en el pipeline ensemble
         # (cv2.imread la ignora; fotos de celular entrarían acostadas).
-        from core.inkcore.extractor_preprocess import imread_oriented
+        from core.inkcore.extractor_preprocess import imread_oriented, orient_by_content
         img_bgr = imread_oriented(image_path)
         if img_bgr is None:
             return ExtractionResult(glyphs=[], stats={"error": f"no se pudo leer {image_path}"})
+        # Paso 2 (5ta tanda) — orientación por contenido/OSD o manual antes del deskew.
+        img_bgr = orient_by_content(img_bgr, self.config.manual_orientation)
 
         # 1. Preprocesar (reutiliza pipeline del GlyphExtractor)
         from core.inkcore.extractor import ExtractionOptions, GlyphExtractor

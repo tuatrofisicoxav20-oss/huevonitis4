@@ -91,6 +91,9 @@ class ExtractionOptions:
     # legacy queda como fallback automático si el pipeline falla o da 0 glifos.
     use_pipeline: bool = True
     pipeline_config: "object | None" = None
+    # Quinta tanda Paso 2 — override manual de orientación (0/90/180/270). Si es
+    # None, se intenta OSD por contenido (requiere osd.traineddata).
+    manual_orientation: "int | None" = None
 
 
 class BBox:
