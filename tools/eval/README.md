@@ -31,21 +31,33 @@ Las cajas predichas viven en ese espacio transformado. Por eso, al correr
 `run_eval` sobre una imagen, se emite `<nombre>.preprocessed.png`: **anotá el
 ground-truth sobre esa imagen**, no sobre la original. Si no, el IoU no cuadra.
 
-## Cómo llenar un dataset (mínimo 5 imágenes propias)
+## Cómo anotar tu dataset (mínimo 5 imágenes propias)
+
+Flujo recomendado: **foto → `bootstrap_gt.py` → corregir a mano → `run_eval`**.
 
 1. Poné tus fotos en `eval_dataset/` (`.png`/`.jpg`).
-2. Corré una vez:
+2. Sembrá el borrador semi-automático (baja la anotación de ~1 h a ~5 min):
    ```bash
-   python -m tools.eval.run_eval tools/eval/eval_dataset/mi_foto.png --label baseline
+   python -m tools.eval.bootstrap_gt tools/eval/eval_dataset/mi_foto.png \
+       --ref "el texto que escribiste"
    ```
    Esto genera:
-   - `mi_foto.preprocessed.png` → el espacio donde anotar.
-   - `mi_foto.pred.json` → las predicciones del extractor como **punto de
-     partida editable**.
-3. Corregí `mi_foto.pred.json` (char + box reales), renombralo a
-   `mi_foto.gt.json`.
-4. Volvé a correr; ahora las métricas (IoU, char-accuracy, precisión de Gold)
-   son reales.
+   - `mi_foto.preprocessed.png` → el espacio sobre el que anotás.
+   - `mi_foto.gt.json` → un **borrador editable** con las cajas + chars que el
+     extractor predijo (o `mi_foto.gt.json.draft` si ya existía un GT, para no
+     pisarlo).
+3. Abrí `mi_foto.preprocessed.png` en un visor y corregí `mi_foto.gt.json`:
+   arreglá los `char` mal asignados, ajustá las `box` mal puestas, borrá las
+   cajas basura y agregá las letras que faltaron. Borrá los campos `tier` y
+   `_nota`. (`bootstrap_gt.py` imprime estas instrucciones al final.)
+4. Medí; ahora IoU, char-accuracy y precisión de Gold son reales:
+   ```bash
+   python -m tools.eval.run_eval tools/eval/eval_dataset/*.png --label baseline
+   ```
+
+> Alternativa sin `bootstrap_gt`: `run_eval` sobre una imagen sin GT también
+> emite `mi_foto.preprocessed.png` y un `mi_foto.pred.json` editable; corregilo
+> y renombralo a `mi_foto.gt.json`.
 
 > Para que las métricas signifiquen algo, rellená `eval_dataset/*.gt.json` con
 > cajas reales de tus propias imágenes (**mínimo 5**). El `ejemplo_sintetico`
