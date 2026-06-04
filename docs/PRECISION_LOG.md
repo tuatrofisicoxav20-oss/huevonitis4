@@ -78,3 +78,22 @@ el default queda conservador (`GLYPH_DETECTORS_EXTRA=[]`).
 | base_classic | (pendiente GT) | | | | |
 | easyocr_cascade | (pendiente GT) | | | | |
 | easyocr_union | (pendiente GT) | | | | |
+
+### Observación SIN GT (señal parcial, no decisiva) — 2026-06-04
+
+Corrida real sobre 1 muestra del usuario (WhatsApp 8.09.28), sin `reference_text`,
+para validar la maquinaria end-to-end. **No mide exactitud** (Gold=0 en los tres
+porque sin referencia no hay verificación char==ref → el tier tapa en Silver):
+
+| caso | n_cajas | Gold | Silver | tiempo |
+|------|---------|------|--------|--------|
+| classic_cv solo | 39 | 0 | 35 | 115 s |
+| classic+easyocr cascade | **30** | 0 | 30 | **74 s** |
+| classic+easyocr union | 41 | 0 | 35 | 156 s |
+
+Lectura: cascade **redujo** las cajas 39→30 (la máscara de región filtró ~23%,
+coherente con descartar ruido de classic_cv fuera del texto) y fue ~2× más rápido
+que union; union **infló** a 41 (sumó cajas de palabra de easyocr). Esto confirma
+la *dirección* del diseño (cascade = filtro de ruido), pero si esas 9 cajas
+filtradas eran ruido o caracteres reales **solo lo dirá el GT anotado**. Por eso
+el default sigue conservador hasta medir gold-prec con `reference_text`.
