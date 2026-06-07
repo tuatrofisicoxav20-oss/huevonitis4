@@ -299,6 +299,196 @@ def _clean_cell(cell_gray: np.ndarray) -> np.ndarray | None:
     return keep[y0:y1, x0:x1]
 
 
+def _estimate_skew(gray: np.ndarray) -> float:
+    """Ángulo (grados) del skew leve de la foto, por líneas casi-horizontales.
+
+    Las fotos de plantilla suelen venir rotadas 0.3-1° (papel torcido). Ese tilt
+    rompe la morfología de líneas rectas y desalinea las columnas, así que lo
+    corregimos antes de detectar la grilla. Usa Hough sobre los bordes y toma la
+    mediana del ángulo de los segmentos casi horizontales.
+    """
+    edges = cv2.Canny(gray, 50, 150)
+    lines = cv2.HoughLinesP(
+        edges, 1, np.pi / 720, threshold=120,
+        minLineLength=gray.shape[1] // 4, maxLineGap=20,
+    )
+    if lines is None:
+        return 0.0
+    angs = []
+    for x1, y1, x2, y2 in lines[:, 0]:
+        a = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+        if abs(a) < 20:                 # casi horizontal
+            angs.append(a)
+    return float(np.median(angs)) if angs else 0.0
+
+
+def _deskew(gray: np.ndarray, angle: float) -> np.ndarray:
+    if abs(angle) < 0.05:
+        return gray
+    h, w = gray.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    return cv2.warpAffine(gray, m, (w, h), flags=cv2.INTER_LINEAR, borderValue=255)
+
+
+def _grid_content_bbox(gray: np.ndarray) -> tuple[int, int, int, int] | None:
+    """bbox de todo el contenido (tinta + líneas de grilla) por proyección.
+
+    Robusto a líneas tenues: no depende de detectarlas, sólo del extent del
+    contenido oscuro. Usa percentiles (no min/max) para ignorar motas de borde
+    del escáner. Devuelve (x0, y0, x1, y1) o None si no hay contenido.
+    """
+    binv = cv2.adaptiveThreshold(
+        cv2.GaussianBlur(gray, (3, 3), 0), 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 41, 10,
+    )
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(binv, connectivity=8)
+    clean = np.zeros_like(binv)
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_AREA] >= 25:    # descartar motas
+            clean[labels == i] = 255
+    ys, xs = np.where(clean > 0)
+    if len(xs) == 0:
+        return None
+    x0, x1 = np.percentile(xs, [0.3, 99.7])
+    y0, y1 = np.percentile(ys, [0.3, 99.7])
+    return int(x0), int(y0), int(x1), int(y1)
+
+
+def _strip_edge_lines(thr: np.ndarray, band: float = 0.20, frac: float = 0.45) -> np.ndarray:
+    """Borra bandas de línea (separadores de grilla) en el margen de la celda.
+
+    Tras el inset puede quedar el separador de fila/columna pegado a un borde de
+    la celda. Si una fila del 20% superior/inferior (o columna izq/der) está
+    rellena >45%, es una línea recta (no la letra, que vive centrada) → se borra.
+    Robusto a tilt leve, donde la morfología recta no alcanza.
+    """
+    h, w = thr.shape[:2]
+    out = thr.copy()
+    bh, bw = int(band * h), int(band * w)
+    rowfrac = (thr > 0).sum(axis=1) / max(1, w)
+    colfrac = (thr > 0).sum(axis=0) / max(1, h)
+    for y in list(range(0, bh)) + list(range(h - bh, h)):
+        if rowfrac[y] > frac:
+            out[y, :] = 0
+    for x in list(range(0, bw)) + list(range(w - bw, w)):
+        if colfrac[x] > frac:
+            out[:, x] = 0
+    return out
+
+
+def _clean_cell_grid(cell: np.ndarray) -> np.ndarray | None:
+    """Como `_clean_cell` pero quita líneas de grilla (morfología + bandas de borde).
+
+    Pensado para la ruta SIN fiduciales, donde la celda se recorta de la foto
+    cruda y puede arrastrar trozos de los separadores de la grilla.
+    """
+    if cell.size == 0:
+        return None
+    thr = cv2.adaptiveThreshold(
+        cv2.GaussianBlur(cell, (3, 3), 0), 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 12,
+    )
+    h, w = thr.shape[:2]
+    # Líneas largas rectas (≥55% del lado): la letra no tiene runs así de largos.
+    hk = cv2.getStructuringElement(cv2.MORPH_RECT, (max(8, int(0.55 * w)), 1))
+    vk = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(8, int(0.55 * h))))
+    lines = cv2.bitwise_or(
+        cv2.morphologyEx(thr, cv2.MORPH_OPEN, hk),
+        cv2.morphologyEx(thr, cv2.MORPH_OPEN, vk),
+    )
+    lines = cv2.dilate(lines, np.ones((3, 3), np.uint8))
+    thr = cv2.subtract(thr, lines)
+    thr = _strip_edge_lines(thr)
+    # Recerrar pequeños gaps que dejó el borrado de líneas dentro de la letra.
+    thr = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(thr, connectivity=8)
+    keep = np.zeros_like(thr)
+    ink = 0
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        if area < max(6, h * w * 0.0008):
+            continue
+        touches = (x <= 1 or y <= 1 or x + bw >= w - 1 or y + bh >= h - 1)
+        if touches and (bw > 0.85 * w or bh > 0.85 * h):
+            continue
+        keep[labels == i] = 255
+        ink += int(area)
+    if ink < h * w * 0.004:
+        return None
+    ys, xs = np.where(keep > 0)
+    if len(xs) == 0:
+        return None
+    pad = 6
+    return keep[max(0, ys.min() - pad):ys.max() + 1 + pad,
+                max(0, xs.min() - pad):xs.max() + 1 + pad]
+
+
+def _extract_grid(gray, lay, clf, char_to_label):
+    """Extracción para plantillas SIN fiduciales: detecta la grilla en la foto.
+
+    En vez de asumir la geometría canónica (que sólo vale si rectificamos por los
+    4 marcadores), deskewa la foto, halla el bbox del contenido y divide en
+    lay.cols × lay.rows celdas uniformes, limpiando líneas de grilla por celda.
+    Esto evita lo que rompía la ruta vieja (un simple resize desalineaba las
+    casillas → recortes sobre líneas y letras partidas). Mismo formato de salida
+    que extract_from_template: lista de (letra, glifo_RGBA, score).
+    """
+    from core.inkcore.extractor_glyph_ops import assess_quality, to_rgba_smooth
+
+    ang = _estimate_skew(gray)
+    gray = _deskew(gray, ang)
+    # Si la foto vino apaisada (más ancha que alta) pero la grilla es vertical
+    # (cols<rows), enderezar 90°: la grilla canónica es más alta que ancha.
+    bb = _grid_content_bbox(gray)
+    if bb is None:
+        logger.warning("_extract_grid: sin contenido detectable")
+        return []
+    gx0, gy0, gx1, gy1 = bb
+    if (gx1 - gx0) > (gy1 - gy0) and lay.cols < lay.rows:
+        gray = _rotate_cw(gray, 90)
+        bb = _grid_content_bbox(gray)
+        if bb is None:
+            return []
+        gx0, gy0, gx1, gy1 = bb
+    n_cols, n_rows = lay.cols, lay.rows
+    xs = np.linspace(gx0, gx1, n_cols + 1)
+    ys = np.linspace(gy0, gy1, n_rows + 1)
+    inset = 0.13
+    logger.info("_extract_grid: skew=%.2f° grilla %dx%d bbox=%s", ang, n_cols, n_rows, bb)
+
+    results: list[tuple[str, Image.Image, float]] = []
+    for r in range(n_rows):
+        for c in range(n_cols):
+            i = r * n_cols + c
+            ch = lay.cell_letter(i)
+            if ch is None:
+                continue
+            x0, x1 = xs[c], xs[c + 1]
+            y0, y1 = ys[r], ys[r + 1]
+            cw, chh = x1 - x0, y1 - y0
+            ix0, ix1 = int(x0 + inset * cw), int(x1 - inset * cw)
+            iy0, iy1 = int(y0 + inset * chh), int(y1 - inset * chh)
+            mask = _clean_cell_grid(gray[iy0:iy1, ix0:ix1])
+            if mask is None:
+                continue
+            glyph = to_rgba_smooth(mask)
+            try:
+                q = assess_quality(glyph)
+                score = float(q.get("quality_score", q.get("score", 0.5)))
+            except Exception:
+                score = 0.5
+            if clf is not None and char_to_label is not None and char_to_label(ch) is not None:
+                try:
+                    cnn = clf.score(mask, ch)
+                    if cnn is not None and cnn < 0.12:
+                        score = min(score, 0.45)
+                except Exception:
+                    pass
+            results.append((ch, glyph, score))
+    logger.info("_extract_grid: %d casillas con tinta", len(results))
+    return results
+
+
 def extract_from_template(
     image_path: str, layout: TemplateLayout | None = None, *, pre_rotate: int = 0,
 ) -> list[tuple[str, Image.Image, float]]:
@@ -329,7 +519,6 @@ def extract_from_template(
     if pre_rotate % 360:
         bgr = _rotate_cw(bgr, pre_rotate)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    canon = _rectify(gray, lay)
 
     # Clasificador opcional: la casilla↔letra ya es correcta por construcción,
     # pero el CNN marca como dudosa la casilla donde se escribió OTRA letra (error
@@ -345,6 +534,15 @@ def extract_from_template(
                 clf = _c
     except Exception as _exc:
         logger.info("extract_from_template: CNN no disponible (%s)", _exc)
+
+    # Bifurcación CON / SIN fiduciales. Con marcadores: rectificación por
+    # perspectiva exacta y geometría canónica (writing_rect). Sin marcadores
+    # (grilla pelada, foto de celular): la canónica fallaba porque _rectify caía
+    # a un resize que NO alinea las casillas → recortes sobre líneas y letras
+    # partidas. En ese caso detectamos la grilla real en la foto (_extract_grid).
+    if _detect_fiducials(gray, lay) is None:
+        return _extract_grid(gray, lay, clf, char_to_label)
+    canon = _rectify(gray, lay)
 
     results: list[tuple[str, Image.Image, float]] = []
     n_labeled = min(lay.n_cells, len(lay.letters) * lay.repeats)
