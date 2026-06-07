@@ -4,6 +4,14 @@ Se separa de renderer.py para mantener cada módulo bajo ~420 líneas. El
 HandwritingRenderer hereda de BackgroundMixin. Los dicts BACKGROUND_STYLES y
 STYLE_PRESETS se re-exportan desde renderer.py para no romper imports previos.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
+
+    from core.inkcore.renderer import RenderOptions
 
 try:
     from PIL import ImageDraw
@@ -47,7 +55,7 @@ STYLE_PRESETS: dict[str, dict] = {
 class BackgroundMixin:
     """Aplica el estilo de fondo a las opciones y dibuja sus decoraciones."""
 
-    def _apply_background_style(self, options) -> "RenderOptions":
+    def _apply_background_style(self, options) -> RenderOptions:
         """Aplica el estilo de fondo (libreta, cuadrícula, etc.) a las opciones."""
         style_def = BACKGROUND_STYLES.get(options.background_style)
         if style_def is None:
@@ -62,7 +70,7 @@ class BackgroundMixin:
 
     def _draw_background_decorations(
         self,
-        canvas: "Image.Image",
+        canvas: Image.Image,
         options,
         line_height_px: int,
         canvas_h: int,

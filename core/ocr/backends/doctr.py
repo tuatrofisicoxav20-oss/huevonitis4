@@ -15,7 +15,7 @@ try:
 except ImportError:
     _DOCTR_OK = False
 
-from core.ocr.base import OCRBackend
+from core.ocr.base import OCRBackend  # noqa: E402
 
 
 class DoctrBackend(OCRBackend):

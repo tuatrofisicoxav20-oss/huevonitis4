@@ -18,7 +18,7 @@ try:
 except ImportError:
     _NP_OK = False
 
-from core.inkcore.glyph_detectors.base import GlyphDetector
+from core.inkcore.glyph_detectors.base import GlyphDetector  # noqa: E402
 
 
 def _paddle_kwargs(lang: str = "es") -> dict:

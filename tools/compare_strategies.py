@@ -52,7 +52,7 @@ def main():
     elif args.strategies and args.strategies != "segmentation":
         from tools.cs_ensemble import run_ensemble_comparison
         strats = [s.strip() for s in args.strategies.split(",") if s.strip()]
-        labelers = [l.strip() for l in args.labelers.split(",") if l.strip()]
+        labelers = [s.strip() for s in args.labelers.split(",") if s.strip()]
         run_ensemble_comparison(args.image, strats, labelers, args.output)
     else:
         from tools.cs_segmentation import run_comparison

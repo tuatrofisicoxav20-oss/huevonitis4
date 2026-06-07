@@ -97,9 +97,12 @@ class DocumentIngestion:
             pass
 
         # Guardar en caché si no fue cancelado
-        if self._cache and self._options.use_cache:
-            if cancel_event is None or not cancel_event.is_set():
-                self._cache.put(str(path), doc, _backend_name, _opts_sig)
+        if (
+            self._cache
+            and self._options.use_cache
+            and (cancel_event is None or not cancel_event.is_set())
+        ):
+            self._cache.put(str(path), doc, _backend_name, _opts_sig)
 
         return doc
 

@@ -1,8 +1,14 @@
 """
 Interfaz base para detectores de glifos a nivel de carácter.
 """
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +20,7 @@ class GlyphDetector(ABC):
     available: bool = False
 
     @abstractmethod
-    def detect(self, image_bgr: "np.ndarray") -> list:
+    def detect(self, image_bgr: np.ndarray) -> list:
         """
         Detecta caracteres en una imagen BGR.
 

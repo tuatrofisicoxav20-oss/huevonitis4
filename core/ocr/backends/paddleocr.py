@@ -13,7 +13,7 @@ try:
 except ImportError:
     _PADDLE_OK = False
 
-from core.ocr.base import OCRBackend
+from core.ocr.base import OCRBackend  # noqa: E402
 
 
 def _paddle_kwargs(lang: str = "es") -> dict:

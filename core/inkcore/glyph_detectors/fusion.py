@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.inkcore.extractor import BBox
 
 logger = logging.getLogger(__name__)
 

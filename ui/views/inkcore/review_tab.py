@@ -2,6 +2,7 @@
 import logging
 import time
 from tkinter import filedialog
+from typing import ClassVar
 
 import customtkinter as ctk
 
@@ -158,7 +159,7 @@ class ReviewTabMixin:
         diagnostics.log_timing("refresh_review_ui", elapsed_ms)
         diagnostics.log_event("ui", "refresh_review", f"{len(ordered)} glifos")
 
-    _PROMOTE_NEXT = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Gold"}
+    _PROMOTE_NEXT: ClassVar[dict] = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Gold"}
 
     def _review_promote(self, glyph):
         """Sube el glifo un nivel de tier (Bronze→Silver→Gold) sin degradarlo.

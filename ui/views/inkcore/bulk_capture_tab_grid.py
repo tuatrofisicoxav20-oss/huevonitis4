@@ -9,6 +9,8 @@ Depende de:
   • self._bulk_update_stats() (en tab principal)
   • self._get_thumb (en main_view)
 """
+from typing import ClassVar
+
 import customtkinter as ctk
 
 from ui import theme
@@ -23,17 +25,17 @@ except ImportError:
 class BulkCaptureGridMixin:
     """Render del grid de candidatos + interacción teclado/mouse."""
 
-    DECISION_BG = {
+    DECISION_BG: ClassVar[dict] = {
         "pending":  theme.BG_TERTIARY,
         "approved": "#1A3A1A",
         "rejected": "#3A1A1A",
     }
-    DECISION_BORDER = {
+    DECISION_BORDER: ClassVar[dict] = {
         "pending":  theme.BORDER,
         "approved": theme.ACCENT_GREEN,
         "rejected": theme.ACCENT_RED,
     }
-    DECISION_ICON = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
+    DECISION_ICON: ClassVar[dict] = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
     GRID_COLS = 7
 
     def _bulk_render_grid(self):

@@ -14,7 +14,7 @@ except ImportError:
     CV2_OK = False
 
 try:
-    from PIL import Image
+    from PIL import Image  # noqa: F401
     PIL_OK = True
 except ImportError:
     PIL_OK = False

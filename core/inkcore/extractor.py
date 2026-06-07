@@ -112,7 +112,7 @@ except ImportError:
     PIL_OK = False
 
 try:
-    import pytesseract
+    import pytesseract  # noqa: F401
     TESSERACT_OK = True
 except ImportError:
     TESSERACT_OK = False
@@ -172,8 +172,8 @@ _BBox = BBox  # backward compat alias
 # ── Orquestación de alineación + pipeline (mixins separados) ───────
 # El hash perceptual (extractor_hashing) lo consume directamente el
 # ExtractionPipelineMixin; ya no se re-exporta desde aquí.
-from core.inkcore.extractor_align_mixin import AlignmentMixin
-from core.inkcore.extractor_pipeline_mixin import ExtractionPipelineMixin
+from core.inkcore.extractor_align_mixin import AlignmentMixin  # noqa: E402
+from core.inkcore.extractor_pipeline_mixin import ExtractionPipelineMixin  # noqa: E402
 
 
 # ── Extractor principal ────────────────────────────────────────────

@@ -4,7 +4,7 @@ import pytest
 
 cv2 = pytest.importorskip("cv2")
 
-from core.inkcore import binarization as B
+from core.inkcore import binarization as B  # noqa: E402
 
 
 def _mask_with_squares(n, size=20, gap=15, h=120):

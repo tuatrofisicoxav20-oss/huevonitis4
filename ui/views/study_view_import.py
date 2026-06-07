@@ -13,6 +13,7 @@ de preview, usados exclusivamente por el flujo de importación.
 import threading
 from pathlib import Path
 from tkinter import filedialog
+from typing import ClassVar
 
 import customtkinter as ctk
 
@@ -109,7 +110,7 @@ def _quick_analyze(path: str, backend_name: str) -> dict:
 class _ImportPreviewDialog(ctk.CTkToplevel):
     """Diálogo modal con info rápida del documento antes de procesar."""
 
-    _BLOCK_COLORS = {
+    _BLOCK_COLORS: ClassVar[dict] = {
         "text_pdf": "#2d6a4f",
         "scan_pdf": "#7b4f00",
         "mixed_pdf": "#5a4a00",

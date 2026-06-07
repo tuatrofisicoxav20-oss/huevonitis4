@@ -19,9 +19,9 @@ try:
 except ImportError:
     _CV2_OK = False
 
-import contextlib
+import contextlib  # noqa: E402
 
-from core.ocr.base import OCRBackend
+from core.ocr.base import OCRBackend  # noqa: E402
 
 
 class TesseractBackend(OCRBackend):

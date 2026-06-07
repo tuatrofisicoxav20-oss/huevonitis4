@@ -62,16 +62,21 @@ def test_basura_clara_no_es_gold():
     # mota diminuta
     a = Image.new("L", (60, 60), 0)
     ImageDraw.Draw(a).ellipse((27, 27, 33, 33), fill=255)
-    mota = Image.new("RGBA", a.size, (255, 255, 255, 0)); mota.putalpha(a)
-    pm = tempfile.mktemp(suffix=".png"); mota.save(pm)
+    mota = Image.new("RGBA", a.size, (255, 255, 255, 0))
+    mota.putalpha(a)
+    pm = tempfile.mktemp(suffix=".png")
+    mota.save(pm)
     assert assess_glyph(pm)["tier"] != "Gold"
     # ruido disperso
-    a2 = Image.new("L", (60, 60), 0); d = ImageDraw.Draw(a2)
+    a2 = Image.new("L", (60, 60), 0)
+    d = ImageDraw.Draw(a2)
     random.seed(1)
     for _ in range(40):
         d.point((random.randint(0, 59), random.randint(0, 59)), fill=255)
-    ruido = Image.new("RGBA", a2.size, (255, 255, 255, 0)); ruido.putalpha(a2)
-    pr = tempfile.mktemp(suffix=".png"); ruido.save(pr)
+    ruido = Image.new("RGBA", a2.size, (255, 255, 255, 0))
+    ruido.putalpha(a2)
+    pr = tempfile.mktemp(suffix=".png")
+    ruido.save(pr)
     assert assess_glyph(pr)["tier"] != "Gold"
 
 

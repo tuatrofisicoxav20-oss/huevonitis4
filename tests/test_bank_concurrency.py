@@ -75,7 +75,9 @@ def test_lecturas_concurrentes_con_escrituras_no_rompen(tmp_path):
         while not stop.is_set():
             a = np.zeros((40, 30), np.uint8)
             a[2 + (i % 5):38, 5:25] = 255   # forma variable → no se deduplica
-            rgba = np.zeros((40, 30, 4), np.uint8); rgba[..., :3] = 255; rgba[..., 3] = a
+            rgba = np.zeros((40, 30, 4), np.uint8)
+            rgba[..., :3] = 255
+            rgba[..., 3] = a
             pth = tmp_path / f"w_{i}.png"
             Image.fromarray(rgba).save(pth)
             try:

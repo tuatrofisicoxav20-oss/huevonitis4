@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import config as _config
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +45,7 @@ def _generate_debug_overlay(
         cv2.putText(overlay, label, (fb.x, max(10, fb.y - 3)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
 
-    for fb, _, char, conf in discarded:
+    for fb, _, _char, _conf in discarded:
         cv2.rectangle(overlay, (fb.x, fb.y), (fb.x + fb.w, fb.y + fb.h),
                       (0, 0, 200), 1)
 

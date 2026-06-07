@@ -32,7 +32,7 @@ try:
 except ImportError:  # pragma: no cover
     _OK = False
 
-from core.inkcore.ai.char_cnn import char_to_label
+from core.inkcore.ai.char_cnn import char_to_label  # noqa: E402
 
 
 def _candidate_cuts(vpp_s, x_min: int, x_max: int, n: int, char_w_avg: float) -> list[int]:

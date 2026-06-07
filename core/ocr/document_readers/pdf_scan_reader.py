@@ -137,7 +137,8 @@ def read_pdf_scan(
                     progress_lock = threading.Lock()
                     page_results: list[DocumentPage] = [None] * len(saved_pages)
 
-                    def _ocr_one(idx_page):
+                    def _ocr_one(idx_page, page_results=page_results,
+                                 progress_lock=progress_lock):
                         idx, (real_page_1b, img_path_str) = idx_page
                         if cancel_event and cancel_event.is_set():
                             return

@@ -187,7 +187,7 @@ class NoteReplicator:
             })
 
         blocks: list[Block] = []
-        for key, words in lines.items():
+        for _key, words in lines.items():
             if not words:
                 continue
             text = " ".join(w["text"] for w in words)
@@ -311,10 +311,9 @@ class NoteReplicator:
 def _box_inside_any(x: int, y: int, w: int, h: int, rects: list) -> bool:
     cx, cy = x + w // 2, y + h // 2
     for (rx, ry, rw, rh) in rects:
-        if rx <= cx <= rx + rw and ry <= cy <= ry + rh:
-            # Excluir solo si el rect es mucho más grande (no es la propia palabra)
-            if rw * rh > w * h * 3:
-                return True
+        # Excluir solo si el rect es mucho más grande (no es la propia palabra)
+        if rx <= cx <= rx + rw and ry <= cy <= ry + rh and rw * rh > w * h * 3:
+            return True
     return False
 
 

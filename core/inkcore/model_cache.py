@@ -10,7 +10,7 @@ import gc
 import logging
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ModelCache:
     """Caché global de modelos pesados (singleton de clase, sin instanciar)."""
 
-    _models: dict[str, Any] = {}
+    _models: ClassVar[dict[str, Any]] = {}
     # F9 — locking POR CLAVE. El lock global anterior congelaba la app durante la
     # primera carga de TrOCR (~400MB): cualquier hilo que pidiera CUALQUIER otro
     # modelo (p.ej. Tesseract) quedaba bloqueado, anulando el diseño de extraer en
@@ -26,7 +26,7 @@ class ModelCache:
     # bloquea a quien pide otro modelo. `_registry_lock` solo protege la creación
     # de los locks por clave y las mutaciones estructurales de _models (evict/clear);
     # se toma brevísimamente, nunca durante un loader().
-    _locks: dict[str, threading.Lock] = {}
+    _locks: ClassVar[dict[str, threading.Lock]] = {}
     _registry_lock = threading.Lock()
 
     @classmethod

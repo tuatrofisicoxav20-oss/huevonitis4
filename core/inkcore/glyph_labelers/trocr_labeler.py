@@ -2,9 +2,15 @@
 Etiquetador usando Microsoft TrOCR (microsoft/trocr-base-handwritten). Opcional.
 Requiere transformers + torch. Descarga ~400 MB en primera ejecución.
 """
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import config
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +28,7 @@ try:
 except ImportError:
     _TORCH_OK = False
 
-from core.inkcore.glyph_labelers.base import GlyphLabeler
+from core.inkcore.glyph_labelers.base import GlyphLabeler  # noqa: E402
 
 _DEFAULT_MODEL = "microsoft/trocr-base-handwritten"
 
@@ -70,7 +76,7 @@ class TrOCRLabeler(GlyphLabeler):
         )
 
     @staticmethod
-    def _to_rgb(img: "Image.Image") -> "Image.Image":
+    def _to_rgb(img: Image.Image) -> Image.Image:
         if img.mode == "RGB":
             return img
         from PIL import Image as _PILImage
@@ -107,7 +113,7 @@ class TrOCRLabeler(GlyphLabeler):
 
         return text or "?", conf
 
-    def label(self, glyph_image: "Image.Image") -> tuple[str, float]:
+    def label(self, glyph_image: Image.Image) -> tuple[str, float]:
         if not _TRANSFORMERS_OK or not _TORCH_OK:
             return ("?", 0.0)
         try:

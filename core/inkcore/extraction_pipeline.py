@@ -70,11 +70,11 @@ class GlyphExtractionPipeline:
                     "los glifos saldrán sin clasificar."
                 )
         for name in names:
-            l = glyph_labelers.get_labeler(name)
-            if l.available:
-                self.labelers.append(l)
+            labeler = glyph_labelers.get_labeler(name)
+            if labeler.available:
+                self.labelers.append(labeler)
             else:
-                logger.warning("Labeler '%s' no disponible: %s", name, l.install_hint())
+                logger.warning("Labeler '%s' no disponible: %s", name, labeler.install_hint())
 
     def _build_expected_map(self, valid_fused, ref_chars, med_h, box_votes) -> dict:
         """Salto 3 — mapa {idx_caja: carácter esperado de la referencia}.
@@ -115,7 +115,7 @@ class GlyphExtractionPipeline:
         stats: dict = {}
 
         try:
-            import cv2
+            import cv2  # noqa: F401
             import numpy as np
         except ImportError:
             return ExtractionResult(glyphs=[], stats={"error": "cv2 no disponible"})

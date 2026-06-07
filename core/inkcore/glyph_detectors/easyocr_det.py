@@ -26,7 +26,7 @@ except ImportError:
 # ocurre lazy en _get_reader, sólo si el detector se activa de verdad.
 _EASY_OK = importlib.util.find_spec("easyocr") is not None
 
-from core.inkcore.glyph_detectors.base import GlyphDetector
+from core.inkcore.glyph_detectors.base import GlyphDetector  # noqa: E402
 
 
 class EasyOCRDetector(GlyphDetector):

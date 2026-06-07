@@ -12,7 +12,7 @@ try:
 except ImportError:
     _CV2_OK = False
 
-from core.inkcore.glyph_detectors.base import GlyphDetector
+from core.inkcore.glyph_detectors.base import GlyphDetector  # noqa: E402
 
 _MIN_COMP_AREA = 10
 _MIN_CHAR_W = 2

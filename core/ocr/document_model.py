@@ -6,10 +6,10 @@ Jerarquía: TextBlock → DocumentPage → Document
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class BlockType(str, Enum):
+class BlockType(StrEnum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     LIST_ITEM = "list_item"

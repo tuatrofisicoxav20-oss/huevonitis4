@@ -13,8 +13,8 @@ from ui.views.base_view import BaseView
 logger = logging.getLogger(__name__)
 
 
-from ui.views.settings_view_cache import SettingsCacheMixin
-from ui.views.settings_view_diagnostics import SettingsDiagnosticsMixin
+from ui.views.settings_view_cache import SettingsCacheMixin  # noqa: E402
+from ui.views.settings_view_diagnostics import SettingsDiagnosticsMixin  # noqa: E402
 
 
 class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):

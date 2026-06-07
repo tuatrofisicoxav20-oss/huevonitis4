@@ -10,7 +10,7 @@ from ui import theme
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import ImageTk
+    from PIL import ImageTk  # noqa: F401 (chequeo)
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False

@@ -135,7 +135,7 @@ class PipelinePanelMixin:
                                button_hover_color=theme.ACCENT_ORANGE_HOVER)
             sl.set(default)
             sl.grid(row=row, column=1, sticky="ew", padx=4)
-            sl.configure(command=lambda v, l=lbl: l.configure(text=f"{float(v):.2f}"))
+            sl.configure(command=lambda v, label=lbl: label.configure(text=f"{float(v):.2f}"))
             return sl
 
         self._min_quality_slider = _make_mini_slider(0, "Min quality:", 0.0, 1.0, 0.18, 100)

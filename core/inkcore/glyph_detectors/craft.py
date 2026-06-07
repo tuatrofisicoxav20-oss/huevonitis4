@@ -23,9 +23,9 @@ try:
 except ImportError:
     _CV2_OK = False
 
-import contextlib
+import contextlib  # noqa: E402
 
-from core.inkcore.glyph_detectors.base import GlyphDetector
+from core.inkcore.glyph_detectors.base import GlyphDetector  # noqa: E402
 
 
 class CRAFTDetector(GlyphDetector):

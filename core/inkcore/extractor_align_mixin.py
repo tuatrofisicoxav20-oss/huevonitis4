@@ -10,7 +10,13 @@ archivos por debajo de ~420 líneas. Agrupa el método maestro `_align_pos`
 GlyphExtractor hereda de esta clase. `BBox` se importa de forma diferida dentro
 de los métodos para evitar el import circular con extractor.py.
 """
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.inkcore.extractor import BBox
 
 try:
     import cv2
@@ -64,9 +70,9 @@ class AlignmentMixin:
         self,
         words: list[str],
         word_bounds: list[int],
-        line_mask: "np.ndarray",
+        line_mask: np.ndarray,
         line_h: float,
-    ) -> list[tuple["BBox", str, float]]:
+    ) -> list[tuple[BBox, str, float]]:
         """Segmenta cada palabra de forma independiente usando los bounds dados."""
         from core.inkcore.extractor import BBox
         h, w = line_mask.shape[:2]
@@ -103,8 +109,8 @@ class AlignmentMixin:
     # ── Helpers de combinación de estrategias (gap-segment vs CNN) ──────
 
     def _bounds_to_result(
-        self, line_mask: "np.ndarray", chars: list[str], bounds: list[int],
-    ) -> list[tuple["BBox", str, float]]:
+        self, line_mask: np.ndarray, chars: list[str], bounds: list[int],
+    ) -> list[tuple[BBox, str, float]]:
         """Convierte n+1 fronteras en la lista (BBox, char, align_score)."""
         from core.inkcore.extractor import BBox
         h, w = line_mask.shape[:2]
@@ -119,7 +125,7 @@ class AlignmentMixin:
         return result
 
     def _count_consistent(
-        self, line_mask: "np.ndarray", chars: list[str], bounds: list[int], line_m,
+        self, line_mask: np.ndarray, chars: list[str], bounds: list[int], line_m,
     ) -> int:
         """Cuántas letras quedarían estructuralmente consistentes con estos cortes.
 
@@ -148,9 +154,9 @@ class AlignmentMixin:
         return cnt
 
     def _align_pos(
-        self, boxes: list["BBox"], text: str, line_h: float = 30.0,
-        line_mask: "np.ndarray | None" = None,
-    ) -> list[tuple["BBox", str, float]]:
+        self, boxes: list[BBox], text: str, line_h: float = 30.0,
+        line_mask: np.ndarray | None = None,
+    ) -> list[tuple[BBox, str, float]]:
         """Pipeline de alineación mejorado: hybrid_v2 primario + 3-etapas como fallback.
 
         Etapa 1 — hybrid_v2 (InkFlow + búsqueda de mínimo absoluto + verificación CC)

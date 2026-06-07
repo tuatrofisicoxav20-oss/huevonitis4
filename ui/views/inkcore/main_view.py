@@ -12,6 +12,10 @@ Sus helpers propios viven en sub-mixins separados:
   InkCoreViewHelpersMixin → main_view_helpers.py (thumbs, on_show, tabs, texto)
   InkCoreViewProfileMixin → main_view_profile.py (barra de perfiles v4.2)
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import customtkinter as ctk
 
 from core.inkcore.pipeline import InkCorePipeline
@@ -34,6 +38,9 @@ from ui.views.inkcore.review_tab import ReviewTabMixin
 from ui.views.inkcore.review_tab_row import ReviewTabRowMixin
 from ui.views.inkcore.template_tab import TemplateTabMixin
 from ui.views.inkcore.writer_tab import WriterTabMixin
+
+if TYPE_CHECKING:
+    from PIL import ImageTk
 
 
 class InkCoreView(

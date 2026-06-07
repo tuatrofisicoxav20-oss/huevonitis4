@@ -10,11 +10,17 @@ GlyphExtractor hereda de esta clase. Los símbolos definidos en extractor.py
 (`BBox`, `ExtractionOptions`, `CHAR_PAD`, `_purge_temp_pngs`) se importan de forma
 diferida dentro de los métodos para evitar el import circular con extractor.py.
 """
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import config
+
+if TYPE_CHECKING:
+    from core.inkcore.extractor import BBox, ExtractionOptions
 from core.inkcore.extractor_hashing import (
     dual_dist as _dual_dist,
 )
@@ -38,7 +44,7 @@ class ExtractionPipelineMixin:
 
     # ── Pipeline principal ─────────────────────────────────────────
 
-    def _run(self, path: str, ref_text: str, opts: "ExtractionOptions") -> list[GlyphEntry]:
+    def _run(self, path: str, ref_text: str, opts: ExtractionOptions) -> list[GlyphEntry]:
         from core.inkcore.extractor import ExtractionOptions, _purge_temp_pngs
         from core.inkcore.extractor_preprocess import imread_oriented, orient_by_content
         img = imread_oriented(path)  # F5 — respeta orientación EXIF de fotos de celular
@@ -121,7 +127,7 @@ class ExtractionPipelineMixin:
         cleaned = re.sub(r'  +', ' ', cleaned)
         return cleaned.strip()
 
-    def _prepare_ref_lines(self, ref_text: str, line_boxes: list["BBox"]) -> list[str]:
+    def _prepare_ref_lines(self, ref_text: str, line_boxes: list[BBox]) -> list[str]:
         """Limpia el texto de referencia y lo divide entre los renglones detectados."""
         # Limpiar separadores en cada línea del texto
         raw_lines = [self._clean_ref(ln) for ln in ref_text.splitlines()]
@@ -158,11 +164,11 @@ class ExtractionPipelineMixin:
 
     def _extract_pass(
         self,
-        clean: "np.ndarray",
-        line_boxes: list["BBox"],
+        clean: np.ndarray,
+        line_boxes: list[BBox],
         ref_lines: list[str],
         median_line_h: float,
-        opts: "ExtractionOptions",
+        opts: ExtractionOptions,
         temp_dir: Path,
     ) -> list[GlyphEntry]:
         """Pasada de extracción sobre una máscara y bandas dadas."""

@@ -1,7 +1,13 @@
 """
 Etiquetador de glifos usando Tesseract (PSM 10 — carácter único).
 """
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +17,7 @@ try:
 except ImportError:
     _TESSERACT_OK = False
 
-from core.inkcore.glyph_labelers.base import GlyphLabeler
+from core.inkcore.glyph_labelers.base import GlyphLabeler  # noqa: E402
 
 
 class TesseractLabeler(GlyphLabeler):
@@ -20,7 +26,7 @@ class TesseractLabeler(GlyphLabeler):
     name = "tesseract_labeler"
     available = _TESSERACT_OK
 
-    def label(self, glyph_image: "Image.Image") -> tuple[str, float]:
+    def label(self, glyph_image: Image.Image) -> tuple[str, float]:
         if not _TESSERACT_OK:
             return ("?", 0.0)
         from core.ocr._tesseract_setup import apply_tesseract_cmd

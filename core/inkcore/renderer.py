@@ -13,7 +13,7 @@ from core.inkcore.renderer_glyph import GlyphLoadMixin
 logger = logging.getLogger(__name__)
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image
     PIL_OK = True
 except ImportError:
     PIL_OK = False

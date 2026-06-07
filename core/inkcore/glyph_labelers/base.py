@@ -1,8 +1,14 @@
 """
 Interfaz base para etiquetadores de glifos.
 """
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +23,7 @@ class GlyphLabeler(ABC):
     available: bool = False
 
     @abstractmethod
-    def label(self, glyph_image: "Image.Image") -> tuple[str, float]:
+    def label(self, glyph_image: Image.Image) -> tuple[str, float]:
         """Devuelve (texto_completo_predicho, confianza_0_a_1)."""
         ...
 
