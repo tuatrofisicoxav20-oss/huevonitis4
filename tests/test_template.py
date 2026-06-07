@@ -266,3 +266,45 @@ def test_extract_auto_apaisada_orden_correcto(tmp_path):
 
     assert auto == ref, f"orden tras autorrotación distinto:\n  ref ={ref}\n  auto={auto}"
     assert len(auto) >= 25, f"sólo {len(auto)} casillas tras autorrotar"
+
+
+class _FakeCNN:
+    """Clasificador falso disponible — el scorer real se monkeypatchea aparte."""
+    available = True
+
+
+def _patch_cnn_scores(monkeypatch, scores_por_angulo):
+    """Hace que el fallback CNN use scores fijos por ángulo (0,90,180,270)."""
+    from core.inkcore import template_extract as te
+    monkeypatch.setattr(
+        "core.inkcore.ai.char_cnn.EMNISTCharClassifier", _FakeCNN, raising=False,
+    )
+    seq = iter([scores_por_angulo[a] for a in (0, 90, 180, 270)])
+    monkeypatch.setattr(te, "_rotation_cnn_score", lambda *a, **k: next(seq))
+
+
+def test_rotacion_por_cnn_elige_ganador_claro(monkeypatch):
+    """Sin fiduciales, el fallback CNN elige el ángulo con acuerdo dominante."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_rotation_by_cnn
+    _patch_cnn_scores(monkeypatch, {0: 0.05, 90: 0.40, 180: 0.08, 270: 0.04})
+    assert _detect_rotation_by_cnn(np.zeros((10, 10), np.uint8), None) == 90
+
+
+def test_rotacion_por_cnn_ambiguo_devuelve_none(monkeypatch):
+    """Sin margen claro (todos parecidos) no rota: devuelve None → caller default 0."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_rotation_by_cnn
+    _patch_cnn_scores(monkeypatch, {0: 0.20, 90: 0.20, 180: 0.19, 270: 0.18})
+    assert _detect_rotation_by_cnn(np.zeros((10, 10), np.uint8), None) is None
+
+
+def test_rotacion_por_cnn_margen_insuficiente_devuelve_none(monkeypatch):
+    """El mejor supera el piso pero no duplica al segundo → None (no arriesga)."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_rotation_by_cnn
+    _patch_cnn_scores(monkeypatch, {0: 0.12, 90: 0.10, 180: 0.05, 270: 0.04})
+    assert _detect_rotation_by_cnn(np.zeros((10, 10), np.uint8), None) is None

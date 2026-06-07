@@ -126,9 +126,14 @@ def detect_template_rotation(image_path: str, layout: TemplateLayout | None = No
     candidata y se elige la que (a) detecta los 4 marcadores de esquina, (b) deja
     la hoja vertical (alto>ancho, la forma canónica de TemplateLayout) y (c)
     coloca el título arriba (ver `_title_band_signal`, que desempata 90 vs 270 y
-    0 vs 180). Si ninguna rotación detecta los 4 marcadores se devuelve 0 con un
-    warning: la grilla podría quedar mal etiquetada y el usuario lo verá al
-    revisar.
+    0 vs 180).
+
+    Si NINGUNA rotación detecta los marcadores (plantilla sin fiduciales: una
+    grilla pelada, foto recortada al ras…) cae a un fallback por CNN: extrae las
+    casillas en cada rotación y se queda con la que maximiza el acuerdo del
+    clasificador con la letra esperada de cada casilla (la grilla canónica mapea
+    casilla→letra por posición). Si el CNN no está disponible o el resultado es
+    ambiguo, devuelve 0 con un warning y el usuario revisa en la grilla.
     """
     if not (_CV2_OK and _PIL_OK):
         logger.warning("detect_template_rotation: faltan cv2/PIL — sin rotación")
@@ -164,13 +169,77 @@ def detect_template_rotation(image_path: str, layout: TemplateLayout | None = No
             best_score, best_angle = score, angle
 
     if not any_fiducials:
+        cnn_angle = _detect_rotation_by_cnn(gray, lay)
+        if cnn_angle is not None:
+            logger.info(
+                "detect_template_rotation: sin marcadores — CNN eligió %d° en %s",
+                cnn_angle, image_path,
+            )
+            return cnn_angle
         logger.warning(
-            "detect_template_rotation: marcadores no detectados en %s — default 0°",
+            "detect_template_rotation: sin marcadores y CNN no concluyente en %s — default 0°",
             image_path,
         )
         return 0
     logger.info("detect_template_rotation: %s → rotar %d° horario", image_path, best_angle)
     return best_angle
+
+
+def _rotation_cnn_score(gray: np.ndarray, layout: TemplateLayout, clf) -> float:
+    """Acuerdo medio del CNN entre cada casilla y su letra esperada (0..1).
+
+    Rectifica (sin fiduciales cae a resize), recorta cada casilla rotulada y la
+    puntúa contra el carácter que le corresponde por posición. Solo cuenta a-z
+    (el CNN no cubre ñ ni mayúsculas/dígitos). Una orientación correcta hace que
+    las letras caigan en su casilla → acuerdo alto; una rotada → acuerdo casi
+    nulo. Devuelve 0.0 si no hay casillas puntuables.
+    """
+    from core.inkcore.ai.char_cnn import char_to_label
+    canon = _rectify(gray, layout)
+    n_labeled = min(layout.n_cells, len(layout.letters) * layout.repeats)
+    scores: list[float] = []
+    for i in range(n_labeled):
+        ch = layout.cell_letter(i)
+        if ch is None or char_to_label(ch) is None:
+            continue
+        wx, wy, ww, wh = layout.writing_rect(i)
+        mask = _clean_cell(canon[wy:wy + wh, wx:wx + ww])
+        if mask is None:
+            continue
+        try:
+            s = clf.score(mask, ch)
+        except Exception:
+            s = None
+        if s is not None:
+            scores.append(float(s))
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def _detect_rotation_by_cnn(gray: np.ndarray, layout: TemplateLayout) -> int | None:
+    """Elige la rotación (0/90/180/270) por acuerdo del CNN, o None si ambiguo.
+
+    Fallback cuando no hay fiduciales. Requiere el clasificador EMNIST; si no
+    está disponible devuelve None (el caller hace default 0). Solo devuelve un
+    ángulo si gana con margen claro, para no rotar de más una hoja ya derecha
+    cuando la señal es débil.
+    """
+    try:
+        from core.inkcore.ai.char_cnn import EMNISTCharClassifier
+        clf = EMNISTCharClassifier()
+    except Exception as exc:
+        logger.info("_detect_rotation_by_cnn: CNN no disponible (%s)", exc)
+        return None
+    if not getattr(clf, "available", False):
+        return None
+    scores = {a: _rotation_cnn_score(_rotate_cw(gray, a), layout, clf) for a in (0, 90, 180, 270)}
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    best_a, best_s = ranked[0]
+    second_s = ranked[1][1]
+    logger.info("_detect_rotation_by_cnn: scores=%s", {a: round(s, 3) for a, s in scores.items()})
+    # Margen claro: el mejor debe superar un piso mínimo y duplicar al segundo.
+    if best_s >= 0.10 and best_s >= 1.8 * max(second_s, 1e-6):
+        return best_a
+    return None
 
 
 def _rectify(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray:
