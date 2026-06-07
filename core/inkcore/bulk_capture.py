@@ -18,6 +18,13 @@ from core.models import GlyphEntry
 
 logger = logging.getLogger(__name__)
 
+# Extensiones que run_folder reconoce como fuentes válidas (imágenes + PDF).
+# Coincide con lo que run() sabe expandir: los .pdf se rasterizan a páginas y
+# el resto se trata como imagen individual.
+SUPPORTED_SOURCE_EXTS = frozenset({
+    ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".pdf",
+})
+
 
 @dataclass
 class BulkGlyphCandidate:
@@ -241,6 +248,42 @@ class BulkCaptureRunner:
         # BUG-04: limpiar tmp_dirs de rasterización
         self._cleanup_raster_tmps()
         return session
+
+    def run_folder(
+        self,
+        folder: str,
+        *,
+        recursive: bool = False,
+    ) -> BulkCaptureSession:
+        """Procesa todas las imágenes/PDFs de una carpeta en lote.
+
+        Recolecta las fuentes con extensión en SUPPORTED_SOURCE_EXTS (ignora
+        mayúsculas/minúsculas), las ordena por nombre para que el orden sea
+        determinista y delega en run(). Con recursive=True desciende a
+        subcarpetas.
+
+        Devuelve una BulkCaptureSession vacía si la ruta no es una carpeta o no
+        contiene fuentes reconocidas.
+        """
+        root = Path(folder)
+        if not root.is_dir():
+            logger.warning("run_folder: '%s' no es una carpeta", folder)
+            return BulkCaptureSession(sources=[], pipeline_config=self._cfg)
+
+        walker = root.rglob("*") if recursive else root.glob("*")
+        sources = sorted(
+            str(p) for p in walker
+            if p.is_file() and p.suffix.lower() in SUPPORTED_SOURCE_EXTS
+        )
+        if not sources:
+            logger.warning(
+                "run_folder: no se encontraron imágenes/PDFs en '%s'%s",
+                folder, " (recursivo)" if recursive else "",
+            )
+            return BulkCaptureSession(sources=[], pipeline_config=self._cfg)
+
+        logger.info("run_folder: %d fuentes en '%s'", len(sources), folder)
+        return self.run(sources)
 
     def run_pdf(self, pdf_path: str) -> BulkCaptureSession:
         """Procesa un PDF escaneado, 2 páginas a la vez para limitar RAM."""
