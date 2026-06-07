@@ -1,6 +1,6 @@
 import logging
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.inkcore.renderer_backgrounds import (
@@ -62,6 +62,26 @@ class RenderOptions:
     draw_lines: bool = False
     # Estilo de fondo: "" | "hoja_blanca" | "libreta" | "hoja_cuadricula"
     background_style: str = ""
+
+
+# Escalado de fuente por nivel de encabezado (h1 más grande que el cuerpo).
+# Niveles >3 caen al valor por defecto: apenas mayores que un párrafo.
+_HEADING_SCALE: dict[int, float] = {1: 1.5, 2: 1.3, 3: 1.15}
+_HEADING_SCALE_DEFAULT = 1.1
+
+
+@dataclass
+class _BlockLine:
+    """Un renglón ya renderizado listo para fluir en una página.
+
+    Lo produce render_document por bloque (encabezado/lista/párrafo) y lo
+    consume _flow_blocklines_to_pages, que sólo necesita saber dónde pegarlo
+    en X, cuánto avanzar en Y y cuánto hueco extra dejar antes del renglón.
+    """
+    img: "Image.Image | None"
+    x: int            # posición X absoluta de pegado (margen + sangría + jitter)
+    line_height: int  # avance vertical de este renglón (mayor en encabezados)
+    gap_before: int   # hueco extra antes del renglón (separación de bloque)
 
 
 class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
@@ -222,6 +242,132 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
             pages.append(canvas.convert("RGB"))
 
         return pages if pages else [Image.new("RGB", (options.page_width, page_height), "#FFFFFF")]
+
+    def render_document(self, doc, options: RenderOptions, page_height: int = 1122) -> list:
+        """Renderiza un Document estructurado respetando su jerarquía.
+
+        A diferencia de render_pages (que trata todo como un párrafo plano), recorre
+        los bloques del Document en orden de arriba-abajo y los dibuja según su tipo:
+
+          - HEADING:   font_size escalado por heading_level (h1≈1.5x … h3≈1.15x).
+          - LIST_ITEM: viñeta "- " + sangría fija + el texto, con word-wrap.
+          - PARAGRAPH: word-wrap por palabra, como el render normal.
+          - CODE:      como párrafo, con una sangría leve.
+
+        Cada BLOQUE (no cada letra) recibe un pequeño offset X/Y acotado y cada
+        renglón una micro-rotación, para que se vea hecho a mano sin desordenarse:
+        el bloque siempre arranca en su margen+sangría y nunca se encima con el de
+        arriba (el flujo vertical garantiza separación). El layout es flujo limpio
+        de arriba-abajo; NO se copian las coordenadas crudas del OCR (un escaneo
+        torcido daría un render torcido). Retorna una lista de imágenes RGB, igual
+        que render_pages, para que la UI las muestre/exporte sin cambios.
+
+        Si el Document no tiene bloques, cae a render_pages sobre su texto plano.
+        """
+        if not PIL_OK:
+            return []
+        options = self.apply_style(options)
+        options = self._apply_background_style(options)
+
+        blocks = [b for page in getattr(doc, "pages", []) for b in page.blocks]
+        if not blocks:
+            text = doc.plain_text() if hasattr(doc, "plain_text") else str(doc)
+            return self.render_pages(text, options, page_height)
+
+        base_font = options.font_size
+        usable_width = options.page_width - 2 * options.page_margin
+        base_line_h = int(base_font * options.line_height)
+
+        items: list[_BlockLine] = []
+        for block in blocks:
+            text = (getattr(block, "text", "") or "").strip()
+            if not text:
+                continue
+            btype = str(getattr(block, "block_type", "paragraph"))
+
+            if btype == "heading":
+                level = getattr(block, "heading_level", 1) or 1
+                scale = _HEADING_SCALE.get(level, _HEADING_SCALE_DEFAULT)
+                fs = max(1, int(base_font * scale))
+                indent = 0
+                prefix = ""
+                gap_extra = int(base_font * 0.8)
+            elif btype == "list_item":
+                fs = base_font
+                indent = int(base_font * 0.9)
+                prefix = "- "
+                gap_extra = int(base_font * 0.15)
+            elif btype == "code":
+                fs = base_font
+                indent = int(base_font * 0.5)
+                prefix = ""
+                gap_extra = int(base_font * 0.35)
+            else:  # paragraph / caption / unknown
+                fs = base_font
+                indent = 0
+                prefix = ""
+                gap_extra = int(base_font * 0.4)
+
+            bopts = replace(options, font_size=fs)
+            line_h = int(fs * options.line_height)
+            block_usable = max(1, usable_width - indent)
+            # Offset POR BLOQUE (no por letra), acotado: natural pero no caótico.
+            bjx = random.randint(-4, 4)
+            bjy = random.randint(-3, 3)
+
+            wrapped = self._soft_wrap_text(prefix + text, bopts, block_usable)
+            for i, ln in enumerate(wrapped):
+                img = self._render_line(ln, bopts, block_usable)
+                # Micro-rotación de renglón (±0.5°): expand=False conserva el tamaño
+                # para no descuadrar el offset ni encimar renglones vecinos.
+                if img is not None:
+                    angle = random.uniform(-0.5, 0.5)
+                    img = img.rotate(angle, expand=False, resample=Image.BICUBIC)
+                items.append(_BlockLine(
+                    img=img,
+                    x=options.page_margin + indent + bjx,
+                    line_height=line_h,
+                    # el hueco de bloque + el jitter Y sólo en el primer renglón
+                    gap_before=(gap_extra + bjy) if i == 0 else 0,
+                ))
+
+        return self._flow_blocklines_to_pages(items, options, page_height, base_line_h)
+
+    def _flow_blocklines_to_pages(
+        self, items: list, options: RenderOptions, page_height: int, base_line_h: int,
+    ) -> list:
+        """Reparte los renglones ya renderizados en páginas de altura fija.
+
+        Mantiene un cursor vertical, abre página nueva cuando un renglón no entra y
+        nunca pega por encima del margen ni fuera de la hoja. Las decoraciones de
+        fondo (renglones/cuadrícula/margen) se dibujan por página con el paso del
+        cuerpo, así el texto de párrafo cae sobre los renglones de la libreta.
+        """
+        bottom = page_height - options.page_margin
+
+        def _new_canvas():
+            c = Image.new("RGBA", (options.page_width, page_height), options.background_color)
+            self._draw_background_decorations(c, options, base_line_h, page_height)
+            return c
+
+        pages = []
+        canvas = _new_canvas()
+        y = options.page_margin
+        for it in items:
+            y += max(0, it.gap_before)
+            # ¿Cabe este renglón? Si no, cierra la página y abre otra.
+            if it.line_height > 0 and y + it.line_height > bottom and y > options.page_margin:
+                pages.append(canvas.convert("RGB"))
+                canvas = _new_canvas()
+                y = options.page_margin
+            if it.img is not None:
+                x = max(0, it.x)
+                paste_y = max(0, min(page_height - it.img.height, y))
+                canvas.paste(it.img, (x, paste_y), it.img)
+            y += it.line_height
+
+        pages.append(canvas.convert("RGB"))
+        return pages
 
     def _render_line(self, text: str, options: RenderOptions, max_width: int) -> "Image.Image | None":
         if not PIL_OK:

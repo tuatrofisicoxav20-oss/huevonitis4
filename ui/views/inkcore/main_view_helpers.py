@@ -97,13 +97,20 @@ class InkCoreViewHelpersMixin:
         except AttributeError:
             return
         pending = getattr(st, "study_text", None)
+        pending_doc = getattr(st, "study_document", None)
         if not pending:
             return
         current = self._writer_text.get("0.0", "end").strip()
         if not current:
             self._writer_text.delete("0.0", "end")
             self._writer_text.insert("0.0", pending)
+            # Guarda el Document para renderizar con estructura (encabezados,
+            # listas, párrafos). _render_pages lo usa mientras el texto no se
+            # edite; si el usuario lo cambia, cae a texto plano automáticamente.
+            self._pending_document = pending_doc
+            self._pending_document_text = pending.strip()
             with contextlib.suppress(Exception):
                 self._tabs.set("✍️ Escritor")
             self.toast("Texto importado desde Estudio", "success")
         st.study_text = ""
+        st.study_document = None

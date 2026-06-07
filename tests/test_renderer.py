@@ -105,3 +105,83 @@ def test_render_text_produce_tinta_visible(renderer, tmp_path):
     img = renderer.render_text("aaa", RenderOptions())
     lum = np.asarray(img.convert("L"))
     assert int((lum < 150).sum()) > 100, "la tinta sigue invisible tras recolorear"
+
+
+# ── render_document (Ticket 2): flujo estructurado por bloques ──────────────
+
+def _bank_con_a(renderer, tmp_path):
+    """Inyecta un glifo 'a' blanco (forma en alpha) en el banco aislado."""
+    import numpy as np
+    from PIL import Image
+    p = tmp_path / "a_000.png"
+    arr = np.zeros((40, 40, 4), dtype=np.uint8)
+    arr[:, :, :3] = 255
+    arr[8:32, 8:32, 3] = 255
+    Image.fromarray(arr).save(p)
+    renderer.bank.add_glyph("a", str(p))
+
+
+def _doc(blocks):
+    from core.ocr.document_model import Document, DocumentPage
+    doc = Document(source_path="/tmp/x")
+    page = DocumentPage(page_number=1)
+    page.blocks = list(blocks)
+    doc.pages.append(page)
+    return doc
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed",
+)
+def test_render_document_devuelve_paginas_con_tinta(renderer, tmp_path):
+    """Un Document con título + lista + párrafo produce páginas RGB con tinta."""
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+    from core.ocr.document_model import BlockType, TextBlock
+    _bank_con_a(renderer, tmp_path)
+    doc = _doc([
+        TextBlock(text="aaa aaa", block_type=BlockType.HEADING, heading_level=1),
+        TextBlock(text="aaa", block_type=BlockType.LIST_ITEM),
+        TextBlock(text="aaa aaa aaa", block_type=BlockType.PARAGRAPH),
+    ])
+    pages = renderer.render_document(doc, RenderOptions())
+    assert isinstance(pages, list) and pages, "no devolvió páginas"
+    lum = np.asarray(pages[0].convert("L"))
+    assert int((lum < 150).sum()) > 200, "no se ve tinta en la página"
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed",
+)
+def test_render_document_titulo_mas_grande_que_parrafo(renderer, tmp_path):
+    """El mismo texto como HEADING h1 produce más tinta (glifos mayores) que como PARAGRAPH."""
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+    from core.ocr.document_model import BlockType, TextBlock
+    _bank_con_a(renderer, tmp_path)
+    opts = RenderOptions(size_variation=0.0, rotation_range=0.0)
+    head = renderer.render_document(
+        _doc([TextBlock(text="aaaa", block_type=BlockType.HEADING, heading_level=1)]), opts)
+    para = renderer.render_document(
+        _doc([TextBlock(text="aaaa", block_type=BlockType.PARAGRAPH)]), opts)
+    tinta_head = int((np.asarray(head[0].convert("L")) < 150).sum())
+    tinta_para = int((np.asarray(para[0].convert("L")) < 150).sum())
+    assert tinta_head > tinta_para * 1.3, (
+        f"el h1 no es claramente mayor (head={tinta_head}, para={tinta_para})"
+    )
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed",
+)
+def test_render_document_sin_bloques_cae_a_texto_plano(renderer, tmp_path):
+    """Un Document vacío no crashea: cae a render_pages y devuelve al menos una página."""
+    from core.inkcore.renderer import RenderOptions
+    from core.ocr.document_model import Document
+    pages = renderer.render_document(Document(source_path="/tmp/x"), RenderOptions())
+    assert isinstance(pages, list) and pages

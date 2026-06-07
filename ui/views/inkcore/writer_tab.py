@@ -155,6 +155,22 @@ class WriterTabMixin:
             background_style=self._bg_style_var.get(),
         )
 
+    def _render_pages(self, renderer, text: str, options: "RenderOptions") -> list:
+        """Renderiza el texto actual a páginas.
+
+        Si llegó un Document estructurado desde Estudio y el texto del editor no
+        fue modificado, usa render_document (respeta encabezados/listas/párrafos).
+        En cuanto el usuario edita el texto, el Document deja de coincidir y se cae
+        a render_pages sobre texto plano.
+        """
+        doc = getattr(self, "_pending_document", None)
+        if doc is not None and text == getattr(self, "_pending_document_text", None):
+            try:
+                return renderer.render_document(doc, options)
+            except Exception as exc:
+                logger.warning("render_document falló (%s); uso texto plano", exc)
+        return renderer.render_pages(text, options)
+
     def _export_writer_pdf(self):
         text = self._writer_text.get("0.0", "end").strip()
         if not text:
@@ -175,7 +191,7 @@ class WriterTabMixin:
                 if renderer is None:
                     self.after(0, lambda: self.toast("El banco está vacío — extrae glifos primero", "warning"))
                     return
-                images = renderer.render_pages(text, options)
+                images = self._render_pages(renderer, text, options)
                 from core.export.pdf_exporter import export_rendered_pages_pdf
                 ok = export_rendered_pages_pdf(images, path)
                 msg = "PDF exportado" if ok else "Error al exportar PDF (¿reportlab instalado?)"
@@ -201,7 +217,7 @@ class WriterTabMixin:
                 if renderer is None:
                     self.after(0, lambda: self._show_preview_pages([]))
                     return
-                pages = renderer.render_pages(text, opts)
+                pages = self._render_pages(renderer, text, opts)
             except Exception as exc:
                 logger.error("render_pages error: %s", exc, exc_info=True)
                 pages = []
@@ -270,7 +286,7 @@ class WriterTabMixin:
 
         def _render():
             try:
-                pages = renderer.render_pages(text, opts)
+                pages = self._render_pages(renderer, text, opts)
             except Exception as exc:
                 logger.error("render_pages export error: %s", exc, exc_info=True)
                 self.after(0, lambda: self.toast("Error al renderizar", "error"))
