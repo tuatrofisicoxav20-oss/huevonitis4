@@ -423,6 +423,21 @@ def _clean_cell_grid(cell: np.ndarray) -> np.ndarray | None:
                 max(0, xs.min() - pad):xs.max() + 1 + pad]
 
 
+def _sizable_components(mask: np.ndarray) -> int:
+    """Cuenta componentes conexos no triviales de la máscara.
+
+    Una letra manuscrita real tiene pocas piezas (1-5: el trazo, el punto de la
+    i/j, la tilde de la ñ, los cruces de x/k). El TÍTULO/instrucciones de la
+    plantilla ("Plantilla de letra", "Huevonitis"…), si la foto lo captó arriba
+    de la grilla y cayó en una casilla, aparece como MUCHAS piezas (las letras de
+    las palabras) → 10-30 componentes. Sirve para descartar esas casillas-texto
+    sin tener que detectar la banda del título geométricamente.
+    """
+    n, _labels, stats, _c = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    thr = max(10, mask.size * 0.001)
+    return sum(1 for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= thr)
+
+
 def _extract_grid(gray, lay, clf, char_to_label):
     """Extracción para plantillas SIN fiduciales: detecta la grilla en la foto.
 
@@ -470,6 +485,18 @@ def _extract_grid(gray, lay, clf, char_to_label):
             iy0, iy1 = int(y0 + inset * chh), int(y1 - inset * chh)
             mask = _clean_cell_grid(gray[iy0:iy1, ix0:ix1])
             if mask is None:
+                continue
+            # Descartar casillas-texto: si la foto captó el título/instrucciones
+            # de la plantilla arriba de la grilla, el bbox de contenido lo incluye
+            # y la fila 1 cae sobre ese texto. Una línea de título da MUCHAS piezas
+            # conexas; una letra real, pocas (≤5). Umbral 8 separa limpio (validado:
+            # ninguna letra manuscrita del banco supera 8).
+            ncomp = _sizable_components(mask)
+            if ncomp >= 8:
+                logger.info(
+                    "_extract_grid: casilla '%s' descartada (texto/título, %d componentes)",
+                    ch, ncomp,
+                )
                 continue
             glyph = to_rgba_smooth(mask)
             try:
