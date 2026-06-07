@@ -323,6 +323,29 @@ def extract_from_template_auto(
     return extract_from_template(image_path, lay, pre_rotate=angle)
 
 
+def _quality_override_from_template(glyph, score, classify_tier) -> dict:
+    """Arma el dict {score, tier, ink_coverage} para bank.add_glyph.
+
+    Reutiliza el score de la plantilla (con la rebaja del CNN si la hubo) y mide
+    ink_coverage barato del canal alpha del glifo (sin re-evaluar calidad). El
+    tier sale de classify_tier con los umbrales del banco. Si algo falla, None
+    para que add_glyph caiga a su assess_glyph habitual.
+    """
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+    s = max(0.0, min(1.0, s))
+    ink_cov = 0.5
+    try:
+        alpha = np.asarray(glyph.getchannel("A"))
+        if alpha.size:
+            ink_cov = round(float((alpha > 64).mean()), 3)
+    except Exception:
+        pass
+    return {"score": round(s, 3), "tier": classify_tier(s), "ink_coverage": ink_cov}
+
+
 def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     """Guarda los glifos extraídos de la plantilla en el banco dado.
 
@@ -340,16 +363,23 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     en el flujo de imagen suelta (extractor_tab), donde el solapamiento de cajas
     sí puede extraer dos veces el mismo glifo. Por eso saved == total salvo
     errores de I/O, y dupes queda en 0.
+
+    También se pasa quality_override para conservar el score que ya calculó
+    extract_from_template (incluida la rebaja a 0.45 del CNN en casillas dudosas)
+    en vez de que add_glyph lo recalcule desde cero: así get_best_glyph elige las
+    muestras buenas de otras hojas y no se pierde la bandera de baja confianza.
     """
     import tempfile
     from pathlib import Path
+
+    from core.inkcore.quality import classify_tier
     if temp_dir is None:
         temp_dir = Path(tempfile.mkdtemp(prefix="tpl_glyphs_"))
     else:
         temp_dir = Path(temp_dir)
         temp_dir.mkdir(parents=True, exist_ok=True)
     saved = dupes = 0
-    for i, (ch, glyph, _q) in enumerate(results):
+    for i, (ch, glyph, q) in enumerate(results):
         safe = ch if ch.isalnum() else f"u{ord(ch)}"
         p = temp_dir / f"{safe}_{i:03d}.png"
         try:
@@ -357,7 +387,14 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
         except Exception as exc:
             logger.warning("save_template: no se pudo escribir %s: %s", p, exc)
             continue
-        entry = bank.add_glyph(ch, str(p), skip_dedup=True)
+        # Conservar el score ya calculado por extract_from_template (incluida la
+        # rebaja a 0.45 que el CNN aplica a las casillas dudosas) en vez de dejar
+        # que add_glyph lo recalcule desde cero: así get_best_glyph prefiere las
+        # muestras buenas de otras hojas y la bandera de baja confianza no se
+        # pierde. ink_coverage se mide barato del alpha del glifo; el tier sale
+        # del score con los mismos umbrales del banco.
+        override = _quality_override_from_template(glyph, q, classify_tier)
+        entry = bank.add_glyph(ch, str(p), skip_dedup=True, quality_override=override)
         if entry is None:
             dupes += 1
         else:

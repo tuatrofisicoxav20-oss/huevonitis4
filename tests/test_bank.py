@@ -130,6 +130,37 @@ def test_skip_dedup_guarda_casi_identicos(bank, tmp_path):
     assert def_dupes > 0
 
 
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed"
+)
+def test_save_template_conserva_score_y_tier(bank):
+    """save_template_glyphs_to_bank preserva el score de la plantilla.
+
+    El _q ya calculado (con la rebaja a 0.45 que el CNN da a casillas dudosas)
+    debe llegar al banco vía quality_override en vez de recalcularse: la muestra
+    floja cae a Bronze y la buena de otra hoja queda Gold, así get_best_glyph
+    elige la buena.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from core.inkcore.template_extract import save_template_glyphs_to_bank
+    arr = np.zeros((40, 40, 4), np.uint8)
+    arr[..., :3] = 255
+    arr[10:30, 10:30, 3] = 255  # bloque de tinta en el alpha
+    glyph = Image.fromarray(arr)  # 4 canales → RGBA
+    # Misma letra en dos hojas: una dudosa (CNN la fijó en 0.45) y una buena.
+    results = [("a", glyph.copy(), 0.45), ("a", glyph.copy(), 0.90)]
+    stats = save_template_glyphs_to_bank(results, bank)
+    assert (stats["saved"], stats["dupes"]) == (2, 0)
+
+    by_score = {round(e.quality_score, 2): e for e in bank.get_all() if e.char == "a"}
+    assert set(by_score) == {0.45, 0.90}, by_score
+    assert by_score[0.45].tier == "Bronze"   # < TIER_SILVER (0.48)
+    assert by_score[0.90].tier == "Gold"     # >= TIER_GOLD (0.75)
+
+
 def _make_alpha_glyph(path: Path, shape: str = "ellipse", px: int = 48):
     """Crea un glifo estilo-extractor: tinta BLANCA con la forma en el alpha.
 
