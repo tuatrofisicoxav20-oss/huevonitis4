@@ -9,6 +9,7 @@ Depende de:
   • self._extracted, self._pipeline
   • self.toast, self._set_status, self._refresh_bank, self._show_extracted_grid
 """
+import contextlib
 import logging
 from pathlib import Path
 
@@ -117,10 +118,8 @@ class ExtractorTabSaveMixin:
         no inicializado, etc.). Falla silenciosamente si el widget aún no se
         creó.
         """
-        try:
+        with contextlib.suppress(AttributeError, Exception):
             self._extract_status.configure(text=text, text_color=color)
-        except (AttributeError, Exception):
-            pass
 
     def _update_extracted_to_bank_paths(self) -> None:
         """Reemplaza rutas temporales de self._extracted con rutas permanentes del banco.

@@ -17,6 +17,7 @@ recortes a la mitad ni etiquetas corridas.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from core.inkcore.template_sheet import TemplateLayout
@@ -37,7 +38,7 @@ except ImportError:
     _PIL_OK = False
 
 
-def _detect_fiducials(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray | None":
+def _detect_fiducials(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray | None:
     """Devuelve los centros de los 4 marcadores (TL,TR,BL,BR) o None.
 
     Busca cuadrados negros sólidos razonablemente grandes y los asigna a la
@@ -82,7 +83,7 @@ def _detect_fiducials(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray
     return np.array(chosen, dtype=np.float32)
 
 
-def _rotate_cw(img: "np.ndarray", angle: int) -> "np.ndarray":
+def _rotate_cw(img: np.ndarray, angle: int) -> np.ndarray:
     """Rota `img` en sentido horario por `angle` ∈ {0,90,180,270} grados."""
     angle %= 360
     if angle == 0:
@@ -96,7 +97,7 @@ def _rotate_cw(img: "np.ndarray", angle: int) -> "np.ndarray":
     raise ValueError(f"_rotate_cw: ángulo no múltiplo de 90: {angle}")
 
 
-def _title_band_signal(canon: "np.ndarray", layout: TemplateLayout) -> float:
+def _title_band_signal(canon: np.ndarray, layout: TemplateLayout) -> float:
     """Mide cuánta tinta hay en la franja del título (arriba) vs el pie (abajo).
 
     En la plantilla canónica el título está pegado al margen superior y el pie
@@ -172,7 +173,7 @@ def detect_template_rotation(image_path: str, layout: TemplateLayout | None = No
     return best_angle
 
 
-def _rectify(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray":
+def _rectify(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray:
     """Rectifica la imagen al tamaño canónico usando los marcadores.
 
     Si no encuentra los 4 marcadores, hace fallback a un simple resize (la foto
@@ -188,7 +189,7 @@ def _rectify(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray":
                                flags=cv2.INTER_LINEAR, borderValue=255)
 
 
-def _clean_cell(cell_gray: "np.ndarray") -> "np.ndarray | None":
+def _clean_cell(cell_gray: np.ndarray) -> np.ndarray | None:
     """Binariza una casilla y deja sólo la tinta central (sin borde/rótulo).
 
     Devuelve una máscara uint8 (255=tinta) ya recortada al bbox de la letra, o
@@ -231,7 +232,7 @@ def _clean_cell(cell_gray: "np.ndarray") -> "np.ndarray | None":
 
 def extract_from_template(
     image_path: str, layout: TemplateLayout | None = None, *, pre_rotate: int = 0,
-) -> list[tuple[str, "Image.Image", float]]:
+) -> list[tuple[str, Image.Image, float]]:
     """Extrae un glifo por casilla rellena. Lista de (letra, glifo_RGBA, calidad).
 
     Sólo devuelve casillas con tinta suficiente (las vacías se omiten). No hay
@@ -310,7 +311,7 @@ def extract_from_template(
 
 def extract_from_template_auto(
     image_path: str, layout: TemplateLayout | None = None,
-) -> list[tuple[str, "Image.Image", float]]:
+) -> list[tuple[str, Image.Image, float]]:
     """Como `extract_from_template`, pero detecta y corrige la rotación primero.
 
     Llama a `detect_template_rotation` para saber cuántos grados girar (el
@@ -400,10 +401,8 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
         else:
             saved += 1
     for f in temp_dir.glob("*.png"):
-        try:
+        with contextlib.suppress(OSError):
             f.unlink()
-        except OSError:
-            pass
     logger.info("save_template_glyphs_to_bank: saved=%d dupes=%d total=%d",
                 saved, dupes, len(results))
     return {"saved": saved, "dupes": dupes, "total": len(results)}

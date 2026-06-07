@@ -19,6 +19,8 @@ try:
 except ImportError:
     _CV2_OK = False
 
+import contextlib
+
 from core.ocr.base import OCRBackend
 
 
@@ -107,10 +109,8 @@ class TesseractBackend(OCRBackend):
             finally:
                 # PILImage.open mantiene el fd abierto; fromarray no, pero close()
                 # es seguro en ambos casos.
-                try:
+                with contextlib.suppress(Exception):
                     pil_img.close()
-                except Exception:
-                    pass
             results = []
             for i in range(len(data["text"])):
                 text = str(data["text"][i]).strip()

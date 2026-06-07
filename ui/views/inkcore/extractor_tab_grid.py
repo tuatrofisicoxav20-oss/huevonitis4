@@ -5,6 +5,8 @@ Solo depende de:
   • self._glyphs_scroll, self._glyph_count_label, self._quality_summary, self._extracted
   • self._get_thumb (definido en main_view.py)
 """
+import contextlib
+
 import customtkinter as ctk
 
 from ui import theme
@@ -137,10 +139,8 @@ class ExtractorTabGridMixin:
         def _hide(_evt):
             tw = tip["win"]
             if tw is not None:
-                try:
+                with contextlib.suppress(Exception):
                     tw.destroy()
-                except Exception:
-                    pass
                 tip["win"] = None
 
         widget.bind("<Enter>", _show)

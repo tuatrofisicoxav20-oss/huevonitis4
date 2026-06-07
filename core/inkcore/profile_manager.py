@@ -261,8 +261,8 @@ def migrate_legacy_to_default(*, backup: bool = True) -> dict:
         try:
             with open(new_manifest, encoding="utf-8") as f:
                 data = json.load(f)
-            old_dir_str = str(tipo.resolve())
-            new_dir_str = str(default_dir.resolve())
+            str(tipo.resolve())
+            str(default_dir.resolve())
             rewritten = 0
             for entry in data:
                 old_path = entry.get("image_path", "")

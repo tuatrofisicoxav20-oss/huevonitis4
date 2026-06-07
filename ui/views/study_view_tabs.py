@@ -8,7 +8,6 @@ import customtkinter as ctk
 
 from ui import theme
 
-
 _BLOCK_TYPE_COLORS = {
     "heading":   ("#d4a017", "#7a5500"),  # dorado
     "list_item": ("#2a7fbf", "#1a4a7a"),  # azul

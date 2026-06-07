@@ -58,7 +58,7 @@ def _candidate_cuts(vpp_s, x_min: int, x_max: int, n: int, char_w_avg: float) ->
 
 
 def align_by_classifier(
-    line_mask: "np.ndarray",
+    line_mask: np.ndarray,
     chars: list[str],
     classifier,
     char_w_avg: float,
@@ -73,7 +73,7 @@ def align_by_classifier(
     n = len(chars)
     if n < 2 or line_mask is None or line_mask.size == 0:
         return None
-    h, w = line_mask.shape[:2]
+    _h, _w = line_mask.shape[:2]
     vpp = (line_mask > 0).sum(0).astype(np.float32)
     ink = np.where(vpp > 0)[0]
     if len(ink) == 0:
@@ -87,14 +87,14 @@ def align_by_classifier(
     vpp_s = cv2.GaussianBlur(vpp.reshape(1, -1), (1, ks), 0).flatten()
     cuts = _candidate_cuts(vpp_s, x_min, x_max, n, char_w_avg)
     M = len(cuts)
-    if M < n + 1:
+    if n + 1 > M:
         return None
 
     # Enumerar segmentos de ancho plausible y clasificarlos en lote.
     min_w = max(2, int(0.22 * char_w_avg))
     max_w = max(min_w + 1, int(2.6 * char_w_avg))
     seg_pairs: list[tuple[int, int]] = []
-    seg_masks: list["np.ndarray"] = []
+    seg_masks: list[np.ndarray] = []
     for k in range(M):
         for j in range(k + 1, M):
             sw = cuts[j] - cuts[k]

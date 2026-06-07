@@ -14,6 +14,7 @@ def test_imread_oriented_aplica_exif(tmp_path):
     de forma explícita, independiente de la versión/flags de OpenCV.)
     """
     from PIL import Image
+
     from core.inkcore.extractor_preprocess import imread_oriented
     # imagen apaisada 120x40 marcada para rotar 90° al mostrarse
     img = Image.new("RGB", (120, 40), "white")
@@ -34,6 +35,7 @@ def test_imread_oriented_sin_exif_no_cambia(tmp_path):
     """Sin EXIF, imread_oriented coincide en dimensiones con cv2.imread."""
     import cv2
     from PIL import Image
+
     from core.inkcore.extractor_preprocess import imread_oriented
     img = Image.new("RGB", (80, 50), "white")
     p = tmp_path / "plain.png"
@@ -46,6 +48,7 @@ def test_imread_oriented_sin_exif_no_cambia(tmp_path):
 def test_deskew_ignora_rayas_horizontales(tmp_path):
     """El deskew no debe inventar un ángulo por las rayas perfectamente horizontales."""
     import numpy as np
+
     from core.inkcore.extractor_preprocess import ImagePreprocessor
     # lienzo con SOLO rayas horizontales largas (como un cuaderno en blanco)
     mask = np.zeros((200, 400), np.uint8)

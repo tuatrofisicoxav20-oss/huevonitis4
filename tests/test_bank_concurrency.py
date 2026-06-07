@@ -42,7 +42,7 @@ def test_add_glyph_concurrente_una_sola_entrada(tmp_path):
         try:
             barrier.wait(timeout=10)   # arrancar los 4 a la vez → máxima colisión
             results.append(bank.add_glyph("a", str(p)))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(4)]
@@ -80,7 +80,7 @@ def test_lecturas_concurrentes_con_escrituras_no_rompen(tmp_path):
             Image.fromarray(rgba).save(pth)
             try:
                 bank.add_glyph(chr(ord("a") + (i % 5)), str(pth))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(("write", exc))
             i += 1
 
@@ -90,7 +90,7 @@ def test_lecturas_concurrentes_con_escrituras_no_rompen(tmp_path):
                 bank.get_all()
                 bank.get_best_glyph("a")
                 bank.coverage()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(("read", exc))
 
     ts = [threading.Thread(target=writer), threading.Thread(target=reader),

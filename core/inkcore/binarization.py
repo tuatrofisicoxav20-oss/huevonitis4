@@ -41,7 +41,7 @@ _MIN_CHAR_W = 2
 _MIN_CHAR_H = 3
 
 
-def candidate_masks(gray: "np.ndarray") -> list[tuple[str, "np.ndarray"]]:
+def candidate_masks(gray: np.ndarray) -> list[tuple[str, np.ndarray]]:
     """Devuelve [(nombre, mask_binaria_inv)] — tinta = blanco (255)."""
     if not _CV2_OK:
         return []
@@ -71,7 +71,7 @@ def candidate_masks(gray: "np.ndarray") -> list[tuple[str, "np.ndarray"]]:
     return out
 
 
-def _letter_cc_count(mask: "np.ndarray") -> int:
+def _letter_cc_count(mask: np.ndarray) -> int:
     """Cuenta componentes del tamaño de una letra (excluye ruido y el blob-página)."""
     h, w = mask.shape[:2]
     num, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -88,7 +88,7 @@ def _letter_cc_count(mask: "np.ndarray") -> int:
     return n
 
 
-def best_binary(gray: "np.ndarray") -> tuple[str, "np.ndarray"]:
+def best_binary(gray: np.ndarray) -> tuple[str, np.ndarray]:
     """Elige la mejor binarización por contenido.
 
     Descarta candidatas degeneradas (fracción de tinta fuera de [INK_MIN, INK_MAX])

@@ -24,8 +24,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 try:
-    import numpy as np
     import cv2
+    import numpy as np
     _CV_OK = True
 except ImportError:  # pragma: no cover
     _CV_OK = False
@@ -103,7 +103,7 @@ def char_to_label(ch: str) -> int | None:
     return None
 
 
-def preprocess_to_emnist(mask: "np.ndarray") -> "np.ndarray | None":
+def preprocess_to_emnist(mask: np.ndarray) -> np.ndarray | None:
     """Lleva una máscara de tinta (255=tinta, fondo 0) al formato EMNIST 28×28.
 
     Recorta al bbox de la tinta, escala el lado mayor a 20 px (manteniendo
@@ -118,7 +118,7 @@ def preprocess_to_emnist(mask: "np.ndarray") -> "np.ndarray | None":
     crop = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1].astype(np.uint8)
     h, w = crop.shape
     s = 20.0 / max(h, w)
-    nh, nw = max(1, int(round(h * s))), max(1, int(round(w * s)))
+    nh, nw = max(1, round(h * s)), max(1, round(w * s))
     res = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_AREA)
     canvas = np.zeros((28, 28), np.float32)
     oy, ox = (28 - nh) // 2, (28 - nw) // 2
@@ -155,7 +155,7 @@ class EMNISTCharClassifier:
     def available(self) -> bool:
         return self._ok
 
-    def _probs(self, mask: "np.ndarray"):
+    def _probs(self, mask: np.ndarray):
         x = preprocess_to_emnist(mask)
         if x is None:
             return None
@@ -163,7 +163,7 @@ class EMNISTCharClassifier:
             logits = self._model(torch.from_numpy(x).view(1, 1, 28, 28))
             return F.softmax(logits, dim=1)[0]
 
-    def classify_batch(self, masks: "list[np.ndarray]") -> "np.ndarray | None":
+    def classify_batch(self, masks: list[np.ndarray]) -> np.ndarray | None:
         """Clasifica muchos recortes de una vez. Devuelve probs [n, 27] (np) o None.
 
         Las máscaras sin tinta producen una fila de ceros. Pensado para el
@@ -189,7 +189,7 @@ class EMNISTCharClassifier:
             out[i] = probs[row]
         return out
 
-    def predict_topk(self, mask: "np.ndarray", k: int = 3) -> list[tuple[str, float]]:
+    def predict_topk(self, mask: np.ndarray, k: int = 3) -> list[tuple[str, float]]:
         """Top-k (letra, probabilidad) para un recorte. [] si no se puede."""
         if not self._ok:
             return []
@@ -200,7 +200,7 @@ class EMNISTCharClassifier:
         return [(label_to_char(int(i)), float(probs[int(i)])) for i in order
                 if int(i) >= 1]
 
-    def score(self, mask: "np.ndarray", expected_char: str) -> float | None:
+    def score(self, mask: np.ndarray, expected_char: str) -> float | None:
         """P(expected_char) según el modelo. None si no aplica (ñ, sin modelo…)."""
         if not self._ok:
             return None

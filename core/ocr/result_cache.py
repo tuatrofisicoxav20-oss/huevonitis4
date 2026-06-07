@@ -7,6 +7,7 @@ Invalidación automática si el archivo fuente cambia o si el backend/opciones d
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -59,10 +60,8 @@ class OCRResultCache:
                 removed += 1
             except OSError:
                 pass
-        try:
+        with contextlib.suppress(OSError):
             version_file.write_text(_CACHE_VERSION)
-        except OSError:
-            pass
         if removed:
             logger.info("OCRResultCache: purga de migración (%d entradas v1)", removed)
 
@@ -81,10 +80,8 @@ class OCRResultCache:
             with pkl.open("rb") as f:
                 return pickle.load(f)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 pkl.unlink()
-            except OSError:
-                pass
             return None
 
     def put(self, source_path: str, document,
@@ -143,10 +140,8 @@ class OCRResultCache:
     def cache_size_bytes(self) -> int:
         total = 0
         for pkl in self._cache_dir.glob("*.pkl"):
-            try:
+            with contextlib.suppress(OSError):
                 total += pkl.stat().st_size
-            except OSError:
-                pass
         return total
 
     def cache_size_mb(self) -> float:

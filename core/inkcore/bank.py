@@ -9,11 +9,6 @@ import threading
 from pathlib import Path
 
 import config
-from core.inkcore.bank_io import backfill_missing_hashes, scan_existing
-from core.inkcore.bank_report import build_bank_report
-from core.inkcore.bank_serial import _TIER_NORMALIZE, entry_from_dict, entry_to_dict
-from core.inkcore.quality import assess_glyph
-from core.models import GlyphEntry
 
 # Re-export de las funciones de hashing perceptual (movidas a bank_hashing.py
 # en v4.2 para mantener bank.py por debajo de ~420 líneas). Se re-importan acá
@@ -27,6 +22,11 @@ from core.inkcore.bank_hashing import (  # noqa: F401
     _glyph_to_gray,
     _hamming,
 )
+from core.inkcore.bank_io import backfill_missing_hashes, scan_existing
+from core.inkcore.bank_report import build_bank_report
+from core.inkcore.bank_serial import _TIER_NORMALIZE, entry_from_dict, entry_to_dict
+from core.inkcore.quality import assess_glyph
+from core.models import GlyphEntry
 
 logger = logging.getLogger(__name__)
 

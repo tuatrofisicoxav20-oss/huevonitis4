@@ -34,7 +34,7 @@ def iou(ax: int, ay: int, aw: int, ah: int,
     return inter / union if union > 0 else 0.0
 
 
-def _bbox_iou(a: "BBox | FusedBBox", b: "BBox | FusedBBox") -> float:
+def _bbox_iou(a: BBox | FusedBBox, b: BBox | FusedBBox) -> float:
     return iou(a.x, a.y, a.w, a.h, b.x, b.y, b.w, b.h)
 
 

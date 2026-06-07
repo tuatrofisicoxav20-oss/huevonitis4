@@ -17,6 +17,8 @@ from pathlib import Path
 import config
 from core.inkcore.extractor_hashing import (
     dual_dist as _dual_dist,
+)
+from core.inkcore.extractor_hashing import (
     dual_hash as _dual_hash,
 )
 from core.models import GlyphEntry

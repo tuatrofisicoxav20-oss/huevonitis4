@@ -9,14 +9,13 @@ para que el usuario decida (o ejecuta los auto_fix automáticos si confía).
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import config
 

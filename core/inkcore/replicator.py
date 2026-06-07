@@ -129,7 +129,7 @@ class NoteReplicator:
         return layout
 
     @staticmethod
-    def _detect_rectangles(thr_inv: "np.ndarray", min_area: float) -> list[tuple[int, int, int, int]]:
+    def _detect_rectangles(thr_inv: np.ndarray, min_area: float) -> list[tuple[int, int, int, int]]:
         """Encuentra contornos cuadrangulares razonablemente rectos."""
         contours, _ = cv2.findContours(thr_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         results: list[tuple[int, int, int, int]] = []
@@ -148,7 +148,7 @@ class NoteReplicator:
         return _dedup_boxes(results)
 
     @staticmethod
-    def _detect_text_blocks(gray: "np.ndarray", rects: list) -> list[Block]:
+    def _detect_text_blocks(gray: np.ndarray, rects: list) -> list[Block]:
         """OCR con tesseract; agrupa palabras por línea en bloques de texto.
 
         Cada bloque corresponde a una línea OCR contigua. Las áreas que caen
@@ -212,7 +212,7 @@ class NoteReplicator:
 
     # ── Render ───────────────────────────────────────────────────
 
-    def render(self, layout: PageLayout, fidelity: int = 0) -> "Image.Image | None":
+    def render(self, layout: PageLayout, fidelity: int = 0) -> Image.Image | None:
         """Re-renderiza un layout usando el bank del replicador.
 
         fidelity 0 = todo replicado con la letra del perfil.
@@ -291,11 +291,13 @@ class NoteReplicator:
         return canvas
 
     @staticmethod
-    def _draw_jittered_rect(draw: "ImageDraw.ImageDraw", block: Block) -> None:
+    def _draw_jittered_rect(draw: ImageDraw.ImageDraw, block: Block) -> None:
         """Dibuja un recuadro con un poco de jitter para que se vea manuscrito."""
         import random as _r
-        jx = lambda: _r.randint(-2, 2)
-        jy = lambda: _r.randint(-2, 2)
+        def jx():
+            return _r.randint(-2, 2)
+        def jy():
+            return _r.randint(-2, 2)
         x1, y1 = block.x + jx(), block.y + jy()
         x2, y2 = block.x + block.w + jx(), block.y + block.h + jy()
         # Trazo doble para simular grosor variable
@@ -341,7 +343,7 @@ def _iou(a, b) -> float:
     return inter / max(1, union)
 
 
-def export_replicated(image: "Image.Image", out_path: str | None = None) -> str:
+def export_replicated(image: Image.Image, out_path: str | None = None) -> str:
     """Guarda el resultado del replicador a EXPORTS_DIR/replicated_<ts>.png/pdf."""
     from datetime import datetime as _dt
     if out_path is None:

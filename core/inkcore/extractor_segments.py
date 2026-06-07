@@ -34,7 +34,7 @@ class SegmentDetector:
     Se instancia una vez en GlyphExtractor.__init__ como self._seg_detector.
     """
 
-    def find_line_boxes(self, mask: "np.ndarray") -> list:
+    def find_line_boxes(self, mask: np.ndarray) -> list:
         """Detecta bandas de texto (líneas de escritura) en la máscara.
 
         Devuelve lista de BBox con las coordenadas de cada banda.
@@ -87,7 +87,7 @@ class SegmentDetector:
 
     @staticmethod
     def split_tall_band(
-        band: list[int], proj: "np.ndarray", img_h: int
+        band: list[int], proj: np.ndarray, img_h: int
     ) -> list[list[int]]:
         """Divide una banda alta en sub-bandas por prominencia de valle.
 

@@ -73,7 +73,6 @@ def export_rendered_pages_pdf(
     if not images:
         return False
 
-    import tempfile
     tmp_files: list[str] = []
     try:
         c = rl_canvas.Canvas(output_path, pagesize=A4)

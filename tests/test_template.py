@@ -46,9 +46,9 @@ def test_layout_geometria_basica():
     assert len(lay.letters) == 27
     # Las casillas no se solapan y caen dentro de la grilla
     for i in range(lay.n_cells):
-        x, y, w, h = lay.cell_rect(i)
+        x, y, _w, _h = lay.cell_rect(i)
         assert x >= lay.grid_x0 - 1 and y >= lay.grid_y0 - 1
-        wx, wy, ww, wh = lay.writing_rect(i)
+        _wx, _wy, ww, wh = lay.writing_rect(i)
         assert ww > 20 and wh > 20
 
 
@@ -143,8 +143,8 @@ def test_charset_grande_entra_en_una_pagina_legible():
         MAYUSCULAS,
         MINUSCULAS,
         PUNTUACION,
-        TemplateLayout,
         VOCALES_ACENTUADAS,
+        TemplateLayout,
     )
     cs = MINUSCULAS + MAYUSCULAS + DIGITOS
     lay = TemplateLayout(charset=cs)

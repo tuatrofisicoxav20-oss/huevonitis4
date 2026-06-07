@@ -1,6 +1,6 @@
 """D3: verifica que ExtractionOptions puede llevar pipeline_config."""
-from core.inkcore.extractor import ExtractionOptions
 from core.inkcore.extraction_pipeline import PipelineConfig
+from core.inkcore.extractor import ExtractionOptions
 
 
 def test_extraction_options_includes_pipeline_config():

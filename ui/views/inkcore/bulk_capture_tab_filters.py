@@ -23,7 +23,7 @@ class BulkCaptureFiltersMixin:
         if not self._bulk_session:
             return
         chars = sorted({c.display_char for c in self._bulk_session.candidates})
-        self._bulk_filter_char_combo.configure(values=["(todos)"] + chars)
+        self._bulk_filter_char_combo.configure(values=["(todos)", *chars])
         self._bulk_filter_char_combo.set(self._bulk_filter_char_val)
 
     def _bulk_filtered_candidates(self) -> list:

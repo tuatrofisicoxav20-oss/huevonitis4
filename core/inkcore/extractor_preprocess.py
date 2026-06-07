@@ -22,9 +22,9 @@ except ImportError:
 # Si no está instalado, todo el preprocesamiento degrada a las variantes
 # basadas en cv2 (Sauvola casero + CLAHE de OpenCV) — el comportamiento previo.
 try:
-    from skimage.filters import threshold_sauvola as _sk_threshold_sauvola
     from skimage.exposure import equalize_adapthist as _sk_equalize_adapthist
     from skimage.exposure import rescale_intensity as _sk_rescale_intensity
+    from skimage.filters import threshold_sauvola as _sk_threshold_sauvola
     SKIMAGE_OK = True
 except ImportError:  # pragma: no cover - entorno sin scikit-image
     SKIMAGE_OK = False
@@ -125,7 +125,7 @@ class ImagePreprocessor:
 
     # ── Ajustes manuales (brillo/contraste/rotación) ───────────────
 
-    def apply_options(self, img: "np.ndarray", opts) -> "np.ndarray":
+    def apply_options(self, img: np.ndarray, opts) -> np.ndarray:
         """Aplica ajustes manuales de brillo, contraste y rotación."""
         if not CV2_OK:
             return img
@@ -142,7 +142,7 @@ class ImagePreprocessor:
 
     # ── Escala ─────────────────────────────────────────────────────
 
-    def scale(self, img: "np.ndarray") -> "np.ndarray":
+    def scale(self, img: np.ndarray) -> np.ndarray:
         """Reduce imágenes grandes a TARGET_LONG en el lado mayor."""
         if not CV2_OK:
             return img
@@ -155,7 +155,7 @@ class ImagePreprocessor:
 
     # ── Autocrop + corrección de perspectiva ───────────────────────
 
-    def autocrop(self, img: "np.ndarray") -> "np.ndarray":
+    def autocrop(self, img: np.ndarray) -> np.ndarray:
         """Detecta y recorta el área de escritura; corrige perspectiva si es posible."""
         if not CV2_OK:
             return img
@@ -183,7 +183,7 @@ class ImagePreprocessor:
                 return crop
         return img
 
-    def _four_point_transform(self, img: "np.ndarray", pts: "np.ndarray") -> "np.ndarray | None":
+    def _four_point_transform(self, img: np.ndarray, pts: np.ndarray) -> np.ndarray | None:
         if not CV2_OK:
             return None
         try:
@@ -205,7 +205,7 @@ class ImagePreprocessor:
             return None
 
     @staticmethod
-    def _order_points(pts: "np.ndarray") -> "np.ndarray":
+    def _order_points(pts: np.ndarray) -> np.ndarray:
         rect = np.zeros((4, 2), dtype=np.float32)
         s = pts.sum(axis=1)
         rect[0] = pts[np.argmin(s)]
@@ -217,7 +217,7 @@ class ImagePreprocessor:
 
     # ── Deskew ─────────────────────────────────────────────────────
 
-    def deskew(self, img: "np.ndarray") -> "tuple[np.ndarray, float]":
+    def deskew(self, img: np.ndarray) -> tuple[np.ndarray, float]:
         """Endereza la imagen si está inclinada. Devuelve (imagen, ángulo_grados)."""
         if not CV2_OK:
             return img, 0.0
@@ -236,7 +236,7 @@ class ImagePreprocessor:
                                  borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
         return rotated, float(angle)
 
-    def _estimate_skew(self, mask: "np.ndarray", width: int) -> "float | None":
+    def _estimate_skew(self, mask: np.ndarray, width: int) -> float | None:
         edges = cv2.Canny(mask, 50, 150)
         # F5 — HoughLinesP da segmentos con extremos: medimos ángulo Y longitud y
         # descartamos las rayas del cuaderno (casi horizontales y que abarcan casi
@@ -289,7 +289,7 @@ class ImagePreprocessor:
     # ── Detección del papel (encuadre con fondo oscuro / mano) ─────
 
     @staticmethod
-    def detect_paper_mask(gray: "np.ndarray") -> "np.ndarray | None":
+    def detect_paper_mask(gray: np.ndarray) -> np.ndarray | None:
         """Detecta la región del PAPEL (zona clara grande) en la imagen.
 
         Pensado para fotos donde el papel no llena el cuadro: hay fondo oscuro,
@@ -307,7 +307,7 @@ class ImagePreprocessor:
 
         # Otsu sobre gris suavizado separa "claro" (papel) de "oscuro" (fondo/mano).
         blur = cv2.GaussianBlur(gray, (9, 9), 0)
-        otsu_thr, bright = cv2.threshold(blur, 0, 255,
+        _otsu_thr, bright = cv2.threshold(blur, 0, 255,
                                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         # Si casi todo es claro, no hay fondo oscuro que recortar (escaneo limpio).
@@ -362,7 +362,7 @@ class ImagePreprocessor:
         return paper
 
     @staticmethod
-    def _fill_holes(mask: "np.ndarray") -> "np.ndarray":
+    def _fill_holes(mask: np.ndarray) -> np.ndarray:
         """Rellena agujeros internos (rodeados de blanco) de una máscara binaria.
 
         Hace flood-fill del FONDO desde un marco exterior de 1px (garantizado
@@ -382,7 +382,7 @@ class ImagePreprocessor:
     # ── Umbralización y normalización ──────────────────────────────
 
     @staticmethod
-    def normalize_illumination(gray: "np.ndarray") -> "np.ndarray":
+    def normalize_illumination(gray: np.ndarray) -> np.ndarray:
         """Sustrae el fondo estimado por dilatación → iluminación uniforme.
 
         (Versión original, robusta para escaneos/cuaderno rayado: estima el fondo
@@ -399,7 +399,7 @@ class ImagePreprocessor:
         return np.clip(norm, 0, 255).astype(np.uint8)
 
     @staticmethod
-    def flatten_shadows(gray: "np.ndarray") -> "np.ndarray":
+    def flatten_shadows(gray: np.ndarray) -> np.ndarray:
         """Aplana sombras/pliegues anchos del papel (caso foto) dividiendo por un
         CLOSE morfológico de kernel mayor que el grosor de los trazos.
 
@@ -420,7 +420,7 @@ class ImagePreprocessor:
         return np.clip(flat, 0, 255).astype(np.uint8)
 
     @staticmethod
-    def sauvola(gray: "np.ndarray", window: int = 25, k: float = 0.20) -> "np.ndarray":
+    def sauvola(gray: np.ndarray, window: int = 25, k: float = 0.20) -> np.ndarray:
         """Thresholding de Sauvola — robusto para escritura a mano con iluminación variable.
 
         Usa la implementación canónica de scikit-image (`threshold_sauvola`,
@@ -449,7 +449,7 @@ class ImagePreprocessor:
         return (g < threshold).astype(np.uint8) * 255
 
     @staticmethod
-    def enhance_contrast(gray: "np.ndarray") -> "np.ndarray":
+    def enhance_contrast(gray: np.ndarray) -> np.ndarray:
         """Realza letras tenues/de bajo contraste (img3) antes de binarizar.
 
         Combina dos técnicas de scikit-image:
@@ -483,7 +483,7 @@ class ImagePreprocessor:
             return gray
 
     @staticmethod
-    def _estimate_text_height(gray: "np.ndarray") -> int:
+    def _estimate_text_height(gray: np.ndarray) -> int:
         """Estima el alto típico de letra (px) para dimensionar la ventana Sauvola.
 
         Una binarización Otsu rápida + componentes conexas: la mediana de la
@@ -511,7 +511,7 @@ class ImagePreprocessor:
             return 0
 
     @staticmethod
-    def filtered_mask(mask: "np.ndarray") -> "np.ndarray":
+    def filtered_mask(mask: np.ndarray) -> np.ndarray:
         """Elimina componentes de ruido (demasiado pequeños)."""
         num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         out = np.zeros_like(mask)
@@ -524,7 +524,7 @@ class ImagePreprocessor:
         return out
 
     @staticmethod
-    def _denoise_specks(mask: "np.ndarray") -> "np.ndarray":
+    def _denoise_specks(mask: np.ndarray) -> np.ndarray:
         """Borra componentes de ruido (granulado del papel) en fotos.
 
         Usa el tamaño TÍPICO de los componentes grandes (las letras) como escala:
@@ -555,7 +555,7 @@ class ImagePreprocessor:
         return out
 
     @staticmethod
-    def _remove_hdashes(mask: "np.ndarray") -> "np.ndarray":
+    def _remove_hdashes(mask: np.ndarray) -> np.ndarray:
         """Borra GUIONES horizontales: fragmentos de renglón rayado roto (caso foto).
 
         En una foto de hoja rayada, la línea del cuaderno no sale entera (como en
@@ -571,7 +571,7 @@ class ImagePreprocessor:
         alto de letra como la mediana de las componentes altas; si no hay letras
         claras no se toca nada (evita comerse escritura tenue).
         """
-        h, w = mask.shape[:2]
+        _h, w = mask.shape[:2]
         num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if num <= 2:
             return mask
@@ -597,7 +597,7 @@ class ImagePreprocessor:
         return out
 
     @staticmethod
-    def _remove_long_lines(mask: "np.ndarray") -> "np.ndarray":
+    def _remove_long_lines(mask: np.ndarray) -> np.ndarray:
         """Borra componentes muy anchos/elongados (borde o pliegue del papel).
 
         En una foto, el filo y el pliegue del papel binarizan como trazos largos
@@ -606,7 +606,7 @@ class ImagePreprocessor:
         que son extremadamente elongadas horizontalmente) limpia esos artefactos
         sin tocar letras. Sólo se usa en el camino "papel detectado" (foto).
         """
-        h, w = mask.shape[:2]
+        _h, w = mask.shape[:2]
         num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         out = mask.copy()
         max_w = int(w * 0.45)
@@ -620,7 +620,7 @@ class ImagePreprocessor:
         return out
 
     @staticmethod
-    def _gate_text_rows(mask: "np.ndarray") -> "np.ndarray":
+    def _gate_text_rows(mask: np.ndarray) -> np.ndarray:
         """Conserva el BLOQUE de texto (renglones contiguos) y descarta lo demás.
 
         En una foto, el borde/pliegue curvo del papel y el granulado generan
@@ -733,7 +733,7 @@ class ImagePreprocessor:
             out[bot:, :] = 0
         return out
 
-    def remove_lines(self, mask: "np.ndarray") -> "np.ndarray":
+    def remove_lines(self, mask: np.ndarray) -> np.ndarray:
         """Elimina líneas horizontales de cuaderno preservando trazos verticales."""
         mask = np.where(mask > 0, np.uint8(255), np.uint8(0))
         h, w = mask.shape[:2]
@@ -759,8 +759,8 @@ class ImagePreprocessor:
     # ── Preprocesamiento completo ──────────────────────────────────
 
     def full_preprocess(
-        self, img: "np.ndarray", opts
-    ) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+        self, img: np.ndarray, opts
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Preprocesamiento completo: papel + normalización + multi-threshold + limpieza.
 
         Devuelve (gray_normalizado, thresh_raw, mask_limpia).

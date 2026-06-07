@@ -21,10 +21,10 @@ except ImportError:
 # Re-exportados para compatibilidad: BACKGROUND_STYLES y STYLE_PRESETS vivían
 # acá antes de mover las decoraciones de fondo a renderer_backgrounds.py.
 __all__ = [
-    "RenderOptions",
-    "HandwritingRenderer",
     "BACKGROUND_STYLES",
     "STYLE_PRESETS",
+    "HandwritingRenderer",
+    "RenderOptions",
 ]
 
 

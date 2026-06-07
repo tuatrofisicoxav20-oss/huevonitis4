@@ -4,15 +4,17 @@ devuelve candidatos listos para revisión y aprobación al banco.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from core.models import GlyphEntry
 
@@ -70,7 +72,7 @@ class BulkCaptureSession:
 
 
 def _rasterize_pdf(
-    pdf_path: str, dpi: int = 200, *, tracker: "list[str] | None" = None,
+    pdf_path: str, dpi: int = 200, *, tracker: list[str] | None = None,
 ) -> list[tuple[str, int]]:
     """BUG-04: si tracker se pasa (lista), registra el tmp_dir creado para
     cleanup posterior. Sin esto, /tmp se llena con 10-50 MB por página
@@ -170,7 +172,7 @@ class BulkCaptureRunner:
         counter_lock = threading.Lock()
 
         def _work(idx_img_label_pnum):
-            i, (img, label, pnum) = idx_img_label_pnum
+            _i, (img, label, pnum) = idx_img_label_pnum
             if self._cancel_event and self._cancel_event.is_set():
                 return (img, pnum, [])
             try:
@@ -204,6 +206,7 @@ class BulkCaptureRunner:
                 self._progress(0.9, f"TrOCR: etiquetando {len(unlabeled)} glifos…")
                 try:
                     from PIL import Image as _PIL
+
                     from core.inkcore.glyph_labelers.trocr_labeler import TrOCRLabeler
                     labeler = TrOCRLabeler()
                     if labeler.available:
@@ -214,7 +217,7 @@ class BulkCaptureRunner:
                             except Exception:
                                 crops.append(_PIL.new("RGB", (32, 32), (255, 255, 255)))
                         results = labeler.label_batch(crops)
-                        for g, (text, conf) in zip(unlabeled, results):
+                        for g, (text, conf) in zip(unlabeled, results, strict=False):
                             g.predicted_char = text[:1] if text and text != "?" else ""
                             g.label_confidence = conf
                         logger.info("TrOCR etiquetó %d glifos", len(unlabeled))
@@ -343,10 +346,8 @@ class BulkCaptureRunner:
                 self._progress(frac, f"Extrayendo glifos página {page_num}/{total_pages}…")
 
                 glyphs = self._extract_from_image(tmp_path)
-                try:
+                with contextlib.suppress(Exception):
                     Path(tmp_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
 
                 for g in glyphs:
                     session.candidates.append(BulkGlyphCandidate(
@@ -369,6 +370,7 @@ class BulkCaptureRunner:
                 self._progress(0.8, f"TrOCR: etiquetando {len(unlabeled)} glifos…")
                 try:
                     from PIL import Image as _PIL
+
                     from core.inkcore.glyph_labelers.trocr_labeler import TrOCRLabeler
                     labeler = TrOCRLabeler()
                     if labeler.available:
@@ -385,7 +387,7 @@ class BulkCaptureRunner:
                             chunk = crops[start:start + BATCH_LBL]
                             results = labeler.label_batch(chunk)
                             for g, (text, conf) in zip(
-                                unlabeled[start:start + BATCH_LBL], results
+                                unlabeled[start:start + BATCH_LBL], results, strict=False
                             ):
                                 g.predicted_char = text[:1] if text and text != "?" else ""
                                 g.label_confidence = conf
@@ -415,7 +417,7 @@ class BulkCaptureRunner:
             logger.error("_extract_from_image '%s': %s", img_path, exc)
             return []
 
-    def _save_temp(self, pil_img: "object", page_num: int) -> str:
+    def _save_temp(self, pil_img: object, page_num: int) -> str:
         import config
         temp_dir = config.DATA_DIR / "temp_bulk_capture"
         temp_dir.mkdir(exist_ok=True)

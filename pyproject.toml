@@ -30,6 +30,11 @@ ignore = [
     "E501",   # line too long — handled by formatter
     "B008",   # function call in default arg
     "SIM108", # ternary — readability preference
+    # Codebase en español: acentos, ¿¡, guiones largos y demás unicode en
+    # comentarios/strings/docstrings son intencionales, no "ambiguos".
+    "RUF001", # ambiguous-unicode-character-string
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
 ]
 
 [tool.ruff.lint.per-file-ignores]

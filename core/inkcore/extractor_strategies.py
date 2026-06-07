@@ -38,11 +38,17 @@ def benchmark_all(
         return {}
 
     from core.inkcore.extractor_alignment import (
-        align_inkflow, align_vpp_only, align_uniform,
-        align_dp_energy, align_cc_first, align_hybrid_v2,
+        align_cc_first,
+        align_dp_energy,
+        align_hybrid_v2,
+        align_inkflow,
+        align_uniform,
+        align_vpp_only,
     )
     from core.inkcore.extractor_glyph_ops import (
-        tight_crop, to_rgba_smooth, assess_quality,
+        assess_quality,
+        tight_crop,
+        to_rgba_smooth,
     )
     from core.inkcore.extractor_ocr_hints import tesseract_boundaries
 

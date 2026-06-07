@@ -7,10 +7,10 @@ lector adecuado. Integra la caché de resultados OCR.
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from core.ocr.document_model import Document
 from core.ocr.options import OCROptions

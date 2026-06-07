@@ -14,6 +14,7 @@ y de métodos de otros mixins:
   self._reload_and_refresh_all, self._refresh_detector_chip,
   self._do_refresh_bank_ui, self._do_refresh_review_ui, self.toast
 """
+import contextlib
 import logging
 from pathlib import Path
 
@@ -102,9 +103,7 @@ class InkCoreViewHelpersMixin:
         if not current:
             self._writer_text.delete("0.0", "end")
             self._writer_text.insert("0.0", pending)
-            try:
+            with contextlib.suppress(Exception):
                 self._tabs.set("✍️ Escritor")
-            except Exception:
-                pass
             self.toast("Texto importado desde Estudio", "success")
         st.study_text = ""

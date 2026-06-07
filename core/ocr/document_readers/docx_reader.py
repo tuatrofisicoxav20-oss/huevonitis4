@@ -30,7 +30,7 @@ def read_docx(docx_path: str) -> str:
         return f"Error leyendo Word: {e}"
 
 
-def read_docx_document(docx_path: str) -> "Document":
+def read_docx_document(docx_path: str) -> Document:
     """
     Lee un .docx y devuelve un Document estructurado con TextBlocks tipados.
     Los encabezados (Heading 1-6) se mapean a BlockType.HEADING.

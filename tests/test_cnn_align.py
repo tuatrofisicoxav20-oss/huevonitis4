@@ -74,7 +74,6 @@ def test_clasificador_reconoce_letra_de_fuente():
     clf = EMNISTCharClassifier()
     if not clf.available:
         pytest.skip("modelo CNN no disponible")
-    import numpy as np
     hits = 0
     for ch in "aehkotuw":
         mask = _line_with_letters(ch, cell=64)
@@ -93,7 +92,7 @@ def test_extraccion_con_cnn_no_crashea(tmp_path, monkeypatch):
     if not EMNISTCharClassifier().available:
         pytest.skip("modelo CNN no disponible")
     from PIL import Image
-    mask = _line_with_letters("abcde", cell=70)
+    _line_with_letters("abcde", cell=70)
     # negro sobre blanco para que parezca foto real
     import numpy as np
     page = 255 - np.asarray(_line_with_letters("abcde", cell=70))

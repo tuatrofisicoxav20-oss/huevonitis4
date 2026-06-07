@@ -8,7 +8,7 @@ def test_extract_from_image_legacy_path(tmp_path):
     config.TIPOGRAFIA_DIR.mkdir(parents=True, exist_ok=True)
     (config.TIPOGRAFIA_DIR / "_temp_extract").mkdir(parents=True, exist_ok=True)
 
-    from core.inkcore.extractor import GlyphExtractor, ExtractionOptions
+    from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
 
     ext = GlyphExtractor()
     opts_legacy = ExtractionOptions(use_pipeline=False)

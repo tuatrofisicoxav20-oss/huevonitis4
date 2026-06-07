@@ -9,7 +9,7 @@ def test_vote_majority_clear_winner():
         "b": ("x", 0.8),
         "c": ("y", 0.95),
     }
-    char, conf, consensus = vote(preds, "majority")
+    char, _conf, consensus = vote(preds, "majority")
     assert char == "x"
     assert consensus is True
 
@@ -46,7 +46,7 @@ def test_vote_highest_conf_consensus():
         "a": ("x", 0.9),
         "b": ("x", 0.8),
     }
-    char, conf, consensus = vote(preds, "highest_conf")
+    char, _conf, consensus = vote(preds, "highest_conf")
     assert char == "x"
     assert consensus is True
 
@@ -69,7 +69,7 @@ def test_vote_consensus_disagree():
         "a": ("p", 0.8),
         "b": ("q", 0.8),
     }
-    char, conf, consensus = vote(preds, "consensus")
+    char, _conf, consensus = vote(preds, "consensus")
     assert char == "?"
     assert consensus is False
 
@@ -85,6 +85,6 @@ def test_vote_empty_predictions():
 def test_vote_single_labeler():
     from core.inkcore.glyph_labelers.voting import vote
     preds = {"only": ("m", 0.75)}
-    char, conf, consensus = vote(preds, "majority")
+    char, _conf, consensus = vote(preds, "majority")
     assert char == "m"
     assert consensus is True

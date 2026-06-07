@@ -1,4 +1,5 @@
 """BulkCaptureTabMixin — tab 📦 Captura masiva de InkCoreView."""
+import contextlib
 import logging
 from tkinter import filedialog
 
@@ -246,10 +247,8 @@ class BulkCaptureTabMixin:
         self._bulk_status.configure(text="Iniciando…", text_color=theme.ACCENT_ORANGE)
         self._bulk_approve_all_btn.configure(state="disabled")
         self._bulk_commit_btn.configure(state="disabled")
-        try:
+        with contextlib.suppress(Exception):
             self.app.begin_background_work()
-        except Exception:
-            pass
 
         cancel_event = self._bulk_cancel_event
 
@@ -313,10 +312,8 @@ class BulkCaptureTabMixin:
         )
         self._bulk_approve_all_btn.configure(state="disabled")
         self._bulk_commit_btn.configure(state="disabled")
-        try:
+        with contextlib.suppress(Exception):
             self.app.begin_background_work()
-        except Exception:
-            pass
 
         cancel_event = self._bulk_cancel_event
 
@@ -358,10 +355,8 @@ class BulkCaptureTabMixin:
             text="Sin sesión activa. Carga un PDF o imágenes para empezar.",
             text_color=theme.TEXT_MUTED,
         )
-        try:
+        with contextlib.suppress(Exception):
             self.app.end_background_work()
-        except Exception:
-            pass
 
     def _bulk_on_session_ready(self, session):
         self._bulk_session = session

@@ -10,7 +10,6 @@ import time
 
 import config as _config
 
-from core.models import GlyphEntry
 # PipelineConfig/ExtractionResult viven en extraction_pipeline_config y el
 # overlay de debug en extraction_debug; se re-exportan acá para no romper la
 # API pública (from core.inkcore.extraction_pipeline import ...).
@@ -19,11 +18,12 @@ from core.inkcore.extraction_pipeline_config import (
     ExtractionResult,
     PipelineConfig,
 )
+from core.models import GlyphEntry
 
 __all__ = [
+    "ExtractionResult",
     "GlyphExtractionPipeline",
     "PipelineConfig",
-    "ExtractionResult",
     "_generate_debug_overlay",
 ]
 
@@ -157,7 +157,7 @@ class GlyphExtractionPipeline:
         stats["detector_counts"] = {k: len(v) for k, v in all_detections.items()}
 
         # 3. Fusionar
-        from core.inkcore.glyph_detectors.fusion import fuse, FusedBBox
+        from core.inkcore.glyph_detectors.fusion import FusedBBox, fuse
         fused = fuse(all_detections, strategy=self.config.detector_fusion,
                      iou_threshold=self.config.iou_dedup_threshold)
         stats["fused_count"] = len(fused)
@@ -212,7 +212,7 @@ class GlyphExtractionPipeline:
             return ExtractionResult(glyphs=[], stats={"error": "Pillow no disponible"})
 
         PAD = 4
-        crops: list["_PIL.Image"] = []
+        crops: list[_PIL.Image] = []
         valid_fused: list[FusedBBox] = []
         for fb in fused:
             # Banda horizontal con margen vertical extra para que
@@ -287,16 +287,16 @@ class GlyphExtractionPipeline:
         # 6. Votar + quality scoring (usa la versión rica _assess_quality
         # del extractor, que pondera cobertura asimétrica, ancho de trazo
         # por distance transform, borde, alineación e ink absoluto).
+        # F4 — Mapeo glifo→char esperado de la referencia, para verificar la
+        # predicción del labeler contra lo que el usuario dijo que escribió.
+        import re as _re
+
         from core.inkcore.glyph_labelers.voting import vote
         from core.inkcore.quality import (
             classify_tier_verified,
             compute_final_quality,
             is_verified,
         )
-
-        # F4 — Mapeo glifo→char esperado de la referencia, para verificar la
-        # predicción del labeler contra lo que el usuario dijo que escribió.
-        import re as _re
         ref_chars = list(_re.sub(r"\s+", "", reference_text)) if reference_text else []
 
         # Altura de línea de referencia (Salto 4 para normalizar anchos, y Salto 3
@@ -342,7 +342,7 @@ class GlyphExtractionPipeline:
         # calibran wf().
         wf_samples: list[tuple[str, float]] = []
 
-        for i, (fb, crop) in enumerate(zip(valid_fused, crops)):
+        for i, (fb, crop) in enumerate(zip(valid_fused, crops, strict=False)):
             # Voto pre-computado (ya normalizado a 1 char) — ver pre-pass arriba.
             char, label_conf, has_consensus = box_votes[i]
 

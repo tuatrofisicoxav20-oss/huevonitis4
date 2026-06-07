@@ -1,6 +1,7 @@
 """D5: export_rendered_pages_pdf genera PDF válido con las páginas correctas."""
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 def _has_reportlab():
@@ -22,6 +23,7 @@ def _has_pil():
 @pytest.mark.skipif(not (_has_reportlab() and _has_pil()), reason="reportlab o PIL no instalado")
 def test_export_rendered_pages_pdf(tmp_path):
     from PIL import Image
+
     from core.export.pdf_exporter import export_rendered_pages_pdf
 
     img1 = Image.new("RGB", (595, 842), (255, 255, 255))

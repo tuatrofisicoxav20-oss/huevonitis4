@@ -102,7 +102,7 @@ def test_settings_min_glyph_quality_loaded(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "MIN_GLYPH_QUALITY", 0.18)
     config.load_settings()
-    assert config.MIN_GLYPH_QUALITY == pytest.approx(0.42)
+    assert pytest.approx(0.42) == config.MIN_GLYPH_QUALITY
 
 
 def test_settings_min_glyph_quality_out_of_range_ignored(tmp_path, monkeypatch):
@@ -114,7 +114,7 @@ def test_settings_min_glyph_quality_out_of_range_ignored(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "MIN_GLYPH_QUALITY", 0.18)
     config.load_settings()
-    assert config.MIN_GLYPH_QUALITY == pytest.approx(0.18), (
+    assert pytest.approx(0.18) == config.MIN_GLYPH_QUALITY, (
         "Valores fuera de rango deben ignorarse, no aplicarse"
     )
 

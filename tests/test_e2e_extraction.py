@@ -85,8 +85,8 @@ def test_ensemble_extraction_meets_minimum(fixture_name, tmp_path, monkeypatch):
     exp = _load_expectations()[fixture_name]
 
     from core.inkcore import glyph_detectors
-    from core.inkcore.extractor import ExtractionOptions
     from core.inkcore.extraction_pipeline import PipelineConfig
+    from core.inkcore.extractor import ExtractionOptions
     from core.inkcore.pipeline import InkCorePipeline
 
     available = glyph_detectors.get_available()

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _generate_debug_overlay(
-    img_bgr: "np.ndarray",
+    img_bgr: np.ndarray,
     accepted: list[tuple],
     discarded: list[tuple],
 ) -> str | None:
@@ -26,7 +26,7 @@ def _generate_debug_overlay(
         return None
 
     overlay = img_bgr.copy()
-    h, w = overlay.shape[:2]
+    _h, w = overlay.shape[:2]
 
     for fb, _, char, conf in accepted:
         # Verde si todos lo vieron, amarillo si solo algunos

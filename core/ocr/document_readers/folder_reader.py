@@ -7,8 +7,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from core.ocr.document_model import Document, DocumentPage
 from core.ocr.document_readers.image_reader import SUPPORTED_EXTS

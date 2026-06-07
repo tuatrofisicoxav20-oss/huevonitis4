@@ -80,8 +80,10 @@ def preload_trocr() -> bool:
     try:
         import torch
         from transformers import (
-            TrOCRProcessor, VisionEncoderDecoderModel,
+            TrOCRProcessor,
+            VisionEncoderDecoderModel,
         )
+
         import config
         from core.inkcore.model_cache import ModelCache
     except ImportError:
@@ -212,7 +214,7 @@ def _try_tesseract(image_path: str) -> tuple[str, float]:
             )
         words: list[str] = []
         confs: list[float] = []
-        for txt, c in zip(data["text"], data["conf"]):
+        for txt, c in zip(data["text"], data["conf"], strict=False):
             txt = str(txt).strip()
             try:
                 c = float(c)

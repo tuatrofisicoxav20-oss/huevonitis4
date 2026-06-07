@@ -38,6 +38,7 @@ def main() -> int:
     config.ensure_dirs()
 
     from PIL import Image, ImageDraw, ImageFont
+
     from core.inkcore.bank import GlyphBank
 
     def render(text: str, x_off: int = 0, y_off: int = 0) -> Image.Image:

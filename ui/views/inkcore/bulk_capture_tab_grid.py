@@ -118,7 +118,7 @@ class BulkCaptureGridMixin:
         def on_right(e, i=idx):
             self._bulk_edit_char_popup(i)
 
-        for w in [card] + list(card.winfo_children()):
+        for w in [card, *list(card.winfo_children())]:
             w.bind("<Button-1>", on_click, add="+")
             w.bind("<Double-Button-1>", on_dbl, add="+")
             w.bind("<Button-3>", on_right, add="+")

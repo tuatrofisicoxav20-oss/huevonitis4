@@ -5,8 +5,8 @@ Acepta cualquier formato soportado por Pillow/OpenCV.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from core.ocr.document_model import BlockType, Document, DocumentPage, TextBlock
 

@@ -19,7 +19,7 @@ la página entera de una sino por renglón.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 # Costes por defecto (escala comparable al término de ancho, ~0..2).
 GAP_BOX = 0.65        # saltar una caja (caja sobrante)

@@ -25,6 +25,7 @@ def test_label_char_roundtrip():
 
 def test_preprocess_encuadre_emnist():
     import numpy as np
+
     from core.inkcore.ai.char_cnn import preprocess_to_emnist
     # mancha de tinta en una esquina de una imagen grande
     mask = np.zeros((120, 80), np.uint8)
@@ -33,13 +34,14 @@ def test_preprocess_encuadre_emnist():
     assert out is not None
     assert out.shape == (28, 28)
     assert out.dtype == np.float32
-    assert 0.0 <= float(out.min()) and float(out.max()) <= 1.0
+    assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
     # la tinta queda centrada (los bordes del lienzo quedan vacíos)
     assert float(out[0].sum()) == 0.0 and float(out[-1].sum()) == 0.0
 
 
 def test_preprocess_vacio_devuelve_none():
     import numpy as np
+
     from core.inkcore.ai.char_cnn import preprocess_to_emnist
     assert preprocess_to_emnist(np.zeros((30, 30), np.uint8)) is None
     assert preprocess_to_emnist(None) is None
@@ -47,6 +49,7 @@ def test_preprocess_vacio_devuelve_none():
 
 def test_clasificador_sin_modelo_degrada(tmp_path):
     import numpy as np
+
     from core.inkcore.ai.char_cnn import EMNISTCharClassifier
     clf = EMNISTCharClassifier(model_path=str(tmp_path / "no_existe.pt"))
     assert clf.available is False

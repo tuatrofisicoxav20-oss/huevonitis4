@@ -46,7 +46,7 @@ def first_alnum(text: str) -> str:
     return ""
 
 
-def is_verified(predicted: str, expected: "str | None", has_consensus: bool) -> bool:
+def is_verified(predicted: str, expected: str | None, has_consensus: bool) -> bool:
     """¿La predicción del labeler VERIFICA el char esperado de la referencia?
 
     Exige consenso entre labelers Y que el primer alfanumérico de la predicción
@@ -80,7 +80,7 @@ def classify_tier_verified(score: float, verified: bool) -> str:
     return tier
 
 
-def _largest_cc_ratio(mask: "np.ndarray") -> float:
+def _largest_cc_ratio(mask: np.ndarray) -> float:
     """Fracción de píxeles de tinta que caen en el componente conexo más grande.
 
     1.0 = todo el trazo es una sola pieza (o no hay tinta); valores bajos = la

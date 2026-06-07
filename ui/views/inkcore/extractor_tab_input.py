@@ -8,6 +8,7 @@ Agrupa lo previo a la extracción y las ventanas de preview:
 
 La lógica de extracción (extract, on_extracted, etc.) sigue en extractor_tab.py.
 """
+import contextlib
 import logging
 import threading
 from pathlib import Path
@@ -83,9 +84,7 @@ class ExtractorTabInputMixin:
         if " " not in clean and len(clean) > 15:
             return True
         # Si ningún char es alfanumérico → basura
-        if not any(c.isalnum() for c in clean):
-            return True
-        return False
+        return bool(not any(c.isalnum() for c in clean))
 
     _QUICK_TEMPLATES = [
         ("a-z", "a b c d e f g h i j k l m n ñ o p q r s t u v w x y z"),
@@ -247,18 +246,14 @@ class ExtractorTabInputMixin:
         # Deshabilitar el botón mientras corre el thread: sin esto, clicks
         # repetidos lanzan threads concurrentes que abren múltiples ventanas
         # de preview y compiten por los mismos sliders/imagen.
-        try:
+        with contextlib.suppress(AttributeError, Exception):
             self._preview_btn.configure(state="disabled", text="Procesando…")
-        except (AttributeError, Exception):
-            pass
         self.toast("Generando preview de preprocesamiento…", "info")
         image_path = self._image_path
 
         def _restore():
-            try:
+            with contextlib.suppress(AttributeError, Exception):
                 self._preview_btn.configure(state="normal", text="🔍 Ver preprocesamiento")
-            except (AttributeError, Exception):
-                pass
 
         def worker():
             try:
@@ -269,10 +264,8 @@ class ExtractorTabInputMixin:
             def _done():
                 _restore()
                 self._open_preview_window(preview)
-            try:
+            with contextlib.suppress(Exception):
                 self.after(0, _done)
-            except Exception:
-                pass
 
         threading.Thread(target=worker, daemon=True).start()
 

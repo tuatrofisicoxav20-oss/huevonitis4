@@ -1,4 +1,14 @@
-from core.models import ClientJob, GlyphEntry, ImageElement, LineElement, Page, Payment, Project, RectElement, TextElement
+from core.models import (
+    ClientJob,
+    GlyphEntry,
+    ImageElement,
+    LineElement,
+    Page,
+    Payment,
+    Project,
+    RectElement,
+    TextElement,
+)
 
 
 def element_to_dict(el) -> dict:

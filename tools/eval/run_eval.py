@@ -96,6 +96,7 @@ def _preprocess_image(image_path: str):
     la imagen sobre la que se debe anotar el GT. Devuelve (img_bgr_preprocesada o None)."""
     try:
         import cv2  # noqa: F401
+
         from core.inkcore.extractor import GlyphExtractor
         from core.inkcore.extractor_preprocess import imread_oriented
     except Exception as exc:

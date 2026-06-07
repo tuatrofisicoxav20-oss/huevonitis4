@@ -128,10 +128,9 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     btn_bar.pack(fill="x", padx=20, pady=12)
 
     def _fix_all_safe():
-        for r, b, m in rows:
-            if r.is_fixable and (b is None or str(b.cget("state")) == "normal"):
-                if b is not None:
-                    b.invoke()
+        for r, b, _m in rows:
+            if r.is_fixable and (b is None or str(b.cget("state")) == "normal") and b is not None:
+                b.invoke()
 
     ctk.CTkButton(
         btn_bar, text="🔧 Arreglar todos los seguros", width=240, height=36,

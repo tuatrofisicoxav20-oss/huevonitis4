@@ -70,13 +70,16 @@ class PaddleDetector(GlyphDetector):
             if ver >= (3, 0):
                 # En 3.0 la API det-only difiere; usar modelo completo con kwargs básicos
                 # y luego ignorar el resultado de rec (fallback compatible)
-                loader = lambda: _PaddleOCR(**kwargs)
+                def loader():
+                    return _PaddleOCR(**kwargs)
             else:
                 det_kwargs = {**kwargs, "det": True, "rec": False}
-                loader = lambda: _PaddleOCR(**det_kwargs)
+                def loader():
+                    return _PaddleOCR(**det_kwargs)
         except Exception:
             det_kwargs = {**kwargs, "det": True, "rec": False}
-            loader = lambda: _PaddleOCR(**det_kwargs)
+            def loader():
+                return _PaddleOCR(**det_kwargs)
 
         self._ocr = ModelCache.get("paddleocr_det_es", loader)
         return self._ocr

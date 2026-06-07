@@ -67,7 +67,7 @@ class InkCoreView(
         self._adj_collapsed = False
         self._review_checkboxes: list = []
         self._review_check_vars: list = []
-        self._thumb_cache: dict[tuple, "ImageTk.PhotoImage"] = {}
+        self._thumb_cache: dict[tuple, ImageTk.PhotoImage] = {}
         self._writer_page_photos: list = []
         # PERF: tabs cuyo contenido quedó desactualizado y se refrescarán de
         # forma diferida la próxima vez que se muestren (evita reconstruir grids

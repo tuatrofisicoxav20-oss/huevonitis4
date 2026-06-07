@@ -163,8 +163,8 @@ def test_bulk_runner_run_pdf_cancellation(tmp_path, monkeypatch):
     cancel = threading.Event()
     cancel.set()  # cancelar de inmediato
 
-    from core.inkcore.extraction_pipeline import PipelineConfig
     from core.inkcore.bulk_capture import BulkCaptureRunner
+    from core.inkcore.extraction_pipeline import PipelineConfig
 
     cfg = PipelineConfig(detectors=["classic_cv"], labelers=[])
     runner = BulkCaptureRunner(cfg, cancel_event=cancel)
@@ -185,7 +185,7 @@ def test_bulk_commit_preserves_metadata(tmp_path, monkeypatch):
     src = tmp_path / "tipo" / "glifo.png"
     Image.new("RGBA", (32, 32), (0, 0, 0, 255)).save(str(src))
 
-    from core.inkcore.bulk_capture import BulkGlyphCandidate, BulkCaptureSession
+    from core.inkcore.bulk_capture import BulkCaptureSession, BulkGlyphCandidate
     from core.models import GlyphEntry
 
     g = GlyphEntry(

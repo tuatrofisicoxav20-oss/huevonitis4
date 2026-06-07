@@ -14,7 +14,7 @@ except ImportError:
     _OK = False
 
 
-def avg_hash(img: "Image.Image", size: int = 16) -> str:
+def avg_hash(img: Image.Image, size: int = 16) -> str:
     gray = img.convert("L").resize((size, size), Image.Resampling.LANCZOS)
     px = _np.asarray(gray).flatten().tolist()
     avg = sum(px) / max(1, len(px))
@@ -25,7 +25,7 @@ def hamming(a: str, b: str) -> int:
     return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
 
 
-def dual_hash(img: "Image.Image") -> tuple[str, str]:
+def dual_hash(img: Image.Image) -> tuple[str, str]:
     return avg_hash(img, 8), avg_hash(img, 16)
 
 

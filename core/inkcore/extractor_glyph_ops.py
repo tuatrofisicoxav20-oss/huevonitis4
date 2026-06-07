@@ -43,7 +43,7 @@ def _is_ruled_line(w: int, h: int, frac_w: float) -> bool:
     return h <= 3 and w >= 6 * h and frac_w >= 0.55
 
 
-def _clean_mask_noise(mask: "np.ndarray") -> "np.ndarray":
+def _clean_mask_noise(mask: np.ndarray) -> np.ndarray:
     """Quita ruido del recorte conservando la letra y sus diacríticos.
 
     El recorte que llega es un rectángulo de la máscara limpia: puede arrastrar
@@ -126,7 +126,7 @@ def _clean_mask_noise(mask: "np.ndarray") -> "np.ndarray":
     return out if out.any() else mask
 
 
-def _strip_ruled_line(mask: "np.ndarray") -> "np.ndarray":
+def _strip_ruled_line(mask: np.ndarray) -> np.ndarray:
     """Borra la línea de renglón que CRUZA la letra (pegada al trazo).
 
     Cuando la línea del cuaderno toca el trazo queda unida al componente
@@ -189,7 +189,7 @@ def _strip_ruled_line(mask: "np.ndarray") -> "np.ndarray":
     return out if out.any() else mask
 
 
-def _close_small_gaps(mask: "np.ndarray") -> "np.ndarray":
+def _close_small_gaps(mask: np.ndarray) -> np.ndarray:
     """Cierra huecos finos del trazo sin engordar la letra.
 
     Un close morfológico (dilate→erode) con kernel chico (3x3, 1 iter) une
@@ -206,7 +206,7 @@ def _close_small_gaps(mask: "np.ndarray") -> "np.ndarray":
 
 
 def refine_char_region(
-    line_mask: "np.ndarray", x1: int, x2: int,
+    line_mask: np.ndarray, x1: int, x2: int,
 ) -> tuple[int, int, int, int]:
     """Reduce el recorte al blob dominante + diacríticos flotantes.
 
@@ -294,7 +294,7 @@ def refine_char_region(
     return gx1, gy1, gx2, gy2
 
 
-def tight_crop(mask: "np.ndarray", padding: int = 3) -> "np.ndarray | None":
+def tight_crop(mask: np.ndarray, padding: int = 3) -> np.ndarray | None:
     """Recorta apretado al trazo, quitando antes ruido y cerrando huecos finos.
 
     Pasos (todos sobre la máscara recibida, que es un rectángulo de la máscara
@@ -336,7 +336,7 @@ def tight_crop(mask: "np.ndarray", padding: int = 3) -> "np.ndarray | None":
     return result
 
 
-def to_rgba_smooth(mask: "np.ndarray") -> "Image.Image":
+def to_rgba_smooth(mask: np.ndarray) -> Image.Image:
     """RGBA con bordes anti-aliased. RGB=blanco para que sea visible sobre fondos oscuros.
 
     El alpha sale de la máscara normalizada a 0/255 y suavizada con un Gaussian
@@ -362,7 +362,7 @@ def to_rgba_smooth(mask: "np.ndarray") -> "Image.Image":
     return Image.fromarray(rgba)
 
 
-def assess_quality(img: "Image.Image", align_score: float = 0.5) -> dict:
+def assess_quality(img: Image.Image, align_score: float = 0.5) -> dict:
     """Calidad integral: cobertura + ancho de trazo + forma + alineación + borde.
 
     Mide la calidad REAL del trazo para que el tier no se infle. Además de la

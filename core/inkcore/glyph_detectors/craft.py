@@ -23,6 +23,8 @@ try:
 except ImportError:
     _CV2_OK = False
 
+import contextlib
+
 from core.inkcore.glyph_detectors.base import GlyphDetector
 
 
@@ -106,10 +108,8 @@ class CRAFTDetector(GlyphDetector):
                 cv2.imwrite(tmp_path, image_bgr)
                 result = craft.detect_text(tmp_path)
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
             boxes = []
             if result and "boxes" in result:

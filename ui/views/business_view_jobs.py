@@ -11,10 +11,15 @@ import customtkinter as ctk
 
 import config
 from core.businesscore.estimator import (
-    calculate_price, generate_whatsapp_message, get_price_breakdown,
+    calculate_price,
+    generate_whatsapp_message,
+    get_price_breakdown,
 )
 from core.businesscore.models import (
-    JOB_STATUSES, JOB_TYPES, URGENCIES, ClientJob,
+    JOB_STATUSES,
+    JOB_TYPES,
+    URGENCIES,
+    ClientJob,
 )
 from ui import theme
 

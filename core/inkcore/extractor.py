@@ -187,7 +187,7 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
         self._seg_detector = SegmentDetector()
         # Última corrida del pipeline ensemble (None si solo se usó legacy).
         # Permite a la UI leer stats, timings y debug_image_path tras extraer.
-        self._last_ensemble_result: "object | None" = None
+        self._last_ensemble_result: object | None = None
         # Detector de glifos opcional — se inicializa desde config.GLYPH_DETECTOR.
         self._detector = None
         try:
@@ -247,7 +247,7 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
         if opts.use_pipeline:
             try:
                 from core.inkcore.extraction_pipeline import (
-                    GlyphExtractionPipeline, PipelineConfig,
+                    GlyphExtractionPipeline,
                 )
                 cfg = opts.pipeline_config or _build_default_pipeline_config()
                 pipeline = GlyphExtractionPipeline(cfg)
@@ -304,7 +304,7 @@ class GlyphExtractor(ExtractionPipelineMixin, AlignmentMixin):
             img = self._scale(img)
             img = self._autocrop(img)
             img, _ = self._deskew(img)
-            gray, _, clean = self._full_preprocess(img, opts)
+            _gray, _, clean = self._full_preprocess(img, opts)
             line_boxes = self._find_line_boxes(clean)
             if not line_boxes:
                 return {"_meta": {"error": "no se detectaron líneas en la imagen"}}

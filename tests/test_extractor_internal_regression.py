@@ -88,7 +88,7 @@ def test_scale_shrinks_large_image(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "TIPOGRAFIA_DIR", tmp_path / "tipo")
     config.ensure_dirs()
 
-    from core.inkcore.extractor import GlyphExtractor, TARGET_LONG
+    from core.inkcore.extractor import TARGET_LONG, GlyphExtractor
     ext = GlyphExtractor()
     big = _gray_image(w=TARGET_LONG + 500, h=TARGET_LONG + 200)
     result = ext._scale(big)

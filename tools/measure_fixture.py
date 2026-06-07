@@ -21,8 +21,8 @@ def _craft_available() -> bool:
 
 
 def measure(image_path: str) -> dict:
-    from core.inkcore.extractor import ExtractionOptions
     from core.inkcore.extraction_pipeline import PipelineConfig
+    from core.inkcore.extractor import ExtractionOptions
     from core.inkcore.pipeline import InkCorePipeline
 
     pipeline = InkCorePipeline()

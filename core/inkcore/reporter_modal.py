@@ -24,7 +24,7 @@ def show_modal(reporter, parent_widget, report_data: dict):
     try:
         from ui import theme
     except ImportError:
-        class theme:  # noqa: N801
+        class theme:
             BG_PRIMARY = "#0D1117"
             BG_SECONDARY = "#111827"
             BG_TERTIARY = "#1E2A38"

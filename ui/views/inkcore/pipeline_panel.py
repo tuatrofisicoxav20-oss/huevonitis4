@@ -1,4 +1,5 @@
 """PipelinePanelMixin — panel colapsable del pipeline ensemble para ExtractorTab."""
+import contextlib
 import logging
 
 import customtkinter as ctk
@@ -189,10 +190,8 @@ class PipelinePanelMixin:
         from core.inkcore import glyph_detectors, glyph_labelers
         avail_dets = glyph_detectors.get_available()
         avail_labs = glyph_labelers.get_available()
-        try:
+        with contextlib.suppress(Exception):
             self._use_pipeline_var.set(True)
-        except Exception:
-            pass
         for name, is_avail in avail_dets.items():
             var = self._detector_vars.get(name)
             if var is not None and is_avail:
@@ -206,10 +205,8 @@ class PipelinePanelMixin:
             self._vote_var.set("highest_conf")
         except Exception:
             pass
-        try:
+        with contextlib.suppress(Exception):
             self._refresh_pipeline_chip()
-        except Exception:
-            pass
         n_d = sum(1 for v in avail_dets.values() if v)
         n_l = sum(1 for v in avail_labs.values() if v)
         self.toast(f"Auto-config: {n_d} detector(es) + {n_l} labeler(s) activos", "success")
@@ -236,21 +233,17 @@ class PipelinePanelMixin:
         # Deshabilitar el botón mientras corre el thread (mismo motivo que
         # _show_preprocess_preview: clicks repetidos lanzan threads paralelos
         # que sobrescriben results y compiten por la misma ventana modal).
-        try:
+        with contextlib.suppress(AttributeError, Exception):
             self._compare_btn.configure(state="disabled", text="Comparando…")
-        except (AttributeError, Exception):
-            pass
         self.toast("Comparando estrategias…", "info")
         image_path = self._image_path
 
         def _restore():
-            try:
+            with contextlib.suppress(AttributeError, Exception):
                 self._compare_btn.configure(
                     state="normal",
                     text="🔬 Comparar estrategias de segmentación",
                 )
-            except (AttributeError, Exception):
-                pass
 
         def worker():
             try:
@@ -263,10 +256,8 @@ class PipelinePanelMixin:
             def _done():
                 _restore()
                 self._show_strategy_results(results)
-            try:
+            with contextlib.suppress(Exception):
                 self.after(0, _done)
-            except Exception:
-                pass
 
         threading.Thread(target=worker, daemon=True).start()
 

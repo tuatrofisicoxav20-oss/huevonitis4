@@ -1,7 +1,7 @@
-from core.ocr.backends.tesseract import TesseractBackend
-from core.ocr.backends.paddleocr import PaddleOCRBackend
 from core.ocr.backends.doctr import DoctrBackend
 from core.ocr.backends.easyocr import EasyOCRBackend
+from core.ocr.backends.paddleocr import PaddleOCRBackend
+from core.ocr.backends.tesseract import TesseractBackend
 from core.ocr.base import OCRBackend
 
 REGISTRY: dict[str, type[OCRBackend]] = {

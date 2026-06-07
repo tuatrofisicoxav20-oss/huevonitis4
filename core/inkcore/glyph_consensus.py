@@ -25,7 +25,7 @@ _DEMOTE = {"Gold": "Silver", "Silver": "Bronze", "Bronze": "Bronze"}
 def hamming(a: str, b: str) -> int:
     if not a or not b:
         return max(len(a), len(b)) or 1
-    return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))
+    return sum(x != y for x, y in zip(a, b, strict=False)) + abs(len(a) - len(b))
 
 
 def medoid_index(hashes: list[str]) -> int:
@@ -88,7 +88,7 @@ def demote_session_outliers(glyphs: list, hashes: list[str]) -> int:
         by_char.setdefault(g.char, []).append(i)
 
     demoted = 0
-    for char, idxs in by_char.items():
+    for _char, idxs in by_char.items():
         if len(idxs) < MIN_GROUP:
             continue
         group_hashes = [hashes[i] for i in idxs]

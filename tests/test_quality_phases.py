@@ -54,9 +54,11 @@ def test_i_y_m_limpias_pueden_ser_gold():
 
 def test_basura_clara_no_es_gold():
     """Motas y ruido disperso siguen sin llegar a Gold (la solidez/ink los frena)."""
-    from PIL import Image, ImageDraw
-    from core.inkcore.quality import assess_glyph
     import random
+
+    from PIL import Image, ImageDraw
+
+    from core.inkcore.quality import assess_glyph
     # mota diminuta
     a = Image.new("L", (60, 60), 0)
     ImageDraw.Draw(a).ellipse((27, 27, 33, 33), fill=255)

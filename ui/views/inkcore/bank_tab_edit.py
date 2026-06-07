@@ -3,6 +3,7 @@
 Acciones por glifo (cycle tier, eliminar), alta manual desde imagen,
 selección múltiple + batch, y recarga/refresco de los tabs afectados.
 """
+import contextlib
 import logging
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -186,10 +187,8 @@ class BankTabEditMixin:
 
     def _bank_clear_selection(self) -> None:
         for var in self._bank_selection_vars.values():
-            try:
+            with contextlib.suppress(Exception):
                 var.set(False)
-            except Exception:
-                pass
         self._update_bank_selection_bar()
         # Re-render para limpiar checkboxes visualmente
         self._do_refresh_bank_ui()
@@ -253,7 +252,5 @@ class BankTabEditMixin:
             else:
                 self._tabs_dirty.add(name)
         # Profile bar counter (v4.2) — actualizar si el método existe
-        try:
+        with contextlib.suppress(AttributeError, Exception):
             self._update_profile_count()
-        except (AttributeError, Exception):
-            pass

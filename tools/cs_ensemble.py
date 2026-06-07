@@ -104,7 +104,8 @@ def run_ensemble_comparison(
 
     try:
         from core.inkcore.extraction_pipeline import (
-            GlyphExtractionPipeline, PipelineConfig,
+            GlyphExtractionPipeline,
+            PipelineConfig,
         )
     except ImportError as exc:
         print(f"ERROR: {exc}")
@@ -138,7 +139,7 @@ def run_ensemble_comparison(
         t0 = time.perf_counter()
         try:
             if strat_name == "legacy" or cfg is None:
-                from core.inkcore.extractor import GlyphExtractor, ExtractionOptions
+                from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
                 ext = GlyphExtractor()
                 glyphs = ext.extract_from_image(
                     image_path, "", ExtractionOptions(use_pipeline=False)

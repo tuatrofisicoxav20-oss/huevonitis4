@@ -1,8 +1,6 @@
 """BusinessDashboardMixin — dashboard con cards + chart animado."""
 import contextlib
 
-import customtkinter as ctk
-
 from core.businesscore.models import ClientJob
 from ui import theme
 from ui.animations import count_up

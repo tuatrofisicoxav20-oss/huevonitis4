@@ -57,7 +57,7 @@ class InkCoreViewProfileMixin:
         self._profile_dropdown.pack(side="left", padx=4)
 
         # Botones +/✏️/🗑️
-        for emoji, tip, cmd, color in (
+        for emoji, _tip, cmd, color in (
             ("➕", "Crear perfil",  self._profile_create, theme.ACCENT_GREEN),
             ("✏️", "Renombrar perfil", self._profile_rename, theme.ACCENT_BLUE),
             ("🗑️", "Eliminar perfil", self._profile_delete, theme.ACCENT_RED),
