@@ -184,6 +184,7 @@ class GlyphBank:
         label_confidence: "float | None" = None,
         detector_sources: "list | None" = None,
         quality_override: "dict | None" = None,
+        skip_dedup: bool = False,
     ) -> "GlyphEntry | None":
         """Add glyph to bank. Returns None if it's a perceptual duplicate.
 
@@ -193,6 +194,18 @@ class GlyphBank:
           detector_sources  — detectores que encontraron este glifo.
           quality_override  — dict con score/tier/ink_coverage ya calculados
                               por el pipeline (evita doble cómputo de quality).
+          skip_dedup        — si True, NO rechaza por duplicado perceptual: se
+                              guarda siempre (salvo error de I/O). Pensado para
+                              el flujo de PLANTILLA, donde las casillas con
+                              repeats>1 son a propósito la MISMA letra repetida
+                              para capturar variación natural de la escritura; el
+                              dedup por hamming las rechazaría y anularía el punto
+                              de repeats, manteniendo el banco artificialmente
+                              chico. El hash igual se calcula y se guarda en la
+                              entry (lo usa el medoide en get_best_glyph). En el
+                              flujo de imagen suelta dejarlo en False: ahí el
+                              solapamiento de cajas sí puede extraer dos veces el
+                              mismo glifo y el dedup aporta.
         Callers legacy add_glyph(char, path) siguen funcionando sin cambios.
         """
         logger.info("add_glyph: start char=%r source=%s", char, source_path)
@@ -218,7 +231,7 @@ class GlyphBank:
         # el dedup e insertar el mismo glifo dos veces (TOCTOU). Aquí no.
         with _bank_lock:
             existing = self._by_char.get(char, [])
-            if usable_hash:
+            if usable_hash and not skip_dedup:
                 # PERF-02: comparar contra hashes cacheados, ignorando degenerados
                 # (un banco con basura todo-ceros no debe rechazar muestras nuevas).
                 old_hashes = [
@@ -234,7 +247,7 @@ class GlyphBank:
                             char, best, strict,
                         )
                         return None
-            elif new_hash:
+            elif new_hash and not usable_hash:
                 logger.warning(
                     "add_glyph: %r con hash degenerado — se omite dedup (glifo sólido/vacío?)",
                     char,
