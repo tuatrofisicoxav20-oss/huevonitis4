@@ -46,7 +46,7 @@ class RenderOptions:
     #     da espaciado irregular y leves solapes como en la letra real.
     #   slant_deg: inclinación (shear) de cada glifo en grados; >0 = cursiva
     #     ligeramente reclinada a la derecha.
-    baseline_drift: float = 2.5
+    baseline_drift: float = 1.2
     kerning_jitter: float = 0.5
     slant_deg: float = 0.0
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
@@ -237,17 +237,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         line_canvas = Image.new("RGBA", (max_width, h), (0, 0, 0, 0))
         x_cursor = 0
 
-        words = text.split(" ")
-        # Bug fix #4: implement simple word-wrap instead of hard break mid-line
-        wrapped_chars: list[tuple[str, bool]] = []  # (char, is_space)
-        for wi, word in enumerate(words):
-            for ch in word:
-                wrapped_chars.append((ch, False))
-            if wi < len(words) - 1:
-                wrapped_chars.append((" ", True))
-
         # Bug fix #2: minimum word space of 4px for very small fonts
         word_space = max(4, int(options.font_size * 0.4))
+        spacing_gap_base = max(2, int(options.font_size * 0.08))
+        kj = max(0.0, min(1.0, options.kerning_jitter))
+        # Jitter vertical SUTIL: como máx ±2px. Antes usaba jitter_px (≈3) y
+        # descuadraba letras vecinas; el horizontal sigue gobernado por jitter_px.
+        vjit = min(2, max(0, options.jitter_px))
 
         # Fase 3 — deriva de línea base: un offset que se mueve poco a poco a lo
         # largo del renglón (random walk acotado) en vez de una recta perfecta.
@@ -256,50 +252,70 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         drift = 0.0
         drift_amp = max(0.0, options.baseline_drift)
 
-        for char, is_space in wrapped_chars:
-            if is_space:
+        # WRAP POR PALABRA: se mide cada palabra entera y, si no entra en lo que
+        # queda del renglón, se pasa COMPLETA a la siguiente línea (el caller ya
+        # repartió en líneas lógicas). Sólo se parte una palabra si por sí sola
+        # excede el ancho total disponible. Así "la" nunca queda partida.
+        first_word = True
+        for word in text.split(" "):
+            if word == "":
+                if not first_word:
+                    x_cursor += word_space
+                continue
+            # Cargar los glifos de la palabra una sola vez (variation=True ⇒
+            # instancia distinta por aparición) y medir su ancho total.
+            glyphs = []  # (char, img, gap) de la palabra
+            word_w = 0
+            for ch in word:
+                glyph_entry = self.bank.get_best_glyph(ch.lower(), variation=True)
+                if glyph_entry is None:
+                    glyph_entry = self.bank.get_best_glyph(ch, variation=True)
+                if glyph_entry and Path(glyph_entry.image_path).exists():
+                    glyph_img = self._load_glyph(glyph_entry.image_path, options, ch)
+                else:
+                    glyph_img = self._render_fallback_char(ch, options)
+                if glyph_img is None:
+                    continue
+                # Kerning variable: el hueco base puede encogerse (leve solape) o
+                # crecer al azar según kerning_jitter. Nunca baja de 1px.
+                gap = spacing_gap_base
+                if kj > 0:
+                    gap += round(random.uniform(-spacing_gap_base * kj, spacing_gap_base * kj))
+                gap = max(1, gap)
+                glyphs.append((ch, glyph_img, gap))
+                word_w += glyph_img.width + gap
+
+            if not glyphs:
+                continue
+
+            # ¿Cabe la palabra entera en lo que resta del renglón?
+            if not first_word and x_cursor + word_space + word_w > max_width:
+                break  # no parte la palabra: la deja para la siguiente línea
+            if not first_word:
                 x_cursor += word_space
-                continue
-            # Salto 2 — variation=True: la escritura manuscrita necesita variar la
-            # instancia por aparición (no robótica). El default determinista
-            # (medoide) es para mostrar "el mejor" en la UI del banco.
-            glyph_entry = self.bank.get_best_glyph(char.lower(), variation=True)
-            if glyph_entry is None:
-                glyph_entry = self.bank.get_best_glyph(char, variation=True)
-            if glyph_entry and Path(glyph_entry.image_path).exists():
-                glyph_img = self._load_glyph(glyph_entry.image_path, options)
-            else:
-                glyph_img = self._render_fallback_char(char, options)
-            if glyph_img is None:
-                continue
-            # Bug fix #4: soft wrap — skip glyphs that exceed max_width rather
-            # than hard-breaking; caller splits into logical lines already.
-            if x_cursor + glyph_img.width > max_width:
-                break
-            # Línea base por categoría de letra: las descendentes (g,j,p,q,y)
-            # bajan su cola bajo el baseline en vez de quedar "flotando" alineadas
-            # por abajo como las de x-height (lo que se veía poco natural).
-            jitter_y = random.randint(-options.jitter_px, options.jitter_px)
-            # Avanza el random walk de la línea base y lo mantiene acotado a
-            # ±drift_amp para que el renglón ondule sin despegarse.
-            if drift_amp > 0:
-                drift += random.uniform(-drift_amp * 0.4, drift_amp * 0.4)
-                drift = max(-drift_amp, min(drift_amp, drift))
-            baseline = int(h * 0.72) + round(drift)
-            if self._vertical_class(char) == "desc":
-                y_pos = baseline - glyph_img.height + int(options.font_size * 0.30)
-            else:
-                y_pos = baseline - glyph_img.height
-            # Apply jitter, then clamp to stay within the canvas vertically
-            y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
-            line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
-            # Kerning variable: el hueco base puede encogerse (leve solape) o
-            # crecer al azar según kerning_jitter, imitando el espaciado irregular
-            # de la mano. Nunca baja de 1px para no fundir letras.
-            spacing_gap = max(2, int(options.font_size * 0.08))
-            kj = max(0.0, min(1.0, options.kerning_jitter))
-            if kj > 0:
-                spacing_gap += round(random.uniform(-spacing_gap * kj, spacing_gap * kj))
-            x_cursor += glyph_img.width + max(1, spacing_gap)
+            first_word = False
+
+            for ch, glyph_img, gap in glyphs:
+                # Sólo se llega a cortar acá si la palabra sola excede max_width.
+                if x_cursor > 0 and x_cursor + glyph_img.width > max_width:
+                    break
+                jitter_y = random.randint(-vjit, vjit) if vjit > 0 else 0
+                # Avanza el random walk de la línea base, acotado a ±drift_amp,
+                # con paso reducido (±0.25) para que el renglón ondule muy poco.
+                if drift_amp > 0:
+                    drift += random.uniform(-drift_amp * 0.25, drift_amp * 0.25)
+                    drift = max(-drift_amp, min(drift_amp, drift))
+                baseline = int(h * 0.72) + round(drift)
+                # Línea base por clase: las de x-height asientan su base en el
+                # baseline; las ascendentes (asta alta) suben; las descendentes
+                # (g,j,p,q,y) meten ~31% del glifo (su cola) bajo el baseline.
+                if self._vertical_class(ch) == "desc":
+                    y_pos = baseline - int(glyph_img.height * 0.69)
+                else:
+                    y_pos = baseline - glyph_img.height
+                # Apply jitter, then clamp to stay within the canvas vertically
+                y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
+                line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
+                x_cursor += glyph_img.width + gap
 
         return line_canvas

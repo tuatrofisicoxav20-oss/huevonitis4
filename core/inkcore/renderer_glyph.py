@@ -35,6 +35,10 @@ class GlyphLoadMixin:
             return "desc"
         if c in cls._ASCENDERS:
             return "asc"
+        # Mayúsculas y dígitos suben hasta la cap-height: cuentan como ascendentes
+        # para que su altura objetivo sea la de un asta alta, no la de x-height.
+        if char.isupper() or char.isdigit():
+            return "asc"
         return "xheight"
 
     @staticmethod
@@ -61,7 +65,7 @@ class GlyphLoadMixin:
         out.putalpha(mask)
         return out
 
-    def _load_glyph(self, path: str, options) -> "Image.Image | None":
+    def _load_glyph(self, path: str, options, char: str | None = None) -> "Image.Image | None":
         if not PIL_OK:
             return None
         try:
@@ -91,8 +95,29 @@ class GlyphLoadMixin:
             # invisibles. Repinta la forma con ink_color preservando el alpha
             # (anti-aliasing). Maneja también glifos opacos (forma en luminancia).
             img = self._recolor_ink(img, options.ink_color)
+            # Recortar al bounding box REAL de la tinta. Los glifos del banco
+            # vienen con padding transparente irregular (a veces 30-40px arriba y
+            # abajo). Sin esto, escalar por la altura total del recorte deja una
+            # 'a' diminuta y flotando sobre el baseline. Recortado al bbox del
+            # alpha, "altura del recorte" == altura real del glifo y el escalado
+            # por clase (abajo) es fiel y consistente entre glifos.
+            bbox = img.getchannel("A").getbbox()
+            if bbox:
+                img = img.crop(bbox)
+            if img.width < 1 or img.height < 1:
+                return None
+            # ALTURA POR CLASE TIPOGRÁFICA. El bug anterior escalaba TODO glifo a
+            # font_size, así una 'o' (x-height) terminaba tan alta como una 'l'.
+            # Ahora la altura objetivo depende de la clase del carácter, partiendo
+            # de una x-height de referencia. NUNCA se normaliza por la altura total
+            # del recorte: un glifo con asta/cola ocupa más px y eso es correcto.
+            x_height = options.font_size * 0.48
+            cls = self._vertical_class(char) if char else "xheight"
+            base_h = x_height if cls == "xheight" else x_height * 1.45
+            # size_factor sigue variando ±size_variation, pero MULTIPLICANDO sobre
+            # la altura de la clase, no reemplazándola: varía alrededor de lo correcto.
             size_factor = 1.0 + random.uniform(-options.size_variation, options.size_variation)
-            target_h = max(1, int(options.font_size * size_factor))
+            target_h = max(1, int(base_h * size_factor))
             ratio = target_h / img.height
             target_w = max(1, int(img.width * ratio))
             img = img.resize((target_w, target_h), Image.LANCZOS)
