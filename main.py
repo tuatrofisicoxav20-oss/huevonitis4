@@ -31,8 +31,44 @@ def _bootstrap() -> logging.Logger:
     return log
 
 
+def _patch_customtkinter_py314(logger: logging.Logger) -> None:
+    """Workaround: customtkinter 5.2.2 (la última en PyPI) + Python 3.14.
+
+    En 3.14, Tk puede entregar `event.widget` como el pathname (str) en vez del
+    objeto widget. `CTkScrollableFrame.check_if_master_is_canvas` hace
+    `widget.master` asumiendo un widget, así que un str revienta con
+    AttributeError en CADA evento de rueda sobre un scrollable frame (banco,
+    revisión, grilla de plantilla…). No es fatal pero ensucia el log y rompe el
+    scroll con rueda. No hay versión upstream que lo arregle todavía, así que
+    envolvemos el método para resolver el str a widget (o tratarlo como
+    no-canvas si no se puede)."""
+    try:
+        from customtkinter.windows.widgets.ctk_scrollable_frame import (
+            CTkScrollableFrame,
+        )
+    except Exception as exc:
+        logger.debug("patch ctk py314 omitido (import falló): %s", exc)
+        return
+    if getattr(CTkScrollableFrame, "_h4_py314_patched", False):
+        return
+    _orig = CTkScrollableFrame.check_if_master_is_canvas
+
+    def _safe_check(self, widget):
+        if isinstance(widget, str):
+            try:
+                widget = self.nametowidget(widget)
+            except Exception:
+                return False
+        return _orig(self, widget)
+
+    CTkScrollableFrame.check_if_master_is_canvas = _safe_check
+    CTkScrollableFrame._h4_py314_patched = True
+    logger.info("Aplicado workaround de scroll de customtkinter para Python 3.14")
+
+
 def main():
     logger = _bootstrap()
+    _patch_customtkinter_py314(logger)
 
     from app_state import STATE
     from core.businesscore.ledger import BusinessLedger
