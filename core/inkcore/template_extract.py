@@ -82,6 +82,96 @@ def _detect_fiducials(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray
     return np.array(chosen, dtype=np.float32)
 
 
+def _rotate_cw(img: "np.ndarray", angle: int) -> "np.ndarray":
+    """Rota `img` en sentido horario por `angle` ∈ {0,90,180,270} grados."""
+    angle %= 360
+    if angle == 0:
+        return img
+    if angle == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    raise ValueError(f"_rotate_cw: ángulo no múltiplo de 90: {angle}")
+
+
+def _title_band_signal(canon: "np.ndarray", layout: TemplateLayout) -> float:
+    """Mide cuánta tinta hay en la franja del título (arriba) vs el pie (abajo).
+
+    En la plantilla canónica el título está pegado al margen superior y el pie
+    queda vacío; las franjas viven FUERA de la grilla, así que la única tinta
+    esperable es el título. Si la hoja está al revés (180° respecto a lo
+    correcto) la rectificación deja el título abajo y esta diferencia se vuelve
+    negativa. Sirve para desempatar 0 vs 180 y 90 vs 270 (los marcadores de
+    esquina son simétricos y no distinguen esos casos por sí solos).
+    """
+    m = layout.margin
+    top = canon[m:layout.grid_y0, layout.grid_x0:layout.grid_x1]
+    bot_y0 = layout.grid_y1
+    bot_y1 = min(layout.height, layout.height - m + (layout.grid_y0 - m))
+    bot = canon[bot_y0:bot_y1, layout.grid_x0:layout.grid_x1]
+    if top.size == 0 or bot.size == 0:
+        return 0.0
+    top_dark = float((top < 128).mean())
+    bot_dark = float((bot < 128).mean())
+    return top_dark - bot_dark
+
+
+def detect_template_rotation(image_path: str, layout: TemplateLayout | None = None) -> int:
+    """Ángulo horario (0/90/180/270) a aplicar para enderezar la plantilla.
+
+    El escáner suele rotar 90° las hojas apaisadas; aquí se prueba cada rotación
+    candidata y se elige la que (a) detecta los 4 marcadores de esquina, (b) deja
+    la hoja vertical (alto>ancho, la forma canónica de TemplateLayout) y (c)
+    coloca el título arriba (ver `_title_band_signal`, que desempata 90 vs 270 y
+    0 vs 180). Si ninguna rotación detecta los 4 marcadores se devuelve 0 con un
+    warning: la grilla podría quedar mal etiquetada y el usuario lo verá al
+    revisar.
+    """
+    if not (_CV2_OK and _PIL_OK):
+        logger.warning("detect_template_rotation: faltan cv2/PIL — sin rotación")
+        return 0
+    from pathlib import Path
+    if not Path(image_path).exists():
+        logger.warning("detect_template_rotation: no existe %s", image_path)
+        return 0
+    bgr = cv2.imread(image_path)
+    if bgr is None:
+        logger.warning("detect_template_rotation: cv2 no pudo leer %s", image_path)
+        return 0
+    lay = layout or TemplateLayout()
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+
+    best_angle = 0
+    best_score = None
+    any_fiducials = False
+    for angle in (0, 90, 180, 270):
+        rot = _rotate_cw(gray, angle)
+        h, w = rot.shape[:2]
+        fid = _detect_fiducials(rot, lay)
+        has_fid = fid is not None
+        any_fiducials = any_fiducials or has_fid
+        portrait = h > w
+        # La verticalidad domina (peso grande); entre verticales con marcadores,
+        # el título arriba desempata. Sin marcadores, score muy bajo.
+        score = (1000.0 if has_fid else 0.0) + (100.0 if portrait else 0.0)
+        if has_fid:
+            canon = _rectify(rot, lay)
+            score += _title_band_signal(canon, lay)
+        if best_score is None or score > best_score:
+            best_score, best_angle = score, angle
+
+    if not any_fiducials:
+        logger.warning(
+            "detect_template_rotation: marcadores no detectados en %s — default 0°",
+            image_path,
+        )
+        return 0
+    logger.info("detect_template_rotation: %s → rotar %d° horario", image_path, best_angle)
+    return best_angle
+
+
 def _rectify(gray: "np.ndarray", layout: TemplateLayout) -> "np.ndarray":
     """Rectifica la imagen al tamaño canónico usando los marcadores.
 
@@ -140,12 +230,17 @@ def _clean_cell(cell_gray: "np.ndarray") -> "np.ndarray | None":
 
 
 def extract_from_template(
-    image_path: str, layout: TemplateLayout | None = None,
+    image_path: str, layout: TemplateLayout | None = None, *, pre_rotate: int = 0,
 ) -> list[tuple[str, "Image.Image", float]]:
     """Extrae un glifo por casilla rellena. Lista de (letra, glifo_RGBA, calidad).
 
     Sólo devuelve casillas con tinta suficiente (las vacías se omiten). No hay
     segmentación: cada casilla se mapea a su letra por posición fija en la grilla.
+
+    `pre_rotate` (0/90/180/270, horario) rota la imagen ANTES de rectificar: lo
+    usa el flujo de PDF multipágina para enderezar hojas que el escáner giró 90°
+    (ver `extract_from_template_auto`). Default 0 = sin cambios (los tests
+    existentes lo invocan sin este argumento).
     """
     if not (_CV2_OK and _PIL_OK):
         logger.warning("extract_from_template: faltan cv2/PIL")
@@ -161,6 +256,8 @@ def extract_from_template(
         logger.warning("extract_from_template: cv2 no pudo leer %s", image_path)
         return []
     lay = layout or TemplateLayout()
+    if pre_rotate % 360:
+        bgr = _rotate_cw(bgr, pre_rotate)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     canon = _rectify(gray, lay)
 
@@ -209,6 +306,21 @@ def extract_from_template(
     logger.info("extract_from_template: %d/%d casillas con tinta (repeats=%d)",
                 len(results), n_labeled, lay.repeats)
     return results
+
+
+def extract_from_template_auto(
+    image_path: str, layout: TemplateLayout | None = None,
+) -> list[tuple[str, "Image.Image", float]]:
+    """Como `extract_from_template`, pero detecta y corrige la rotación primero.
+
+    Llama a `detect_template_rotation` para saber cuántos grados girar (el
+    escáner gira 90° las hojas apaisadas) y extrae con ese `pre_rotate`. Pensado
+    para el flujo de PDF multipágina, donde cada página puede venir con una
+    orientación distinta.
+    """
+    lay = layout or TemplateLayout()
+    angle = detect_template_rotation(image_path, lay)
+    return extract_from_template(image_path, lay, pre_rotate=angle)
 
 
 def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:

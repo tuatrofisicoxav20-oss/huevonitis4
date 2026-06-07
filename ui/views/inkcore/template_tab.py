@@ -32,6 +32,11 @@ class TemplateTabMixin:
         self._tpl_photo_path: str | None = None
         self._tpl_results: list = []
         self._tpl_thumb_photos: list = []
+        # Charset/repeats efectivamente usados al GENERAR la última plantilla.
+        # Se congelan acá para que "cargar foto" extraiga con la MISMA geometría
+        # aunque el usuario cambie los checkboxes después de generar.
+        self._tpl_charset: str | None = None
+        self._tpl_repeats: int | None = None
 
         main = ctk.CTkFrame(parent, fg_color="transparent")
         main.pack(fill="both", expand=True)
@@ -63,6 +68,39 @@ class TemplateTabMixin:
             font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
             wraplength=250, justify="left",
         ).pack(padx=14, pady=(0, 8), anchor="w")
+
+        # Conjuntos de caracteres a incluir. El charset combinado se usa TANTO
+        # para generar la hoja como para extraer la foto (la geometría depende de
+        # cuántas casillas haya), así que ambos pasos comparten la misma elección.
+        from core.inkcore.template_sheet import (
+            DIGITOS,
+            MAYUSCULAS,
+            MINUSCULAS,
+            PUNTUACION,
+            VOCALES_ACENTUADAS,
+        )
+        ctk.CTkLabel(
+            parent, text="Conjuntos a incluir:",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(padx=14, pady=(2, 2), anchor="w")
+        sets_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        sets_frame.pack(padx=14, pady=(0, 6), anchor="w", fill="x")
+        # (etiqueta, caracteres, marcado por defecto). El orden define el orden
+        # canónico del charset combinado.
+        self._tpl_set_specs = []
+        for label, chars, default in (
+            ("minúsculas", MINUSCULAS, True),
+            ("MAYÚSCULAS", MAYUSCULAS, False),
+            ("dígitos", DIGITOS, False),
+            ("puntuación", PUNTUACION, False),
+            ("vocales acentuadas", VOCALES_ACENTUADAS, False),
+        ):
+            var = ctk.BooleanVar(value=default)
+            ctk.CTkCheckBox(
+                sets_frame, text=label, variable=var, font=theme.FONT_SMALL,
+                checkbox_width=18, checkbox_height=18,
+            ).pack(anchor="w", pady=1)
+            self._tpl_set_specs.append((label, chars, var))
 
         # Selector de muestras por letra: el MISMO valor sirve para generar la
         # hoja y para extraer la foto (la geometría depende de él). Más muestras
@@ -126,18 +164,37 @@ class TemplateTabMixin:
 
     # ── Lógica ───────────────────────────────────────────────────
 
-    def _tpl_layout(self):
-        """Layout actual según el selector de muestras por letra."""
-        from core.inkcore.template_sheet import TemplateLayout
-        try:
-            reps = int(self._tpl_repeats_var.get())
-        except (ValueError, AttributeError):
-            reps = 1
-        return TemplateLayout(repeats=max(1, reps))
+    def _tpl_charset_from_ui(self) -> str:
+        """Charset combinado según los checkboxes marcados (en orden canónico)."""
+        parts = [chars for _label, chars, var in self._tpl_set_specs if var.get()]
+        return "".join(parts)
+
+    def _tpl_layout(self, *, use_snapshot: bool = False):
+        """Layout actual: charset + muestras por letra.
+
+        Con `use_snapshot=True` usa el charset/repeats congelados al generar la
+        última plantilla (si existen), para que la extracción coincida con la
+        hoja impresa aunque cambien los checkboxes. Si no hay snapshot, cae a la
+        selección viva de la UI.
+        """
+        from core.inkcore.template_sheet import MINUSCULAS, TemplateLayout
+        if use_snapshot and self._tpl_charset:
+            charset = self._tpl_charset
+            reps = self._tpl_repeats or 1
+        else:
+            charset = self._tpl_charset_from_ui() or MINUSCULAS
+            try:
+                reps = int(self._tpl_repeats_var.get())
+            except (ValueError, AttributeError):
+                reps = 1
+        return TemplateLayout(charset=charset, repeats=max(1, reps))
 
     def _tpl_generate(self):
         layout = self._tpl_layout()
         reps = layout.repeats
+        # Congelar lo usado para que "cargar foto" extraiga con la misma grilla.
+        self._tpl_charset = layout.charset
+        self._tpl_repeats = layout.repeats
         path = filedialog.asksaveasfilename(
             title="Guardar plantilla",
             defaultextension=".pdf",
@@ -162,8 +219,12 @@ class TemplateTabMixin:
 
     def _tpl_load_photo(self):
         path = filedialog.askopenfilename(
-            title="Foto de la plantilla rellena",
-            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp")],
+            title="Foto o PDF de la plantilla rellena",
+            filetypes=[
+                ("Plantilla (imágenes o PDF)", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp *.pdf"),
+                ("PDF", "*.pdf"),
+                ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
+            ],
         )
         if not path:
             return
@@ -171,21 +232,67 @@ class TemplateTabMixin:
         self._tpl_photo_name.configure(
             text=f"✓ {Path(path).name}", text_color=theme.ACCENT_GREEN,
         )
+        is_pdf = Path(path).suffix.lower() == ".pdf"
         self._tpl_status.configure(
-            text="🔎 Extrayendo casillas…", text_color=theme.ACCENT_ORANGE,
+            text="🔎 Rasterizando PDF…" if is_pdf else "🔎 Extrayendo casillas…",
+            text_color=theme.ACCENT_ORANGE,
         )
         # Capturar el layout en el hilo de UI (no leer la var Tk desde el worker).
-        layout = self._tpl_layout()
+        # Usa el charset/repeats con que se generó la última plantilla.
+        layout = self._tpl_layout(use_snapshot=True)
+
+        def _set_status(text, color=theme.ACCENT_ORANGE):
+            if self.winfo_exists():
+                self.after(0, lambda: self._tpl_status.configure(text=text, text_color=color))
 
         def worker():
+            from core.inkcore.template_extract import extract_from_template_auto
+            # Reutiliza el rasterizador de bulk_capture (poppler + cleanup de
+            # temporales). No procesamos con el extractor de renglón: cada página
+            # se extrae SIEMPRE por casilla con el flujo de plantilla, autorrotando.
+            tmp_tracker: list[str] = []
+            no_poppler = False
             try:
-                from core.inkcore.template_extract import extract_from_template
-                results = extract_from_template(path, layout)
+                if is_pdf:
+                    from core.inkcore.bulk_capture import _rasterize_pdf
+                    pages = _rasterize_pdf(path, dpi=300, tracker=tmp_tracker)
+                    if not pages:
+                        no_poppler = True
+                        page_items = []
+                    else:
+                        page_items = [(p, f"página {pnum}") for p, pnum in pages]
+                else:
+                    page_items = [(path, Path(path).name)]
+
+                results: list = []
+                total = len(page_items)
+                for i, (page_path, label) in enumerate(page_items, start=1):
+                    if total > 1:
+                        _set_status(f"🔎 Procesando {label} ({i}/{total})…")
+                    try:
+                        page_res = extract_from_template_auto(page_path, layout)
+                    except Exception as exc:
+                        logger.error("tpl_load página %s: %s", label, exc, exc_info=True)
+                        page_res = []
+                    results.extend(page_res)
             except Exception as exc:
                 logger.error("tpl_load worker: %s", exc, exc_info=True)
                 results = None
+            finally:
+                # Limpiar temporales de rasterización (igual que bulk_capture).
+                import shutil
+                for d in tmp_tracker:
+                    shutil.rmtree(d, ignore_errors=True)
 
             def _done():
+                if no_poppler:
+                    self._tpl_status.configure(
+                        text="⚠ No se pudo leer el PDF. Instalá poppler para leer PDFs "
+                             "(o cargá las páginas como imágenes).",
+                        text_color=theme.ACCENT_RED,
+                    )
+                    self.toast("Instalá poppler para leer PDFs", "error")
+                    return
                 if not results:
                     self._tpl_status.configure(
                         text="⚠ No se detectaron letras (¿foto nítida? ¿marcadores visibles?)",
@@ -196,7 +303,10 @@ class TemplateTabMixin:
                 self._tpl_results = results
                 self._render_tpl_grid(results)
                 from core.inkcore.alphabet_coverage import coverage_message
-                cov = coverage_message([c for c, _g, _q in results], scope="Plantilla")
+                cov = coverage_message(
+                    [c for c, _g, _q in results],
+                    alphabet=layout.charset, scope="Plantilla",
+                )
                 self._tpl_status.configure(
                     text=f"✓ {len(results)} casillas. {cov}\nRevisá y guardá en el banco.",
                     text_color=theme.ACCENT_GREEN,
