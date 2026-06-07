@@ -4,7 +4,7 @@ from core.inkcore.alphabet_coverage import (
     coverage,
     coverage_message,
     missing_letters,
-)
+)  # coverage ya importado para los tests de charset mixto
 
 
 def test_alfabeto_tiene_27_letras_con_ñ():
@@ -40,3 +40,24 @@ def test_mensaje_lista_faltantes():
     msg = coverage_message(list("abcdefhijklpqrstuvwyñ"), scope="Banco")
     assert msg.startswith("Banco: 21/27")
     assert "g m n o x z" in msg
+
+
+def test_charset_con_mayusculas_no_colapsa_caso():
+    """Con un charset que incluye MAYÚSCULAS, 'a' y 'A' son distintos."""
+    alpha = "abABC"
+    # Solo 'a' y 'B' presentes → faltan A, b, C.
+    have, total, miss = coverage(["a", "B"], alpha)
+    assert total == 5 and have == 2
+    # Faltantes en el orden del alfabeto "abABC": b, A, C.
+    assert miss == ["b", "A", "C"]
+
+
+def test_charset_con_digitos():
+    have, total, miss = coverage(["0", "5"], "0123456789")
+    assert total == 10 and have == 2
+    assert "0" not in miss and "5" not in miss
+
+
+def test_mensaje_charset_completo():
+    msg = coverage_message(list("0123456789"), alphabet="0123456789", scope="Dígitos")
+    assert "completo" in msg and msg.startswith("Dígitos: 10/10")

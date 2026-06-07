@@ -115,6 +115,30 @@ class ExtractorTabBuildMixin:
         self._contrast_slider   = make_slider(1, "Contraste", -80, 80, 0, self._apply_preview)
         self._rotation_slider   = make_slider(2, "Rotación", -15, 15, 0, self._apply_preview)
 
+        # Máximo de muestras por carácter — cuántos recortes de la MISMA letra
+        # conservar. Default 10 (= ExtractionOptions.max_per_char); subir si la
+        # foto repite mucho una letra y quieres más variantes en el banco.
+        ctk.CTkLabel(
+            sliders_grid, text="Máx/letra", font=theme.FONT_SMALL,
+            text_color=theme.TEXT_SECONDARY, width=70, anchor="w",
+        ).grid(row=3, column=0, sticky="w", pady=2)
+        self._max_per_char_value = ctk.CTkLabel(
+            sliders_grid, text="10",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED, width=32,
+        )
+        self._max_per_char_value.grid(row=3, column=2, padx=(4, 0))
+        self._max_per_char_slider = ctk.CTkSlider(
+            sliders_grid, from_=1, to=30, number_of_steps=29,
+            progress_color=theme.ACCENT_ORANGE,
+            button_color=theme.ACCENT_ORANGE,
+            button_hover_color=theme.ACCENT_ORANGE_HOVER,
+        )
+        self._max_per_char_slider.set(10)
+        self._max_per_char_slider.grid(row=3, column=1, sticky="ew", padx=4)
+        self._max_per_char_slider.configure(
+            command=lambda v: self._max_per_char_value.configure(text=f"{int(float(v))}")
+        )
+
         remove_lines_row = ctk.CTkFrame(adj_frame, fg_color="transparent")
         remove_lines_row.pack(fill="x", padx=10, pady=(0, 8))
         ctk.CTkLabel(

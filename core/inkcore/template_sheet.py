@@ -25,8 +25,17 @@ try:
 except ImportError:
     _PIL_OK = False
 
-# Alfabeto español, ñ en la posición 14 (igual que el resto del proyecto).
-SPANISH_ALPHABET = "abcdefghijklmnñopqrstuvwxyz"
+# Conjuntos de caracteres seleccionables para la plantilla. El charset de un
+# TemplateLayout se arma combinando los que el usuario elija (ver UI). El orden
+# acá es el orden canónico de las casillas.
+MINUSCULAS = "abcdefghijklmnñopqrstuvwxyz"          # ñ en la posición 14
+MAYUSCULAS = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
+DIGITOS = "0123456789"
+PUNTUACION = ".,;:¿?¡!()-\"'"
+VOCALES_ACENTUADAS = "áéíóúÁÉÍÓÚ"
+
+# Compat: el alfabeto español base (las 27 minúsculas) sigue siendo el default.
+SPANISH_ALPHABET = MINUSCULAS
 
 
 @dataclass
@@ -38,9 +47,9 @@ class TemplateLayout:
     fiducial: int = 56          # lado del cuadrado marcador de esquina
     label_strip: int = 30       # alto de la franja del rótulo (arriba de la casilla)
     inset: int = 10             # margen interno al recortar (evita bordes/rótulo)
-    letters: str = SPANISH_ALPHABET
+    charset: str = SPANISH_ALPHABET   # caracteres rotulados (uno por grupo de `repeats` casillas)
     repeats: int = 1            # muestras por letra (casillas consecutivas con la misma letra)
-    cols: int = 0              # 0 = auto en __post_init__ según repeats
+    cols: int = 0              # 0 = auto en __post_init__ según charset/repeats
 
     # Derivados en __post_init__ (no pasar a mano)
     rows: int = field(default=0)
@@ -50,13 +59,23 @@ class TemplateLayout:
     grid_y1: int = field(default=0)
 
     def __post_init__(self):
-        # repeats=1 conserva el diseño original (4×7 = 28 casillas); con más
-        # muestras la grilla se densifica para acomodar len(letters)*repeats.
+        # repeats=1 con el alfabeto base conserva el diseño original (4×7 = 28
+        # casillas); con más muestras o un charset grande la grilla se densifica
+        # para acomodar len(charset)*repeats en una sola página A4.
         if self.repeats < 1:
             self.repeats = 1
+        n_needed = len(self.charset) * self.repeats
         if self.cols <= 0:
-            self.cols = 4 if self.repeats == 1 else 6
-        n_needed = len(self.letters) * self.repeats
+            if self.repeats == 1 and len(self.charset) <= 28:
+                self.cols = 4
+            else:
+                self.cols = 6
+            # Charset/repeats grandes: agregar columnas (hasta 10) para que las
+            # casillas no se vuelvan ilegibles ni se desborde la hoja. Con 10
+            # columnas y ~18 filas entran ~180 casillas con área de escritura
+            # todavía usable (>20px de alto).
+            while self.cols < 10 and math.ceil(n_needed / self.cols) > 16:
+                self.cols += 1
         self.rows = max(1, math.ceil(n_needed / self.cols))
         self.grid_x0 = self.margin + 50
         self.grid_y0 = self.margin + 110   # deja lugar para el título arriba
@@ -65,19 +84,24 @@ class TemplateLayout:
 
     # ── Geometría ────────────────────────────────────────────────
     @property
+    def letters(self) -> str:
+        """Alias histórico de `charset` (compat con código/tests previos)."""
+        return self.charset
+
+    @property
     def n_cells(self) -> int:
         return self.cols * self.rows
 
     def cell_letter(self, index: int) -> str | None:
-        """Letra rotulada en la casilla `index`, o None si es casilla libre.
+        """Carácter rotulado en la casilla `index`, o None si es casilla libre.
 
-        Con repeats>1 las casillas consecutivas comparten letra: índices
-        0..repeats-1 → primera letra, etc. Las casillas más allá de
-        len(letters)*repeats quedan sin rótulo (sobrantes de la grilla).
+        Con repeats>1 las casillas consecutivas comparten carácter: índices
+        0..repeats-1 → primer carácter, etc. Las casillas más allá de
+        len(charset)*repeats quedan sin rótulo (sobrantes de la grilla).
         """
         li = index // self.repeats
-        if 0 <= li < len(self.letters):
-            return self.letters[li]
+        if 0 <= li < len(self.charset):
+            return self.charset[li]
         return None
 
     @property
@@ -127,7 +151,7 @@ def _load_font(size: int):
     return ImageFont.load_default()
 
 
-def build_template_sheet(layout: TemplateLayout | None = None) -> "Image.Image | None":
+def build_template_sheet(layout: TemplateLayout | None = None) -> Image.Image | None:
     """Genera la hoja imprimible (PIL RGB). None si falta PIL."""
     if not _PIL_OK:
         return None

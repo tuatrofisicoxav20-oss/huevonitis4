@@ -14,41 +14,66 @@ from collections.abc import Iterable
 SPANISH_ALPHABET = "abcdefghijklmnñopqrstuvwxyz"
 
 
-def _present_set(chars: Iterable[str]) -> set[str]:
-    """Conjunto de letras presentes, en minúscula, ignorando no-strings y vacíos."""
+def _case_sensitive(alphabet: str) -> bool:
+    """¿El alfabeto distingue mayúsculas? (charset con MAYÚSCULAS lo requiere).
+
+    Con el alfabeto base (27 minúsculas) devuelve False y se conserva el
+    comportamiento histórico de ignorar mayúsculas. Cuando el charset de la
+    plantilla incluye 'A'..'Z', 'a' y 'A' son glifos distintos y no deben
+    colapsarse al medir cobertura.
+    """
+    return any(c.isupper() for c in alphabet)
+
+
+def _present_set(chars: Iterable[str], *, case_sensitive: bool = False) -> set[str]:
+    """Conjunto de caracteres presentes, ignorando no-strings y vacíos.
+
+    Si `case_sensitive` es False (default) normaliza a minúscula, como antes.
+    """
     out: set[str] = set()
     for c in chars:
         if isinstance(c, str) and c:
-            out.add(c.lower())
+            out.add(c if case_sensitive else c.lower())
     return out
 
 
 def missing_letters(
     present: Iterable[str], alphabet: str = SPANISH_ALPHABET,
+    *, case_sensitive: bool | None = None,
 ) -> list[str]:
-    """Letras del alfabeto que NO aparecen en `present`, en orden alfabético."""
-    have = _present_set(present)
-    return [c for c in alphabet if c not in have]
+    """Caracteres del alfabeto que NO aparecen en `present`, en orden del alfabeto.
+
+    `case_sensitive=None` autodetecta según el alfabeto (True si incluye
+    mayúsculas), así un charset con MAYÚSCULAS/dígitos se mide bien sin tocar a
+    los llamadores que usan el alfabeto base.
+    """
+    cs = _case_sensitive(alphabet) if case_sensitive is None else case_sensitive
+    have = _present_set(present, case_sensitive=cs)
+    return [c for c in alphabet if (c if cs else c.lower()) not in have]
 
 
 def coverage(
     present: Iterable[str], alphabet: str = SPANISH_ALPHABET,
+    *, case_sensitive: bool | None = None,
 ) -> tuple[int, int, list[str]]:
     """Devuelve (tenidas, total, faltantes) respecto al alfabeto dado."""
-    miss = missing_letters(present, alphabet)
+    miss = missing_letters(present, alphabet, case_sensitive=case_sensitive)
     return len(alphabet) - len(miss), len(alphabet), miss
 
 
 def coverage_message(
     present: Iterable[str], alphabet: str = SPANISH_ALPHABET, *, scope: str = "",
+    case_sensitive: bool | None = None,
 ) -> str:
     """Frase lista para la UI: 'Banco: 21/27 · faltan g m n o x z'.
 
-    `scope` es un prefijo opcional ('Banco', 'Esta foto'…). Si no falta nada,
-    devuelve un mensaje de completitud.
+    `scope` es un prefijo opcional ('Banco', 'Esta foto'…). `alphabet` es el
+    charset real de la plantilla (puede incluir MAYÚSCULAS, dígitos o
+    puntuación), así el conteo 'tenidas/total' refleja lo que se pidió y no las
+    27 minúsculas. Si no falta nada, devuelve un mensaje de completitud.
     """
-    have, total, miss = coverage(present, alphabet)
+    have, total, miss = coverage(present, alphabet, case_sensitive=case_sensitive)
     prefix = f"{scope}: " if scope else ""
     if not miss:
-        return f"{prefix}{have}/{total} ✓ alfabeto completo"
+        return f"{prefix}{have}/{total} ✓ completo"
     return f"{prefix}{have}/{total} · faltan {' '.join(miss)}"

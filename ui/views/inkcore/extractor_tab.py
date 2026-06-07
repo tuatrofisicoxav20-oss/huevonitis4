@@ -6,6 +6,7 @@ extractor_tab_grid.py, la entrada/preview en extractor_tab_input.py y el
 guardado al banco en extractor_tab_save.py. ExtractorTabMixin hereda de esos
 sub-mixins para que InkCoreView siga viendo una sola clase con toda la API.
 """
+import contextlib
 import logging
 import threading
 from pathlib import Path
@@ -110,14 +111,13 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
             use_pipeline=use_p,
             pipeline_config=cfg,
             min_quality=float(self._min_quality_slider.get()) if use_p else config.MIN_GLYPH_QUALITY,
+            max_per_char=int(float(self._max_per_char_slider.get())),
         )
         logger.info("_extract: opts=%s, iniciando hilo", opts)
 
         # Refresca el chip para que refleje exactamente la corrida en curso
-        try:
+        with contextlib.suppress(Exception):
             self._refresh_pipeline_chip()
-        except Exception:
-            pass
 
         self._extract_progress.pack(fill="x", padx=12, pady=2)
         self._extract_progress.start()
@@ -262,7 +262,7 @@ class ExtractorTabMixin(ExtractorTabInputMixin, ExtractorTabSaveMixin):
             if dets:
                 parts.append("D:" + "+".join(d.replace("_labeler", "").replace("_det", "") for d in dets))
             if labs:
-                parts.append("L:" + "+".join(l.replace("_labeler", "") for l in labs))
+                parts.append("L:" + "+".join(lab.replace("_labeler", "") for lab in labs))
             chip.configure(text="  ⚙ " + "  ".join(parts) + "  ")
         except Exception:
             pass
