@@ -218,6 +218,16 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     al banco y persiste). Devuelve {saved, dupes, total}. Pensado para llamarse
     desde la UI con el bank vivo de la app (NO desde un script suelto sobre el
     banco real con la app abierta — colisiona el manifest).
+
+    Se pasa skip_dedup=True a add_glyph: las casillas de la plantilla con
+    repeats>1 son intencionalmente la MISMA letra repetida para capturar la
+    variación natural de la escritura, y vienen de posiciones distintas de la
+    grilla. El dedup perceptual por hamming las rechazaría como duplicados,
+    anulando el propósito de repeats y manteniendo el banco artificialmente
+    chico — justo esa variación es la que mejora el render. El dedup sigue activo
+    en el flujo de imagen suelta (extractor_tab), donde el solapamiento de cajas
+    sí puede extraer dos veces el mismo glifo. Por eso saved == total salvo
+    errores de I/O, y dupes queda en 0.
     """
     import tempfile
     from pathlib import Path
@@ -235,7 +245,7 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
         except Exception as exc:
             logger.warning("save_template: no se pudo escribir %s: %s", p, exc)
             continue
-        entry = bank.add_glyph(ch, str(p))
+        entry = bank.add_glyph(ch, str(p), skip_dedup=True)
         if entry is None:
             dupes += 1
         else:
