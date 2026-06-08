@@ -229,6 +229,25 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         lines = self._soft_wrap_text(text, options, usable_width)
         line_height_px = int(options.font_size * options.line_height)
 
+        # SNAP A LIBRETA también para texto plano: si el fondo tiene renglones
+        # horizontales, delega en el flujo con snap (mismo que render_document) para
+        # que cada renglón caiga sobre una raya. Sin renglones se mantiene el camino
+        # clásico de abajo (sin cambios de comportamiento donde no aplica).
+        style_def = BACKGROUND_STYLES.get(options.background_style, {})
+        if options.draw_lines and not style_def.get("draw_grid"):
+            boff = self._line_baseline_offset(options.font_size)
+            items = [
+                _BlockLine(
+                    img=self._render_line(line, options, usable_width),
+                    x=options.page_margin,
+                    line_height=line_height_px,
+                    gap_before=0,
+                    baseline_offset=boff,
+                )
+                for line in lines
+            ]
+            return self._flow_blocklines_to_pages(items, options, page_height, line_height_px)
+
         # Renderizar todas las líneas de texto
         rendered_lines = [self._render_line(line, options, usable_width) for line in lines]
 
