@@ -118,7 +118,7 @@ class WriterTabMixin:
         self._writer_mode_var = ctk.StringVar(value="apuntes")
         for mode_val, mode_label in [
             ("apuntes", "📝 Apuntes"),
-            ("mapa", "🗺️ Mapa conceptual"),
+            ("mapa", "🗺️ Mapa"),
             ("diagrama", "🔷 Diagrama"),
         ]:
             ctk.CTkRadioButton(
@@ -193,6 +193,8 @@ class WriterTabMixin:
 
         # Fase 7 — restaurar los RENDER_PARAMS persistidos de la sesión anterior.
         self._load_writer_params()
+        logger.info("Escritor construido: modos Apuntes/Mapa/Diagrama, DPI %s",
+                    getattr(self, "_dpi_var", None) and self._dpi_var.get())
 
     # ── Logic ──────────────────────────────────────────────────────
 
