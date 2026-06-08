@@ -308,6 +308,36 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
 
         return pages if pages else [Image.new("RGB", (options.page_width, page_height), "#FFFFFF")]
 
+    def iter_pages(self, text: str, options: RenderOptions, page_height: int = 1122):
+        """Generador de páginas PEREZOSO: produce y entrega una página a la vez.
+
+        Para 36+ páginas, materializar la lista entera (render_pages) acumula en RAM
+        tanto las imágenes de renglón como las de página. Acá se trocea el texto por
+        cantidad de renglones que entran en una página y se renderiza CADA trozo por
+        separado reutilizando render_pages — así sólo viven en memoria los renglones
+        y la página del trozo en curso. El consumidor (exportador PDF) escribe y
+        libera cada página antes de pedir la siguiente → pico de RAM plano.
+
+        Reutiliza render_pages para NO duplicar la lógica de snap a libreta ni la
+        paginación (regla: no reescribir lo que funciona). La memoria de variantes y
+        el snap se reinician por página, lo cual es natural en un salto de página.
+        """
+        if not PIL_OK:
+            return
+        # apply_style por adelantado para medir el wrap con las opciones finales.
+        probe = self.apply_style(options)
+        usable_width = probe.page_width - 2 * probe.page_margin
+        line_height_px = int(probe.font_size * probe.line_height)
+        lines = self._soft_wrap_text(text, probe, usable_width)
+        usable_height = page_height - 2 * probe.page_margin
+        lines_per_page = max(1, usable_height // line_height_px)
+        if not lines:
+            yield Image.new("RGB", (probe.page_width, page_height), probe.background_color)
+            return
+        for i in range(0, len(lines), lines_per_page):
+            chunk = "\n".join(lines[i:i + lines_per_page])
+            yield from self.render_pages(chunk, options, page_height)
+
     def render_document(self, doc, options: RenderOptions, page_height: int = 1122) -> list:
         """Renderiza un Document estructurado respetando su jerarquía.
 

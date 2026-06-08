@@ -199,6 +199,21 @@ class WriterTabMixin:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
         return renderer.render_pages(text, options)
 
+    def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions"):
+        """Páginas para exportar a PDF. Texto plano → iterador perezoso (RAM
+        constante); mapa/documento → lista (casos acotados). El exportador
+        streaming consume cualquiera de los dos."""
+        if getattr(self, "_writer_mode_var", None) is not None and self._writer_mode_var.get() == "mapa":
+            from core.inkcore.concept_map import ConceptMapRenderer
+            return ConceptMapRenderer(renderer).render(text, options)
+        doc = getattr(self, "_pending_document", None)
+        if doc is not None and text == getattr(self, "_pending_document_text", None):
+            try:
+                return renderer.render_document(doc, options)
+            except Exception as exc:
+                logger.warning("render_document falló (%s); uso texto plano", exc)
+        return renderer.iter_pages(text, options)
+
     def _export_writer_pdf(self):
         text = self._writer_text.get("0.0", "end").strip()
         if not text:
@@ -219,9 +234,12 @@ class WriterTabMixin:
                 if renderer is None:
                     self.after(0, lambda: self.toast("El banco está vacío — extrae glifos primero", "warning"))
                     return
-                images = self._render_pages(renderer, text, options)
-                from core.export.pdf_exporter import export_rendered_pages_pdf
-                ok = export_rendered_pages_pdf(images, path)
+                # Streaming: para texto plano usa iter_pages (genera y libera página
+                # por página → RAM constante en 36+ hojas). Mapa/Documento siguen
+                # devolviendo lista, que el exportador también consume.
+                pages = self._iter_pages_for_export(renderer, text, options)
+                from core.export.pdf_exporter import export_pages_streaming
+                ok = export_pages_streaming(pages, path, page_size="letter")
                 msg = "PDF exportado" if ok else "Error al exportar PDF (¿reportlab instalado?)"
                 kind = "success" if ok else "error"
                 self.after(0, lambda: self.toast(msg, kind))
