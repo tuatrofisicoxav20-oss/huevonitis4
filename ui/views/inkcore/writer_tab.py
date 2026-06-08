@@ -1,6 +1,8 @@
 """WriterTabMixin — tab ✍️ Escritor de InkCoreView."""
+import contextlib
 import logging
 import threading
+from dataclasses import replace
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -9,6 +11,9 @@ from core.inkcore.renderer import RenderOptions
 from ui import theme
 
 logger = logging.getLogger(__name__)
+
+# Fase 7 — RENDER_PARAMS "naturales" por defecto del escritor (reset/persistencia).
+_WRITER_DEFAULTS = {"font_size": 40, "jitter": 3, "style": "Limpio", "bg": "", "dpi": "150"}
 
 try:
     from PIL import Image, ImageTk
@@ -123,6 +128,23 @@ class WriterTabMixin:
                 border_color=theme.BORDER,
             ).pack(side="left", padx=6)
 
+        # Fase 7 — DPI de exportación + reset de parámetros a valores naturales.
+        ctrl_frame = ctk.CTkFrame(left, fg_color="transparent")
+        ctrl_frame.pack(fill="x", padx=12, pady=(2, 2))
+        ctk.CTkLabel(
+            ctrl_frame, text="DPI PDF:",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        self._dpi_var = ctk.StringVar(value="150")
+        ctk.CTkOptionMenu(
+            ctrl_frame, values=["150", "300"], variable=self._dpi_var, width=80,
+            fg_color=theme.BG_TERTIARY, button_color=theme.ACCENT_GREEN,
+            button_hover_color=theme.ACCENT_GREEN_HOVER, text_color=theme.TEXT_PRIMARY,
+        ).pack(side="left", padx=8)
+        self.secondary_button(
+            ctrl_frame, "↺ Valores naturales", self._reset_render_params, 170,
+        ).pack(side="left")
+
         btn_row = ctk.CTkFrame(left, fg_color="transparent")
         btn_row.pack(fill="x", padx=12, pady=6)
 
@@ -136,7 +158,6 @@ class WriterTabMixin:
             corner_radius=8,
         ).pack(side="left", padx=(0, 6))
 
-        self.secondary_button(btn_row, "📷 Importar foto (OCR)", self._import_photo_ocr, 170).pack(side="left", padx=(0, 6))
         self.secondary_button(btn_row, "💾 Exportar PNG", self._export_png, 130).pack(side="left", padx=(0, 6))
         self.primary_button(btn_row, "📄 Exportar PDF con mi letra", self._export_writer_pdf, 220).pack(side="left")
 
@@ -168,28 +189,67 @@ class WriterTabMixin:
         )
         self._writer_preview_label.pack(expand=True, pady=40)
 
+        # Fase 7 — restaurar los RENDER_PARAMS persistidos de la sesión anterior.
+        self._load_writer_params()
+
     # ── Logic ──────────────────────────────────────────────────────
 
-    def _import_photo_ocr(self):
-        """Fase 0.6/7: cargar foto → revisar/corregir OCR → texto al editor."""
-        path = filedialog.askopenfilename(
-            title="Elegí la foto de los apuntes manuscritos",
-            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.webp *.bmp"), ("Todos", "*.*")],
-        )
-        if not path:
+    def _writer_params_path(self):
+        import config
+        return config.DATA_DIR / "writer_params.json"
+
+    def _reset_render_params(self):
+        """Fase 7 — volver a los 'valores naturales' por defecto."""
+        d = _WRITER_DEFAULTS
+        self._size_slider.set(d["font_size"])
+        self._jitter_slider.set(d["jitter"])
+        with contextlib.suppress(Exception):
+            self._style_menu.set(d["style"])
+        with contextlib.suppress(Exception):
+            self._bg_style_var.set(d["bg"])
+        with contextlib.suppress(Exception):
+            self._dpi_var.set(d["dpi"])
+        self._save_writer_params()
+        self.toast("Parámetros restaurados a valores naturales", "info")
+
+    def _save_writer_params(self):
+        """Persiste los RENDER_PARAMS del escritor entre sesiones (JSON propio)."""
+        import json
+        data = {
+            "font_size": int(self._size_slider.get()),
+            "jitter": int(self._jitter_slider.get()),
+            "style": self._style_menu.get(),
+            "bg": self._bg_style_var.get(),
+            "dpi": self._dpi_var.get(),
+        }
+        with contextlib.suppress(Exception):
+            self._writer_params_path().write_text(json.dumps(data), encoding="utf-8")
+
+    def _load_writer_params(self):
+        import json
+        p = self._writer_params_path()
+        if not p.exists():
             return
-
-        def on_accept(text: str):
-            self._writer_text.delete("0.0", "end")
-            self._writer_text.insert("0.0", text)
-            self.toast("Transcripción cargada — revisá el preview", "success")
-
         try:
-            from ui.views.inkcore.ocr_review_dialog import OCRReviewDialog
-            OCRReviewDialog(self, path, on_accept, backend_name="trocr")
-        except Exception as exc:
-            logger.error("import_photo_ocr: %s", exc, exc_info=True)
-            self.toast(f"No se pudo abrir la revisión OCR: {exc}", "error")
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        with contextlib.suppress(Exception):
+            self._size_slider.set(int(d["font_size"]))
+        with contextlib.suppress(Exception):
+            self._jitter_slider.set(int(d["jitter"]))
+        with contextlib.suppress(Exception):
+            self._style_menu.set(d["style"])
+        with contextlib.suppress(Exception):
+            self._bg_style_var.set(d["bg"])
+        with contextlib.suppress(Exception):
+            self._dpi_var.set(str(d["dpi"]))
+
+    # NOTA (decisión de diseño v4.2): el OCR de manuscrito se ELIMINÓ del flujo
+    # del Escritor — el OCR local da puro ruido. El usuario pega/teclea texto YA
+    # limpio (de un digital, o Google Lens/Keep). Huevonitis hace una cosa:
+    # convertir texto a la letra del banco. El backend TrOCR y el diálogo de
+    # revisión quedan en el repo pero desconectados del flujo principal.
 
     def _get_render_options(self) -> "RenderOptions":
         return RenderOptions(
@@ -221,20 +281,20 @@ class WriterTabMixin:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
         return renderer.render_pages(text, options)
 
-    def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions"):
+    def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions", page_height: int = 1122):
         """Páginas para exportar a PDF. Texto plano → iterador perezoso (RAM
         constante); mapa/documento → lista (casos acotados). El exportador
         streaming consume cualquiera de los dos."""
         if getattr(self, "_writer_mode_var", None) is not None and self._writer_mode_var.get() == "mapa":
             from core.inkcore.concept_map import ConceptMapRenderer
-            return ConceptMapRenderer(renderer).render(text, options)
+            return ConceptMapRenderer(renderer).render(text, options, page_height)
         doc = getattr(self, "_pending_document", None)
         if doc is not None and text == getattr(self, "_pending_document_text", None):
             try:
-                return renderer.render_document(doc, options)
+                return renderer.render_document(doc, options, page_height)
             except Exception as exc:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
-        return renderer.iter_pages(text, options)
+        return renderer.iter_pages(text, options, page_height)
 
     def _export_writer_pdf(self):
         text = self._writer_text.get("0.0", "end").strip()
@@ -248,7 +308,21 @@ class WriterTabMixin:
         )
         if not path:
             return
+        self._save_writer_params()  # Fase 7 — persistir entre sesiones
         options = self._get_render_options()
+        # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Escala TODO el render
+        # proporcionalmente (font, ancho y alto de página, margen) → el bitmap sale
+        # al doble de resolución sin cambiar el layout. Sube RAM y tamaño del PDF.
+        dpi = int(self._dpi_var.get()) if getattr(self, "_dpi_var", None) else 150
+        scale = dpi / 150.0
+        page_height = int(1122 * scale)
+        if scale != 1.0:
+            options = replace(
+                options,
+                font_size=int(options.font_size * scale),
+                page_width=int(options.page_width * scale),
+                page_margin=int(options.page_margin * scale),
+            )
 
         def worker():
             try:
@@ -259,7 +333,7 @@ class WriterTabMixin:
                 # Streaming: para texto plano usa iter_pages (genera y libera página
                 # por página → RAM constante en 36+ hojas). Mapa/Documento siguen
                 # devolviendo lista, que el exportador también consume.
-                pages = self._iter_pages_for_export(renderer, text, options)
+                pages = self._iter_pages_for_export(renderer, text, options, page_height)
                 from core.export.pdf_exporter import export_pages_streaming
 
                 def _progress(n, total):
