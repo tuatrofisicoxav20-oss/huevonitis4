@@ -136,6 +136,7 @@ class WriterTabMixin:
             corner_radius=8,
         ).pack(side="left", padx=(0, 6))
 
+        self.secondary_button(btn_row, "📷 Importar foto (OCR)", self._import_photo_ocr, 170).pack(side="left", padx=(0, 6))
         self.secondary_button(btn_row, "💾 Exportar PNG", self._export_png, 130).pack(side="left", padx=(0, 6))
         self.primary_button(btn_row, "📄 Exportar PDF con mi letra", self._export_writer_pdf, 220).pack(side="left")
 
@@ -168,6 +169,27 @@ class WriterTabMixin:
         self._writer_preview_label.pack(expand=True, pady=40)
 
     # ── Logic ──────────────────────────────────────────────────────
+
+    def _import_photo_ocr(self):
+        """Fase 0.6/7: cargar foto → revisar/corregir OCR → texto al editor."""
+        path = filedialog.askopenfilename(
+            title="Elegí la foto de los apuntes manuscritos",
+            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.webp *.bmp"), ("Todos", "*.*")],
+        )
+        if not path:
+            return
+
+        def on_accept(text: str):
+            self._writer_text.delete("0.0", "end")
+            self._writer_text.insert("0.0", text)
+            self.toast("Transcripción cargada — revisá el preview", "success")
+
+        try:
+            from ui.views.inkcore.ocr_review_dialog import OCRReviewDialog
+            OCRReviewDialog(self, path, on_accept, backend_name="trocr")
+        except Exception as exc:
+            logger.error("import_photo_ocr: %s", exc, exc_info=True)
+            self.toast(f"No se pudo abrir la revisión OCR: {exc}", "error")
 
     def _get_render_options(self) -> "RenderOptions":
         return RenderOptions(
@@ -239,7 +261,14 @@ class WriterTabMixin:
                 # devolviendo lista, que el exportador también consume.
                 pages = self._iter_pages_for_export(renderer, text, options)
                 from core.export.pdf_exporter import export_pages_streaming
-                ok = export_pages_streaming(pages, path, page_size="letter")
+
+                def _progress(n, total):
+                    # Barra de progreso real: el render de 36+ hojas tarda y el
+                    # usuario debe ver que avanza. Actualiza desde el hilo de UI.
+                    self.after(0, lambda n=n: self._page_count_label.configure(text=f"Exportando… pág {n}"))
+
+                ok = export_pages_streaming(pages, path, page_size="letter", progress_cb=_progress)
+                self.after(0, lambda: self._page_count_label.configure(text=""))
                 msg = "PDF exportado" if ok else "Error al exportar PDF (¿reportlab instalado?)"
                 kind = "success" if ok else "error"
                 self.after(0, lambda: self.toast(msg, kind))
