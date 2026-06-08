@@ -257,6 +257,20 @@ class InkCorePipeline:
             stats["errors"], len(glyphs),
         )
         self.reload_bank()
+        # Curación automática: saca de la rotación los glifos que el CNN reconoce
+        # como OTRA letra (cortes mal segmentados / basura que pasó el gate de
+        # tier). Integrado acá para que TODA extracción deje el banco limpio sin
+        # intervención manual. No crítico: si falla, la extracción no se rompe.
+        try:
+            cur = self.bank.auto_curate()
+            if cur.get("demoted"):
+                logger.info(
+                    "auto_curate: %d glifos mal clasificados → Bronze %s",
+                    cur["demoted"], cur["by_char"],
+                )
+                stats["curated"] = cur["demoted"]
+        except Exception as exc:
+            logger.warning("auto_curate falló (no crítico): %s", exc)
         # BUG-02: cleanup SELECTIVO — solo los que se consumieron, no todo el dir.
         # Esto evita borrar candidatos pendientes de bulk capture.
         _cleanup_temp_dir(consumed_paths)

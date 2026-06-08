@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 # deadlock; con RLock el mismo hilo puede re-entrar. (F7)
 _bank_lock = threading.RLock()
 
+# auto_curate: un glifo Gold/Silver se considera MAL CLASIFICADO si el CNN
+# (juez independiente del puño) le da a la letra esperada una probabilidad por
+# debajo de este piso Y su top-1 es OTRA letra. Es una segmentación errónea
+# (terminó siendo otra letra) o basura; se saca de la rotación (→ Bronze).
+_CURATE_MISCLASS_FLOOR = 0.05
+
 if PIL_OK:
     from PIL import Image
 
@@ -174,6 +180,93 @@ class GlyphBank:
             return
         with _bank_lock:
             self._atomic_write(self.manifest_file, [self._to_dict(e) for e in self._entries])
+
+    @staticmethod
+    def _ink_mask_for_cnn(path: str):
+        """Máscara binaria de tinta (255=tinta) lista para el CNN, o None.
+
+        Mismo criterio que el renderer al recolorear: la forma sale del alpha; si
+        el alpha es plano (glifo opaco legacy), de la luminancia invertida.
+        """
+        if not PIL_OK:
+            return None
+        try:
+            import numpy as np
+            im = Image.open(path).convert("RGBA")
+            a = np.asarray(im.getchannel("A"))
+            if int(a.max()) - int(a.min()) < 12:
+                a = 255 - np.asarray(im.convert("L"))
+            return (a > 40).astype("uint8") * 255
+        except Exception:
+            return None
+
+    def auto_curate(self, classifier=None, dry_run: bool = False) -> dict:
+        """Degrada a Bronze los glifos Gold/Silver que el CNN reconoce como OTRA letra.
+
+        Usa el clasificador EMNIST (a-z) como juez independiente del texto de
+        referencia del usuario: si para un glifo etiquetado 'x' el modelo da una
+        P(x) ínfima Y su top-1 es otra letra, casi seguro el corte quedó mal
+        (terminó siendo otra letra) o es basura. Lo saca de la rotación
+        (Gold/Silver → Bronze) SIN borrar el archivo, así es reversible y el glifo
+        sigue disponible si el usuario lo quiere recuperar.
+
+        Conservador por diseño:
+          • Sólo opera sobre a-z. La ñ y los dígitos no existen en EMNIST, así que
+            se dejan intactos (el CNN no puede juzgarlos).
+          • Nunca vacía un carácter: siempre conserva el glifo mejor puntuado de
+            cada letra aunque también parezca sospechoso.
+          • Si el modelo no está disponible (sin torch/sin .pt), es un no-op.
+
+        Devuelve stats: ``{"checked", "demoted", "by_char", "available"}``.
+        """
+        stats = {"checked": 0, "demoted": 0, "by_char": {}, "available": False}
+        if not PIL_OK:
+            return stats
+        try:
+            from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
+        except Exception:
+            return stats
+        clf = classifier or EMNISTCharClassifier()
+        if not getattr(clf, "available", False):
+            return stats
+        stats["available"] = True
+
+        demoted: list[GlyphEntry] = []
+        with _bank_lock:
+            for char, entries in list(self._by_char.items()):
+                if char_to_label(char) is None:
+                    continue  # ñ / dígitos: el CNN no aplica
+                rotation = [e for e in entries if e.tier in ("Gold", "Silver")]
+                if len(rotation) < 2:
+                    continue  # con uno solo no se puede demover sin vaciar
+                scored = []
+                for e in rotation:
+                    mask = self._ink_mask_for_cnn(e.image_path)
+                    if mask is None:
+                        continue
+                    sc = clf.score(mask, char)
+                    top = clf.predict_topk(mask, 1)
+                    top_char = top[0][0] if top else "?"
+                    scored.append((e, sc if sc is not None else -1.0, top_char))
+                if len(scored) < 2:
+                    continue
+                stats["checked"] += len(scored)
+                # Proteger siempre el mejor (mayor P(esperada)) de cada letra.
+                best = max(scored, key=lambda t: t[1])
+                for e, sc, top_char in scored:
+                    if e is best[0]:
+                        continue
+                    if 0 <= sc < _CURATE_MISCLASS_FLOOR and top_char != char:
+                        demoted.append(e)
+                        stats["by_char"][char] = stats["by_char"].get(char, 0) + 1
+            if demoted and not dry_run:
+                for e in demoted:
+                    e.tier = "Bronze"
+                self._rebuild_indices()
+        stats["demoted"] = len(demoted)
+        if demoted and not dry_run:
+            self.save()
+        return stats
 
     def add_glyph(
         self,
