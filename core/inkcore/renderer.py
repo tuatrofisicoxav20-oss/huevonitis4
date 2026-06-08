@@ -61,6 +61,9 @@ class RenderOptions:
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
     ink_color: str = "#1A1A2E"
+    # Semilla opcional para reproducir un render idéntico (debug / regenerar).
+    # None = aleatorio cada vez.
+    seed: "int | None" = None
     style: str = "Limpio"
     mode: str = "PNG"
     page_width: int = 1240
@@ -109,6 +112,25 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
     def __init__(self, bank):
         self.bank = bank
         self._raw_cache: dict[str, Image.Image] = {}  # path -> RGBA image raw
+        # Estado de selección de variantes, por-render (lo fija _begin_render).
+        self._sel_history: dict | None = None
+        self._sel_rng = None
+
+    def _begin_render(self, options: RenderOptions) -> None:
+        """Reinicia el estado de selección de variantes para un render nuevo.
+
+        history vacía por render (la memoria corta no debe cruzar renders). Si
+        options.seed != None, resiembra el random GLOBAL para que TODO el azar del
+        render (selección de variante + jitter + rotación + carga) sea reproducible
+        con una sola línea, sin enhebrar un rng por los ~12 puntos de azar. Es
+        opt-in: con seed=None (lo normal) no se toca el estado global y el render
+        es aleatorio como siempre.
+        """
+        self._sel_history = {}
+        seed = getattr(options, "seed", None)
+        if seed is not None:
+            random.seed(seed)
+        self._sel_rng = None
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})
@@ -126,6 +148,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         if not PIL_OK:
             return None
         options = self.apply_style(options)
+        self._begin_render(options)
         usable_width = max(1, options.page_width - 2 * options.page_margin)
         line_height_px = int(options.font_size * options.line_height)
         wrapped = self._soft_wrap_text(text, options, usable_width)
@@ -147,6 +170,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         if not PIL_OK:
             return None
         options = self.apply_style(options)
+        self._begin_render(options)
         options = self._apply_background_style(options)
         lines = text.split("\n")
 
@@ -231,6 +255,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         if not PIL_OK:
             return []
         options = self.apply_style(options)
+        self._begin_render(options)
         options = self._apply_background_style(options)
         usable_width = options.page_width - 2 * options.page_margin
         # BUG-06: wrap antes de renderizar para que párrafos largos no se trunquen
@@ -307,6 +332,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         if not PIL_OK:
             return []
         options = self.apply_style(options)
+        self._begin_render(options)
         options = self._apply_background_style(options)
 
         blocks = [b for page in getattr(doc, "pages", []) for b in page.blocks]
@@ -497,9 +523,14 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
             glyphs = []  # (char, img, gap) de la palabra
             word_w = 0
             for ch in word:
-                glyph_entry = self.bank.get_best_glyph(ch.lower(), variation=True)
+                # Selección con rotación de variantes (memoria corta + muestreo
+                # ponderado por tier + seed reproducible). El estado por-render
+                # (self._sel_history / self._sel_rng) lo fija cada método público.
+                hist = getattr(self, "_sel_history", None)
+                rng = getattr(self, "_sel_rng", None)
+                glyph_entry = self.bank.select_glyph(ch.lower(), history=hist, rng=rng)
                 if glyph_entry is None:
-                    glyph_entry = self.bank.get_best_glyph(ch, variation=True)
+                    glyph_entry = self.bank.select_glyph(ch, history=hist, rng=rng)
                 if glyph_entry and Path(glyph_entry.image_path).exists():
                     glyph_img = self._load_glyph(glyph_entry.image_path, options, ch)
                 else:

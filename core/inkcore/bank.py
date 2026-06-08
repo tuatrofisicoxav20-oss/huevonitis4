@@ -44,6 +44,11 @@ _bank_lock = threading.RLock()
 # (terminó siendo otra letra) o basura; se saca de la rotación (→ Bronze).
 _CURATE_MISCLASS_FLOOR = 0.05
 
+# Pesos de muestreo por tier para la selección de ESCRITURA (select_glyph): Gold
+# pesa más que Silver, pero TODAS rotan entre sí (no se colapsa a "siempre la
+# mejor"). Bronze queda fuera de la rotación (papelera de auto_curate/outliers).
+_SELECT_TIER_WEIGHT = {"Gold": 3.0, "Silver": 1.0, "Bronze": 0.0}
+
 if PIL_OK:
     from PIL import Image
 
@@ -436,6 +441,47 @@ class GlyphBank:
         from core.inkcore.glyph_consensus import medoid_index
         idx = medoid_index([e.perceptual_hash for e in group])
         return group[idx]
+
+    def select_glyph(
+        self,
+        char: str,
+        history: "dict | None" = None,
+        rng: "random.Random | None" = None,
+        recent_n: int = 3,
+    ) -> "GlyphEntry | None":
+        """Selección para ESCRITURA: muestreo ponderado por tier + memoria corta.
+
+        Mata la repetición robótica sin colapsar a un solo glifo:
+          • Muestreo PONDERADO: Gold pesa más que Silver, pero todas rotan.
+          • Memoria corta: evita repetir un glifo usado en las últimas N
+            apariciones de ESE carácter (N = min(recent_n, variantes-1)), así
+            nunca sale el mismo glifo dos veces seguidas si hay alternativas.
+          • Reproducible: si se pasa ``rng`` (random.Random con seed), el render
+            es idéntico. ``history`` es un dict que mantiene el CALLER (uno por
+            render) — mantiene el estado fuera del banco para no chocar con la UI
+            ni con el hilo de extracción.
+
+        Devuelve None si no hay glifos para el carácter (el caller usa fallback).
+        """
+        with _bank_lock:
+            candidates = list(self._by_char.get(char, []))
+        if not candidates:
+            return None
+        rnd = rng or random
+        pool = [(e, _SELECT_TIER_WEIGHT.get(e.tier, 0.0)) for e in candidates]
+        pool = [(e, w) for e, w in pool if w > 0] or [(e, 1.0) for e in candidates]
+        # Evitar las últimas N usadas de este char (sin vaciar el pool).
+        if history is not None and len(pool) > 1:
+            recent = history.get(char, [])
+            n = min(recent_n, len(pool) - 1)
+            avoid = set(recent[-n:]) if n > 0 else set()
+            filtered = [(e, w) for e, w in pool if e.image_path not in avoid]
+            if filtered:
+                pool = filtered
+        chosen = rnd.choices([e for e, _ in pool], weights=[w for _, w in pool], k=1)[0]
+        if history is not None:
+            history.setdefault(char, []).append(chosen.image_path)
+        return chosen
 
     def get_all(self, char_filter: str = "", tier_filter: str = "") -> list[GlyphEntry]:
         # PERF-03: usar índices cuando hay filtro específico.
