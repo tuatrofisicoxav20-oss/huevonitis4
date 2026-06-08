@@ -137,6 +137,18 @@ Medido tras implementar la Fase 1 (selector) sobre el banco real:
 | 3 | espaciado variable | std de separaciones = 9.84 px (>0) | ✅ |
 | 4 | texto se apoya en las rayas | rayas alineadas al baseline real + snap a libreta | ✅ (visual) |
 
+## Verificación gates 0.1 y 6.5 (añadidos en la revisión del prompt)
+
+| Gate | Criterio | Medido | ¿Pasa? |
+|---|---|---|---|
+| 0.1 | lock en queue/report | ya con snapshot bajo `_bank_lock` (F7/Fase 1); test concurrente sin RuntimeError | ✅ |
+| 0.1 | lookup por índice (no O(N)) | usa `_by_char` (PERF-03); 1000 lookups <1s | ✅ |
+| 6.5 | inclinación base distinta por línea | slants por línea std 0.69 (no todas iguales) | ✅ |
+| 6.5 | márgenes derechos irregulares | varianza X final = 32839 (>0) | ✅ |
+| 6.5 | glifo faltante reportado, no rompe | `@ # €` en `last_missing_chars()`, marcados en rojo, render OK | ✅ |
+
+Suite completa tras todas las fases: **319 passed, 3 skipped** (verde).
+
 ## Conclusión Fase 0
 
 El **escritor (Fases 1–4) está esencialmente hecho** y medido bien. El trabajo
