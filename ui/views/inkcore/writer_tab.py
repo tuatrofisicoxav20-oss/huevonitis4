@@ -119,9 +119,11 @@ class WriterTabMixin:
         for mode_val, mode_label in [
             ("apuntes", "📝 Apuntes"),
             ("mapa", "🗺️ Mapa conceptual"),
+            ("diagrama", "🔷 Diagrama"),
         ]:
             ctk.CTkRadioButton(
                 mode_frame, text=mode_label, variable=self._writer_mode_var, value=mode_val,
+                command=self._on_writer_mode_change,
                 font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER,
@@ -251,6 +253,23 @@ class WriterTabMixin:
     # convertir texto a la letra del banco. El backend TrOCR y el diálogo de
     # revisión quedan en el repo pero desconectados del flujo principal.
 
+    _DIAGRAM_EXAMPLE = (
+        "# Modo Diagrama: una primitiva por línea. Coordenadas en píxeles.\n"
+        "box 120,120 380,210 entrada\n"
+        "arrow 380,165 520,165\n"
+        "box 520,120 820,210 proceso\n"
+        "arrow 670,210 670,330\n"
+        "circle 670,400 70 fin\n"
+        "text 150,300 una nota a mano"
+    )
+
+    def _on_writer_mode_change(self):
+        """Al pasar a modo Diagrama, si el editor está vacío, deja un ejemplo del
+        DSL para que el usuario sepa la sintaxis (Fase 6 — primitivas en la UI)."""
+        with contextlib.suppress(Exception):
+            if self._writer_mode_var.get() == "diagrama" and not self._writer_text.get("0.0", "end").strip():
+                self._writer_text.insert("0.0", self._DIAGRAM_EXAMPLE)
+
     def _get_render_options(self) -> "RenderOptions":
         return RenderOptions(
             font_size=int(self._size_slider.get()),
@@ -269,9 +288,13 @@ class WriterTabMixin:
         (respeta encabezados/listas/párrafos); en cuanto el usuario edita el
         texto, cae a render_pages sobre texto plano.
         """
-        if getattr(self, "_writer_mode_var", None) is not None and self._writer_mode_var.get() == "mapa":
+        mode = self._writer_mode_var.get() if getattr(self, "_writer_mode_var", None) is not None else "apuntes"
+        if mode == "mapa":
             from core.inkcore.concept_map import ConceptMapRenderer
             return ConceptMapRenderer(renderer).render(text, options)
+        if mode == "diagrama":
+            from core.inkcore.diagram_dsl import DiagramRenderer
+            return DiagramRenderer(renderer).render(text, options)
 
         doc = getattr(self, "_pending_document", None)
         if doc is not None and text == getattr(self, "_pending_document_text", None):
@@ -285,9 +308,13 @@ class WriterTabMixin:
         """Páginas para exportar a PDF. Texto plano → iterador perezoso (RAM
         constante); mapa/documento → lista (casos acotados). El exportador
         streaming consume cualquiera de los dos."""
-        if getattr(self, "_writer_mode_var", None) is not None and self._writer_mode_var.get() == "mapa":
+        mode = self._writer_mode_var.get() if getattr(self, "_writer_mode_var", None) is not None else "apuntes"
+        if mode == "mapa":
             from core.inkcore.concept_map import ConceptMapRenderer
             return ConceptMapRenderer(renderer).render(text, options, page_height)
+        if mode == "diagrama":
+            from core.inkcore.diagram_dsl import DiagramRenderer
+            return DiagramRenderer(renderer).render(text, options, page_height)
         doc = getattr(self, "_pending_document", None)
         if doc is not None and text == getattr(self, "_pending_document_text", None):
             try:
