@@ -129,7 +129,10 @@ class GlyphLoadMixin:
             # mapeo afín toma input_x = x + shear*(y - h): en la base (y=h) no hay
             # desplazamiento, arriba (y=0) se corre shear*h. Ensancha el lienzo
             # para no recortar.
-            slant = getattr(options, "slant_deg", 0.0) or 0.0
+            # Fase 6.5 — slant total = inclinación global (slant_deg) + inclinación
+            # BASE del renglón en curso (_cur_line_slant), así cada línea tiene su
+            # propio ángulo coherente sin perder el shear global.
+            slant = (getattr(options, "slant_deg", 0.0) or 0.0) + (getattr(self, "_cur_line_slant", 0.0) or 0.0)
             if abs(slant) > 0.1:
                 import math
                 shear = math.tan(math.radians(slant))
@@ -162,7 +165,13 @@ class GlyphLoadMixin:
             logger.debug(f"Could not load glyph {path}: {e}")
             return None
 
-    def _render_fallback_char(self, char: str, options) -> "Image.Image | None":
+    def _render_fallback_char(self, char: str, options, missing: bool = False) -> "Image.Image | None":
+        """Glifo de respaldo (fuente mono) para un carácter sin variante en el banco.
+
+        Fase 6.5: si ``missing`` es True (no está en el banco), se marca VISIBLE —
+        en rojo y subrayado — para que en la previsualización el usuario vea qué
+        carácter le falta capturar, en vez de un hueco silencioso.
+        """
         if not PIL_OK:
             return None
         size = options.font_size
@@ -177,5 +186,10 @@ class GlyphLoadMixin:
             ink = ImageColor.getrgb(options.ink_color)[:3]
         except (ValueError, TypeError):
             ink = (26, 26, 46)
-        draw.text((2, 2), char, fill=(*ink, 220), font=font)
+        if missing:
+            mark = (204, 32, 32)  # rojo: carácter faltante en el banco
+            draw.text((2, 2), char, fill=(*mark, 235), font=font)
+            draw.line([(2, size - 3), (int(size * 0.7) - 2, size - 3)], fill=(*mark, 235), width=2)
+        else:
+            draw.text((2, 2), char, fill=(*ink, 220), font=font)
         return img

@@ -57,6 +57,10 @@ class RenderOptions:
     baseline_drift: float = 1.2
     kerning_jitter: float = 0.5
     slant_deg: float = 0.0
+    # Fase 6.5 — inclinación BASE por renglón (macro): además del jitter por glifo,
+    # cada línea recibe un ángulo base al azar en ±line_slant_deg, coherente dentro
+    # de la línea. La mano no mantiene el mismo ángulo línea a línea. 0 = apagado.
+    line_slant_deg: float = 1.4
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
@@ -115,6 +119,17 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         # Estado de selección de variantes, por-render (lo fija _begin_render).
         self._sel_history: dict | None = None
         self._sel_rng = None
+        # Fase 6.5 — estado de realismo por-render:
+        self._cur_line_slant = 0.0        # inclinación base del renglón en curso
+        self._last_line_slants: list[float] = []  # para verificar el gate
+        self._missing_chars: set[str] = set()     # chars sin glifo en el banco
+
+    def last_missing_chars(self) -> set[str]:
+        """Caracteres del último render que NO tenían glifo en el banco (Fase 6.5).
+
+        La UI los muestra para que el usuario sepa qué capturar. Se vacía al
+        empezar cada render."""
+        return set(getattr(self, "_missing_chars", set()))
 
     def _begin_render(self, options: RenderOptions) -> None:
         """Reinicia el estado de selección de variantes para un render nuevo.
@@ -131,6 +146,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         if seed is not None:
             random.seed(seed)
         self._sel_rng = None
+        self._last_line_slants = []
+        self._missing_chars = set()
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})
@@ -523,6 +540,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         line_canvas = Image.new("RGBA", (max_width, h), (0, 0, 0, 0))
         x_cursor = 0
 
+        # Fase 6.5 — inclinación BASE de ESTE renglón (coherente dentro de la línea,
+        # distinta entre líneas). _load_glyph la suma al slant_deg por glifo.
+        line_slant_amp = max(0.0, getattr(options, "line_slant_deg", 0.0))
+        _rng = getattr(self, "_sel_rng", None) or random
+        self._cur_line_slant = _rng.uniform(-line_slant_amp, line_slant_amp) if line_slant_amp else 0.0
+        self._last_line_slants.append(self._cur_line_slant)
+
         # Bug fix #2: minimum word space of 4px for very small fonts
         word_space = max(4, int(options.font_size * 0.4))
         spacing_gap_base = max(2, int(options.font_size * 0.08))
@@ -564,7 +588,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
                 if glyph_entry and Path(glyph_entry.image_path).exists():
                     glyph_img = self._load_glyph(glyph_entry.image_path, options, ch)
                 else:
-                    glyph_img = self._render_fallback_char(ch, options)
+                    # Fase 6.5 — glifo faltante: en vez de sustituir en silencio,
+                    # se registra el carácter (la UI/preview lo reporta) y se marca
+                    # visible el fallback para que el usuario sepa qué capturar.
+                    if not ch.isspace():
+                        self._missing_chars.add(ch)
+                    glyph_img = self._render_fallback_char(ch, options, missing=True)
                 if glyph_img is None:
                     continue
                 # Kerning variable: el hueco base puede encogerse (leve solape) o
