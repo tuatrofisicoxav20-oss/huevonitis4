@@ -144,10 +144,18 @@ class GlyphLoadMixin:
             # Guard again after rotation (expand=True can theoretically produce odd sizes)
             if img.width < 1 or img.height < 1:
                 return None
+            # Trazo más sólido/oscuro (bolígrafo, no lápiz): gamma<1 sobre el alpha
+            # empuja los píxeles de borde hacia opaco. Luego la "presión" por glifo
+            # (alpha_factor) lo atenúa un poco al azar, variando entre letras.
+            ink_boost = getattr(options, "ink_boost", 1.0) or 1.0
             alpha_factor = random.uniform(options.ink_alpha_min, options.ink_alpha_max)
-            if alpha_factor < 1.0:
+            if ink_boost != 1.0 or alpha_factor < 1.0:
                 r, g, b, a = img.split()
-                a = a.point(lambda v: int(v * alpha_factor))
+                if ink_boost != 1.0:
+                    boost_lut = [min(255, int(((v / 255.0) ** ink_boost) * 255)) for v in range(256)]
+                    a = a.point(boost_lut)
+                if alpha_factor < 1.0:
+                    a = a.point(lambda v: int(v * alpha_factor))
                 img = Image.merge("RGBA", (r, g, b, a))
             return img
         except Exception as e:

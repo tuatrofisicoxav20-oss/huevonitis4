@@ -36,8 +36,16 @@ class RenderOptions:
     letter_spacing: float = 1.1
     line_height: float = 1.6
     rotation_range: float = 4.0
-    ink_alpha_min: float = 0.80
+    # Variación de "presión": el alpha de cada glifo se multiplica por un factor
+    # al azar en [min, max]. Floor más alto que antes (0.80) para que ninguna
+    # letra salga desteñida, manteniendo variación entre letras como un bolígrafo.
+    ink_alpha_min: float = 0.86
     ink_alpha_max: float = 1.0
+    # ink_boost: gamma (<1) sobre el alpha de cada glifo. Sube los píxeles de
+    # borde (semi-transparentes por el anti-aliasing) hacia opaco, así el trazo
+    # se ve SÓLIDO y oscuro como tinta de bolígrafo y no fino/gris como lápiz.
+    # 1.0 = sin efecto.
+    ink_boost: float = 0.7
     # Realismo de la escritura (Fase 3). Valores conservadores: suben la
     # credibilidad sin volver el texto ilegible.
     #   baseline_drift: amplitud máx (px) del vaivén lento de la línea base a lo

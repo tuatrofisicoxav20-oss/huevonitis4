@@ -94,8 +94,15 @@ class BackgroundMixin:
                 draw.line([(0, y), (options.page_width, y)], fill=line_col, width=1)
                 y += grid_size
         elif options.draw_lines:
-            # Líneas horizontales
-            y = options.page_margin + line_height_px
+            # Líneas horizontales ALINEADAS al baseline real del texto. El writer
+            # pega cada renglón en y = margin + i*line_height_px y, dentro de esa
+            # imagen, el baseline de los glifos cae en int(h*0.72) con
+            # h = int(font_size*2.5). Si dibujáramos las rayas a múltiplos de
+            # line_height_px, quedarían desfasadas y el texto "flotaría" sobre la
+            # línea. Replicando ese mismo offset, las letras se APOYAN en la raya.
+            h_line = int(options.font_size * 2.5)
+            baseline_off = int(h_line * 0.72)
+            y = options.page_margin + baseline_off
             while y < canvas_h - options.page_margin:
                 draw.line(
                     [(options.page_margin, y), (options.page_width - options.page_margin, y)],
