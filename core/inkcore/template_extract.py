@@ -452,19 +452,17 @@ def _extract_grid(gray, lay, clf, char_to_label):
 
     ang = _estimate_skew(gray)
     gray = _deskew(gray, ang)
-    # Si la foto vino apaisada (más ancha que alta) pero la grilla es vertical
-    # (cols<rows), enderezar 90°: la grilla canónica es más alta que ancha.
+    # Extrae la grilla TAL CUAL en la orientación recibida (sin auto-rotar por
+    # aspecto: eso arreglaba el alto/ancho pero no el arriba/abajo, y dejaba
+    # páginas apaisadas dadas vuelta → letras en la casilla equivocada). La
+    # orientación correcta la elige extract_from_template_auto probando las 4
+    # rotaciones y quedándose con la de mayor acuerdo CNN (señal limpia sobre la
+    # extracción de grilla, no sobre la canónica rota).
     bb = _grid_content_bbox(gray)
     if bb is None:
         logger.warning("_extract_grid: sin contenido detectable")
         return []
     gx0, gy0, gx1, gy1 = bb
-    if (gx1 - gx0) > (gy1 - gy0) and lay.cols < lay.rows:
-        gray = _rotate_cw(gray, 90)
-        bb = _grid_content_bbox(gray)
-        if bb is None:
-            return []
-        gx0, gy0, gx1, gy1 = bb
     n_cols, n_rows = lay.cols, lay.rows
     xs = np.linspace(gx0, gx1, n_cols + 1)
     ys = np.linspace(gy0, gy1, n_rows + 1)
@@ -603,19 +601,88 @@ def extract_from_template(
     return results
 
 
+def _has_fiducials(image_path: str, lay: TemplateLayout) -> bool:
+    """True si alguna de las 4 rotaciones detecta los 4 marcadores de esquina."""
+    if not (_CV2_OK and _PIL_OK):
+        return False
+    bgr = cv2.imread(image_path)
+    if bgr is None:
+        return False
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    for angle in (0, 90, 180, 270):
+        if _detect_fiducials(_rotate_cw(gray, angle), lay) is not None:
+            return True
+    return False
+
+
+def _grid_cnn_agreement(results, clf, char_to_label) -> float:
+    """Acuerdo medio del CNN entre cada casilla a-z y su letra esperada.
+
+    Es la señal para elegir orientación sin fiduciales: la rotación correcta hace
+    que cada letra caiga en su casilla → P(letra esperada) alto (~0.4-0.6); una
+    rotación equivocada deja letras cruzadas → ~0.02. Diferencia de 10-15×, así
+    que discrimina con claridad. Solo cuenta a-z (la ñ no la cubre el CNN).
+    """
+    scores = []
+    for ch, glyph, _s in results:
+        if char_to_label(ch) is None:
+            continue
+        try:
+            a = np.asarray(glyph.convert("RGBA"))[:, :, 3]
+            mask = (a > 30).astype(np.uint8) * 255
+            v = clf.score(mask, ch)
+        except Exception:
+            v = None
+        if v is not None:
+            scores.append(v)
+    return sum(scores) / len(scores) if scores else 0.0
+
+
 def extract_from_template_auto(
     image_path: str, layout: TemplateLayout | None = None,
 ) -> list[tuple[str, Image.Image, float]]:
     """Como `extract_from_template`, pero detecta y corrige la rotación primero.
 
-    Llama a `detect_template_rotation` para saber cuántos grados girar (el
-    escáner gira 90° las hojas apaisadas) y extrae con ese `pre_rotate`. Pensado
-    para el flujo de PDF multipágina, donde cada página puede venir con una
-    orientación distinta.
+    CON fiduciales: usa `detect_template_rotation` (los marcadores y el título
+    bastan para orientar) y extrae con ese `pre_rotate`.
+
+    SIN fiduciales (grilla pelada, foto de celular): la rotación por CNN sobre la
+    extracción canónica NO es fiable (la canónica está rota sin marcadores), y el
+    escáner gira algunas hojas 90°. Por eso acá se prueban las 4 rotaciones con la
+    extracción de GRILLA y se elige la de mayor acuerdo CNN casilla↔letra. Esto
+    arregla las hojas apaisadas que antes quedaban mal mapeadas (la 'x' caía en la
+    casilla de 'd', la 'w' en la de 'o', etc.). Si no hay CNN, cae a 0°.
     """
     lay = layout or TemplateLayout()
-    angle = detect_template_rotation(image_path, lay)
-    return extract_from_template(image_path, lay, pre_rotate=angle)
+    if _has_fiducials(image_path, lay):
+        angle = detect_template_rotation(image_path, lay)
+        return extract_from_template(image_path, lay, pre_rotate=angle)
+
+    # Sin fiduciales: búsqueda de orientación por acuerdo CNN sobre la grilla.
+    clf = None
+    char_to_label = None
+    try:
+        from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
+        _c = EMNISTCharClassifier()
+        if _c.available:
+            clf = _c
+    except Exception as exc:
+        logger.info("extract_from_template_auto: CNN no disponible (%s)", exc)
+
+    if clf is None:
+        return extract_from_template(image_path, lay, pre_rotate=0)
+
+    best_res, best_score, best_rot = [], -1.0, 0
+    for rot in (0, 90, 180, 270):
+        res = extract_from_template(image_path, lay, pre_rotate=rot)
+        score = _grid_cnn_agreement(res, clf, char_to_label)
+        if score > best_score:
+            best_score, best_res, best_rot = score, res, rot
+    logger.info(
+        "extract_from_template_auto: sin fiduciales — rot %d° (acuerdo CNN=%.3f)",
+        best_rot, best_score,
+    )
+    return best_res
 
 
 def _quality_override_from_template(glyph, score, classify_tier) -> dict:
