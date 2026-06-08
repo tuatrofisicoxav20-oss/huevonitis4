@@ -296,7 +296,13 @@ class WriterTabMixin:
             except Exception as exc:
                 logger.error("render_pages error: %s", exc, exc_info=True)
                 pages = []
+            # Fase 6.5 — avisar qué caracteres faltan en el banco (los que salieron
+            # marcados en rojo en la preview), para que el usuario sepa qué capturar.
+            missing = sorted(getattr(renderer, "last_missing_chars", lambda: set())()) if renderer else []
             self.after(0, lambda: self._show_preview_pages(pages))
+            if missing:
+                faltan = " ".join(missing)
+                self.after(0, lambda f=faltan: self.toast(f"Faltan en el banco (en rojo): {f}", "warning"))
 
         threading.Thread(target=worker, daemon=True).start()
         self.toast("Renderizando...", "info")
