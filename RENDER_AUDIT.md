@@ -123,6 +123,20 @@ las **repeticiones consecutivas** (5 medidas) y agregar muestreo ponderado +
 | 6 diagramas a mano | parcial | existe `concept_map.py` (árbol a mano); faltan primitivas (flecha/caja/círculo/llave) y mapa mental |
 | 7 integración UI del flujo | parcial | falta cablear foto→OCR→revisión→preview→PDF + sliders RENDER_PARAMS |
 
+## Verificación de gates (Fases 1–4)
+
+Medido tras implementar la Fase 1 (selector) sobre el banco real:
+
+| Gate | Criterio | Medido | ¿Pasa? |
+|---|---|---|---|
+| 1 | ≥3 variantes por vocal con ≥5 apariciones | a:6 e:10 i:7 o:8 | ✅ |
+| 1 | repeticiones consecutivas del mismo glifo | 0 (baseline: 5) | ✅ |
+| 1 | seed reproducible | seed=42 idéntico 2×; ≠ seed=7 | ✅ |
+| 2 | baseline ondula | std base por columna = 5.05 px (>0) | ✅ |
+| 2 | rotación SIN halos | RGB donde hay tinta = [11,11,20] (color tinta, no gris/negro) | ✅ |
+| 3 | espaciado variable | std de separaciones = 9.84 px (>0) | ✅ |
+| 4 | texto se apoya en las rayas | rayas alineadas al baseline real + snap a libreta | ✅ (visual) |
+
 ## Conclusión Fase 0
 
 El **escritor (Fases 1–4) está esencialmente hecho** y medido bien. El trabajo
