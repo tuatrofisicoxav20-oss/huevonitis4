@@ -376,11 +376,13 @@ def _strip_edge_lines(thr: np.ndarray, band: float = 0.20, frac: float = 0.45) -
     return out
 
 
-def _clean_cell_grid(cell: np.ndarray) -> np.ndarray | None:
-    """Como `_clean_cell` pero quita líneas de grilla (morfología + bandas de borde).
+def _cell_ink_mask(cell: np.ndarray) -> np.ndarray | None:
+    """Máscara de tinta de la celda (255=tinta), del MISMO tamaño que `cell`.
 
-    Pensado para la ruta SIN fiduciales, donde la celda se recorta de la foto
-    cruda y puede arrastrar trozos de los separadores de la grilla.
+    Binariza, quita líneas de grilla (morfología + bandas de borde) y descarta
+    motas y los separadores que cruzan toda la celda. NO autocrop: devuelve la
+    máscara completa para poder medir el contacto con el borde (ver inset
+    adaptativo en _extract_grid). None si la celda está prácticamente vacía.
     """
     if cell.size == 0:
         return None
@@ -415,12 +417,24 @@ def _clean_cell_grid(cell: np.ndarray) -> np.ndarray | None:
         ink += int(area)
     if ink < h * w * 0.004:
         return None
+    return keep
+
+
+def _autocrop_mask(keep: np.ndarray, pad: int = 6) -> np.ndarray | None:
     ys, xs = np.where(keep > 0)
     if len(xs) == 0:
         return None
-    pad = 6
-    return keep[max(0, ys.min() - pad):ys.max() + 1 + pad,
-                max(0, xs.min() - pad):xs.max() + 1 + pad]
+    h, w = keep.shape[:2]
+    return keep[max(0, ys.min() - pad):min(h, ys.max() + 1 + pad),
+                max(0, xs.min() - pad):min(w, xs.max() + 1 + pad)]
+
+
+def _clean_cell_grid(cell: np.ndarray) -> np.ndarray | None:
+    """Máscara de tinta de la celda, recortada al bbox de la letra (con padding)."""
+    keep = _cell_ink_mask(cell)
+    if keep is None:
+        return None
+    return _autocrop_mask(keep)
 
 
 def _sizable_components(mask: np.ndarray) -> int:
@@ -466,8 +480,15 @@ def _extract_grid(gray, lay, clf, char_to_label):
     n_cols, n_rows = lay.cols, lay.rows
     xs = np.linspace(gx0, gx1, n_cols + 1)
     ys = np.linspace(gy0, gy1, n_rows + 1)
-    inset = 0.13
     logger.info("_extract_grid: skew=%.2f° grilla %dx%d bbox=%s", ang, n_cols, n_rows, bb)
+
+    def _crop(r, c, inset):
+        x0, x1 = xs[c], xs[c + 1]
+        y0, y1 = ys[r], ys[r + 1]
+        cw, chh = x1 - x0, y1 - y0
+        ix0, ix1 = int(x0 + inset * cw), int(x1 - inset * cw)
+        iy0, iy1 = int(y0 + inset * chh), int(y1 - inset * chh)
+        return gray[iy0:iy1, ix0:ix1]
 
     results: list[tuple[str, Image.Image, float]] = []
     for r in range(n_rows):
@@ -476,12 +497,24 @@ def _extract_grid(gray, lay, clf, char_to_label):
             ch = lay.cell_letter(i)
             if ch is None:
                 continue
-            x0, x1 = xs[c], xs[c + 1]
-            y0, y1 = ys[r], ys[r + 1]
-            cw, chh = x1 - x0, y1 - y0
-            ix0, ix1 = int(x0 + inset * cw), int(x1 - inset * cw)
-            iy0, iy1 = int(y0 + inset * chh), int(y1 - inset * chh)
-            mask = _clean_cell_grid(gray[iy0:iy1, ix0:ix1])
+            # Inset adaptativo: arranca con 13% (excluye los separadores de la
+            # grilla). Si la letra quedó RECORTADA por estar descentrada (p. ej. la
+            # 'o' alta cuyo arco superior cae fuera del crop), un inset chico (4%)
+            # captura MÁS tinta. Se adopta el inset chico sólo cuando (a) suma
+            # ≥15% de tinta y (b) NO agrega componentes: la letra recuperada se
+            # conecta a la existente (mismo nº de piezas), mientras que un
+            # separador de grilla entraría como pieza NUEVA → se rechaza. Así sólo
+            # se beneficia a las casillas recortadas, sin reintroducir grilla en
+            # las centradas.
+            keep = _cell_ink_mask(_crop(r, c, 0.13))
+            if keep is None:
+                continue
+            keep_big = _cell_ink_mask(_crop(r, c, 0.04))
+            if (keep_big is not None
+                    and (keep_big > 0).sum() >= 1.15 * (keep > 0).sum()
+                    and _sizable_components(keep_big) <= _sizable_components(keep)):
+                keep = keep_big
+            mask = _autocrop_mask(keep)
             if mask is None:
                 continue
             # Descartar casillas-texto: si la foto captó el título/instrucciones
