@@ -101,6 +101,28 @@ class WriterTabMixin:
                 border_color=theme.BORDER,
             ).pack(side="left", padx=6)
 
+        mode_frame = ctk.CTkFrame(left, fg_color="transparent")
+        mode_frame.pack(fill="x", padx=12, pady=(4, 2))
+        ctk.CTkLabel(
+            mode_frame, text="Modo:",
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        # "apuntes" = render lineal (texto/bloques); "mapa" = mapa conceptual
+        # (árbol desde texto indentado). Es un modo APARTE: no comparte layout
+        # con el render lineal.
+        self._writer_mode_var = ctk.StringVar(value="apuntes")
+        for mode_val, mode_label in [
+            ("apuntes", "📝 Apuntes"),
+            ("mapa", "🗺️ Mapa conceptual"),
+        ]:
+            ctk.CTkRadioButton(
+                mode_frame, text=mode_label, variable=self._writer_mode_var, value=mode_val,
+                font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+                fg_color=theme.ACCENT_GREEN,
+                hover_color=theme.ACCENT_GREEN_HOVER,
+                border_color=theme.BORDER,
+            ).pack(side="left", padx=6)
+
         btn_row = ctk.CTkFrame(left, fg_color="transparent")
         btn_row.pack(fill="x", padx=12, pady=6)
 
@@ -158,11 +180,17 @@ class WriterTabMixin:
     def _render_pages(self, renderer, text: str, options: "RenderOptions") -> list:
         """Renderiza el texto actual a páginas.
 
-        Si llegó un Document estructurado desde Estudio y el texto del editor no
-        fue modificado, usa render_document (respeta encabezados/listas/párrafos).
-        En cuanto el usuario edita el texto, el Document deja de coincidir y se cae
-        a render_pages sobre texto plano.
+        Modo "mapa": el texto se interpreta como jerarquía indentada y se dibuja
+        como mapa conceptual a mano (módulo aparte; no comparte layout con el
+        render lineal). Modo "apuntes": si llegó un Document estructurado desde
+        Estudio y el texto del editor no fue modificado, usa render_document
+        (respeta encabezados/listas/párrafos); en cuanto el usuario edita el
+        texto, cae a render_pages sobre texto plano.
         """
+        if getattr(self, "_writer_mode_var", None) is not None and self._writer_mode_var.get() == "mapa":
+            from core.inkcore.concept_map import ConceptMapRenderer
+            return ConceptMapRenderer(renderer).render(text, options)
+
         doc = getattr(self, "_pending_document", None)
         if doc is not None and text == getattr(self, "_pending_document_text", None):
             try:
