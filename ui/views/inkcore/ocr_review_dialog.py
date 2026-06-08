@@ -31,14 +31,26 @@ class OCRReviewDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, image_path: str, on_accept, backend_name: str = "trocr"):
         super().__init__(parent)
+        logger.info("OCRReviewDialog: abriendo para %s (backend=%s)", image_path, backend_name)
         self.title("Revisar transcripción — foto vs texto")
         self.geometry("1100x720")
         self._image_path = image_path
         self._on_accept = on_accept
         self._backend_name = backend_name
         self._extra_contrast = False
-        self._build()
+        try:
+            self._build()
+        except Exception:
+            # Los errores de construcción de widgets (customtkinter en Py3.14)
+            # suelen ir a stderr; los mandamos al log para poder diagnosticarlos.
+            logger.exception("OCRReviewDialog._build falló")
+            raise
         self.after(100, self._run_ocr)
+
+    def report_callback_exception(self, exc, val, tb):
+        """Tkinter manda acá las excepciones de callbacks/after/eventos — por
+        default van a stderr. Las logueamos para verlas en app.log."""
+        logger.error("OCRReviewDialog callback error", exc_info=(exc, val, tb))
 
     # ── UI ────────────────────────────────────────────────────────
     def _build(self):
