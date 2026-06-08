@@ -185,3 +185,43 @@ def test_render_document_sin_bloques_cae_a_texto_plano(renderer, tmp_path):
     from core.ocr.document_model import Document
     pages = renderer.render_document(Document(source_path="/tmp/x"), RenderOptions())
     assert isinstance(pages, list) and pages
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed",
+)
+def test_render_document_cuerpo_snapea_a_renglones_libreta(renderer, tmp_path):
+    """En libreta, los renglones de cuerpo caen con período = paso de la grilla.
+
+    El snap a libreta alinea cada línea base a un renglón del fondo (paso
+    base_line_h = font_size*line_height). Verificamos que las bandas de tinta del
+    cuerpo están espaciadas justo ese paso (y no a la deriva entre renglones).
+    """
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+    from core.ocr.document_model import BlockType, TextBlock
+    _bank_con_a(renderer, tmp_path)
+    # Sin presets ni ruido vertical para medir el período limpio.
+    opts = RenderOptions(
+        font_size=40, style="", background_style="libreta",
+        size_variation=0.0, rotation_range=0.0, jitter_px=0, baseline_drift=0.0,
+    )
+    base_line_h = int(opts.font_size * opts.line_height)  # 64
+    doc = _doc([TextBlock(text=" ".join(["aaa"] * 60), block_type=BlockType.PARAGRAPH)])
+    pages = renderer.render_document(doc, opts)
+    lum = np.asarray(pages[0].convert("L"))
+    # Filas con tinta del cuerpo (el azul del renglón es claro, >150; la tinta <120).
+    row_has_ink = (lum < 120).sum(axis=1) > 5
+    # Inicio de cada banda de texto (transición sin-tinta → con-tinta).
+    band_tops = [
+        i for i in range(1, len(row_has_ink))
+        if row_has_ink[i] and not row_has_ink[i - 1]
+    ]
+    assert len(band_tops) >= 3, f"esperaba varias líneas, vi {len(band_tops)}"
+    gaps = np.diff(band_tops)
+    # El período entre bandas debe ser el paso de la grilla (±2px por anti-aliasing).
+    assert abs(int(np.median(gaps)) - base_line_h) <= 2, (
+        f"el cuerpo no quedó pegado a la grilla: gaps={list(gaps)} vs paso={base_line_h}"
+    )

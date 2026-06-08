@@ -82,9 +82,22 @@ class _BlockLine:
     x: int            # posición X absoluta de pegado (margen + sangría + jitter)
     line_height: int  # avance vertical de este renglón (mayor en encabezados)
     gap_before: int   # hueco extra antes del renglón (separación de bloque)
+    baseline_offset: int  # px del top del renglón a su línea base (para snap a libreta)
 
 
 class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
+    # Geometría del renglón. El lienzo de un renglón mide font_size*FACTOR de alto
+    # y la línea base se asienta en BASELINE_FACTOR de esa altura. Centralizados
+    # para que _render_line (que dibuja) y el snap a libreta (que alinea) usen el
+    # MISMO baseline; si divergen, el texto no caería sobre los renglones.
+    _LINE_CANVAS_FACTOR = 2.5
+    _BASELINE_FACTOR = 0.72
+
+    @classmethod
+    def _line_baseline_offset(cls, font_size: int) -> int:
+        """Distancia (px) del borde superior del renglón a su línea base."""
+        return int(int(font_size * cls._LINE_CANVAS_FACTOR) * cls._BASELINE_FACTOR)
+
     def __init__(self, bank):
         self.bank = bank
         self._raw_cache: dict[str, Image.Image] = {}  # path -> RGBA image raw
@@ -310,6 +323,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
 
             bopts = replace(options, font_size=fs)
             line_h = int(fs * options.line_height)
+            boff = self._line_baseline_offset(fs)
             block_usable = max(1, usable_width - indent)
             # Offset POR BLOQUE (no por letra), acotado: natural pero no caótico.
             bjx = random.randint(-4, 4)
@@ -329,6 +343,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
                     line_height=line_h,
                     # el hueco de bloque + el jitter Y sólo en el primer renglón
                     gap_before=(gap_extra + bjy) if i == 0 else 0,
+                    baseline_offset=boff,
                 ))
 
         return self._flow_blocklines_to_pages(items, options, page_height, base_line_h)
@@ -339,32 +354,74 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         """Reparte los renglones ya renderizados en páginas de altura fija.
 
         Mantiene un cursor vertical, abre página nueva cuando un renglón no entra y
-        nunca pega por encima del margen ni fuera de la hoja. Las decoraciones de
-        fondo (renglones/cuadrícula/margen) se dibujan por página con el paso del
-        cuerpo, así el texto de párrafo cae sobre los renglones de la libreta.
+        nunca pega por encima del margen ni fuera de la hoja.
+
+        SNAP A LIBRETA: cuando el fondo tiene renglones horizontales (libreta o
+        cualquier estilo con draw_lines y sin cuadrícula), cada renglón se ALINEA
+        para que su línea base caiga EXACTO sobre un renglón del fondo
+        (margen + k·base_line_h). Redondea al renglón MÁS CERCANO (no ceil): el
+        lienzo de un renglón reserva headroom mayor que base_line_h, así que un ceil
+        saltaría un renglón y dejaría el primero vacío. Una guarda de no-solape
+        (next_min_k) impide que un renglón caiga sobre el anterior, reservando los
+        renglones de grilla que ocupa cada línea (clave tras un encabezado alto).
+        Para renglones de cuerpo consecutivos el snap es transparente. El jitter
+        horizontal y la micro-rotación se conservan: el "hecho a mano" queda en X.
         """
         bottom = page_height - options.page_margin
+        margin = options.page_margin
+        style_def = BACKGROUND_STYLES.get(options.background_style, {})
+        snap = (
+            base_line_h > 0
+            and bool(getattr(options, "draw_lines", False))
+            and not style_def.get("draw_grid")
+        )
 
         def _new_canvas():
             c = Image.new("RGBA", (options.page_width, page_height), options.background_color)
             self._draw_background_decorations(c, options, base_line_h, page_height)
             return c
 
+        def _snap_k(y_top: int, it, floor_k: int) -> int:
+            """Índice del renglón de grilla (1=primero) que recibe la línea base."""
+            desired = y_top + it.baseline_offset
+            k = (desired - margin + base_line_h // 2) // base_line_h  # redondeo
+            return max(1, floor_k, k)
+
         pages = []
         canvas = _new_canvas()
-        y = options.page_margin
+        y = margin
+        next_min_k = 1
         for it in items:
             y += max(0, it.gap_before)
-            # ¿Cabe este renglón? Si no, cierra la página y abre otra.
-            if it.line_height > 0 and y + it.line_height > bottom and y > options.page_margin:
+            do_snap = snap and it.baseline_offset > 0
+            if do_snap:
+                k = _snap_k(y, it, next_min_k)
+                paste_y = margin + k * base_line_h - it.baseline_offset
+            else:
+                k = None
+                paste_y = y
+            # ¿Cabe este renglón? Si no, cierra la página y re-snapea arriba.
+            if it.line_height > 0 and paste_y + it.line_height > bottom and y > margin:
                 pages.append(canvas.convert("RGB"))
                 canvas = _new_canvas()
-                y = options.page_margin
+                y = margin
+                next_min_k = 1
+                if do_snap:
+                    k = _snap_k(y, it, next_min_k)
+                    paste_y = margin + k * base_line_h - it.baseline_offset
+                else:
+                    paste_y = y
             if it.img is not None:
                 x = max(0, it.x)
-                paste_y = max(0, min(page_height - it.img.height, y))
-                canvas.paste(it.img, (x, paste_y), it.img)
-            y += it.line_height
+                py = max(0, min(page_height - it.img.height, paste_y))
+                canvas.paste(it.img, (x, py), it.img)
+            if k is not None:
+                # Reservar los renglones de grilla que ocupa esta línea (ceil).
+                span = max(1, -(-it.line_height // base_line_h))
+                next_min_k = k + span
+            # El cursor continuo sigue desde la base de este renglón para que el
+            # siguiente caiga un renglón más abajo (snap transparente en el cuerpo).
+            y = paste_y + it.line_height
 
         pages.append(canvas.convert("RGB"))
         return pages
@@ -379,7 +436,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         # the full glyph height above that.  Reserve font_size * 2.5 so that
         # tall glyphs (ascenders) and deep glyphs (descenders g,p,q,y) never
         # get clipped at the bottom.
-        h = int(options.font_size * 2.5)
+        h = int(options.font_size * self._LINE_CANVAS_FACTOR)
         line_canvas = Image.new("RGBA", (max_width, h), (0, 0, 0, 0))
         x_cursor = 0
 
@@ -451,7 +508,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
                 if drift_amp > 0:
                     drift += random.uniform(-drift_amp * 0.25, drift_amp * 0.25)
                     drift = max(-drift_amp, min(drift_amp, drift))
-                baseline = int(h * 0.72) + round(drift)
+                baseline = int(h * self._BASELINE_FACTOR) + round(drift)
                 # Línea base por clase: las de x-height asientan su base en el
                 # baseline; las ascendentes (asta alta) suben; las descendentes
                 # (g,j,p,q,y) meten ~31% del glifo (su cola) bajo el baseline.
