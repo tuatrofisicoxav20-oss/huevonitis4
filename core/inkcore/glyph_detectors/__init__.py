@@ -1,14 +1,8 @@
 from core.inkcore.glyph_detectors.base import GlyphDetector
 from core.inkcore.glyph_detectors.classic_cv import ClassicCVDetector
-from core.inkcore.glyph_detectors.craft import CRAFTDetector
-from core.inkcore.glyph_detectors.easyocr_det import EasyOCRDetector
-from core.inkcore.glyph_detectors.paddle_det import PaddleDetector
 
 REGISTRY: dict[str, type[GlyphDetector]] = {
     ClassicCVDetector.name: ClassicCVDetector,
-    CRAFTDetector.name: CRAFTDetector,
-    EasyOCRDetector.name: EasyOCRDetector,
-    PaddleDetector.name: PaddleDetector,
 }
 
 
