@@ -112,23 +112,24 @@ class WriterTabMixin:
             mode_frame, text="Modo:",
             font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
-        # "apuntes" = render lineal (texto/bloques); "mapa" = mapa conceptual
-        # (árbol desde texto indentado). Es un modo APARTE: no comparte layout
-        # con el render lineal.
+        # "apuntes" = render lineal (texto/bloques); "mapa" = mapa conceptual a
+        # mano; "diagrama" = primitivas desde el DSL de texto. Es un DESPLEGABLE
+        # (no radios en fila) para que el 3er modo nunca se corte si la ventana es
+        # angosta. _writer_mode_var guarda el valor interno (lo lee el resto).
         self._writer_mode_var = ctk.StringVar(value="apuntes")
-        for mode_val, mode_label in [
-            ("apuntes", "📝 Apuntes"),
-            ("mapa", "🗺️ Mapa"),
-            ("diagrama", "🔷 Diagrama"),
-        ]:
-            ctk.CTkRadioButton(
-                mode_frame, text=mode_label, variable=self._writer_mode_var, value=mode_val,
-                command=self._on_writer_mode_change,
-                font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-                fg_color=theme.ACCENT_GREEN,
-                hover_color=theme.ACCENT_GREEN_HOVER,
-                border_color=theme.BORDER,
-            ).pack(side="left", padx=6)
+        self._mode_labels = {"📝 Apuntes": "apuntes", "🗺️ Mapa": "mapa", "🔷 Diagrama": "diagrama"}
+
+        def _on_mode_menu(label):
+            self._writer_mode_var.set(self._mode_labels.get(label, "apuntes"))
+            self._on_writer_mode_change()
+
+        self._mode_menu = ctk.CTkOptionMenu(
+            mode_frame, values=list(self._mode_labels.keys()), command=_on_mode_menu,
+            width=180, fg_color=theme.BG_TERTIARY, button_color=theme.ACCENT_GREEN,
+            button_hover_color=theme.ACCENT_GREEN_HOVER, text_color=theme.TEXT_PRIMARY,
+        )
+        self._mode_menu.set("📝 Apuntes")
+        self._mode_menu.pack(side="left", padx=8)
 
         # Fase 7 — DPI de exportación + reset de parámetros a valores naturales.
         ctrl_frame = ctk.CTkFrame(left, fg_color="transparent")
