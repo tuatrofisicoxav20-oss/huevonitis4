@@ -33,7 +33,6 @@ from ui.views.inkcore.extractor_tab_grid import ExtractorTabGridMixin
 from ui.views.inkcore.main_view_helpers import InkCoreViewHelpersMixin
 from ui.views.inkcore.main_view_profile import InkCoreViewProfileMixin
 from ui.views.inkcore.pipeline_panel import PipelinePanelMixin
-from ui.views.inkcore.replicator_tab import ReplicatorTabMixin
 from ui.views.inkcore.review_tab import ReviewTabMixin
 from ui.views.inkcore.review_tab_row import ReviewTabRowMixin
 from ui.views.inkcore.template_tab import TemplateTabMixin
@@ -57,7 +56,6 @@ class InkCoreView(
     WriterTabMixin,
     ReviewTabMixin,
     ReviewTabRowMixin,
-    ReplicatorTabMixin,
     TemplateTabMixin,
     BaseView,
 ):
@@ -101,14 +99,12 @@ class InkCoreView(
         self._tabs.add("🗂 Banco")
         self._tabs.add("✍️ Escritor")
         self._tabs.add("✅ Revisión")
-        self._tabs.add("🔁 Reproducir")
         self._tabs.add("🧩 Plantilla")
         self._build_extractor(self._tabs.tab("📷 Extractor"))
         self._build_bulk_capture(self._tabs.tab("📦 Captura masiva"))
         self._build_bank(self._tabs.tab("🗂 Banco"))
         self._build_writer(self._tabs.tab("✍️ Escritor"))
         self._build_review(self._tabs.tab("✅ Revisión"))
-        self._build_replicator(self._tabs.tab("🔁 Reproducir"))
         self._build_template(self._tabs.tab("🧩 Plantilla"))
         # Estado de sesión bulk
         self._bulk_session = None
