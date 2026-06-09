@@ -122,21 +122,30 @@ class GlyphExtractionPipeline:
 
         # F5/F6 — respetar orientación EXIF también en el pipeline ensemble
         # (cv2.imread la ignora; fotos de celular entrarían acostadas).
-        from core.inkcore.extractor_preprocess import imread_oriented, orient_by_content
+        from core.inkcore.glyph_ingest import (
+            GlyphPreprocessOptions,
+            ImagePreprocessor,
+            assess_quality,
+            imread_oriented,
+            orient_by_content,
+            refine_char_region,
+            tight_crop,
+            to_rgba_smooth,
+        )
         img_bgr = imread_oriented(image_path)
         if img_bgr is None:
             return ExtractionResult(glyphs=[], stats={"error": f"no se pudo leer {image_path}"})
         # Paso 2 (5ta tanda) — orientación por contenido/OSD o manual antes del deskew.
         img_bgr = orient_by_content(img_bgr, self.config.manual_orientation)
 
-        # 1. Preprocesar (reutiliza pipeline del GlyphExtractor)
-        from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
-        _ext = GlyphExtractor()
-        opts = ExtractionOptions(min_quality=self.config.min_quality)
-        img = _ext._scale(img_bgr)
-        img = _ext._autocrop(img)
-        img, _ = _ext._deskew(img)
-        _, _, clean = _ext._full_preprocess(img, opts)
+        # 1. Preprocesar con el motor de imagen (extractor_preprocess), desacoplado
+        # de la fachada GlyphExtractor (eliminada en la limpieza v4.2).
+        _prep = ImagePreprocessor()
+        opts = GlyphPreprocessOptions(min_quality=self.config.min_quality)
+        img = _prep.scale(img_bgr)
+        img = _prep.autocrop(img)
+        img, _ = _prep.deskew(img)
+        _, _, clean = _prep.full_preprocess(img, opts)
         h_img, w_img = img.shape[:2]
 
         timings["preprocess_ms"] = int((time.perf_counter() - t_start) * 1000)
@@ -225,7 +234,7 @@ class GlyphExtractionPipeline:
             line_mask = clean[band_top:band_bot, :]
 
             # Refinar incluyendo diacríticos/descenders (coords dentro de line_mask)
-            gx1, gy1, gx2, gy2 = _ext._refine_char_region(
+            gx1, gy1, gx2, gy2 = refine_char_region(
                 line_mask, fb.x, fb.x + fb.w,
             )
 
@@ -240,11 +249,11 @@ class GlyphExtractionPipeline:
             if mask_crop.size == 0:
                 continue
 
-            tight = _ext._tight_crop(mask_crop, padding=3)
+            tight = tight_crop(mask_crop, padding=3)
             if tight is None:
                 continue
 
-            pil_img = _ext._to_rgba_smooth(tight)
+            pil_img = to_rgba_smooth(tight)
             crops.append(pil_img)
             valid_fused.append(fb)
 
@@ -330,8 +339,8 @@ class GlyphExtractionPipeline:
         # la anterior en la UI (self._extracted = glyphs), así que purgar los
         # PNG sueltos previos al empezar es seguro. El cleanup selectivo de
         # save_glyphs_to_bank sigue borrando solo los que SÍ se guardaron.
-        from core.inkcore.extractor import _purge_temp_pngs
-        _purge_temp_pngs(temp_dir)
+        from core.inkcore.glyph_ingest import purge_temp_pngs
+        purge_temp_pngs(temp_dir)
 
         glyphs: list[GlyphEntry] = []
         boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
@@ -366,7 +375,7 @@ class GlyphExtractionPipeline:
             # Quality rica del extractor (sobre el PIL en memoria, sin re-leer disco).
             # align_score=agreement_score → glifos vistos por más detectores
             # ganan un pequeño boost al ponderar la alineación interna.
-            quality = _ext._assess_quality(crop, align_score=fb.agreement_score)
+            quality = assess_quality(crop, align_score=fb.agreement_score)
             base_q = quality.get("quality_score", 0.0)
             final_q = compute_final_quality(
                 base_quality=base_q,

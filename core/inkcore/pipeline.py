@@ -79,13 +79,6 @@ class InkCorePipeline:
             # thread and the main thread (e.g. save_glyphs_to_bank called
             # while a background extraction is finishing).
             self._bank_lock = threading.Lock()
-            # Pre-cargamos TrOCR en background — no bloquea el arranque
-            # pero deja el modelo caliente cuando el usuario pulse Procesar.
-            # Cold start TrOCR: ~12s → warm: ~2.5s (ganancia ~10s).
-            self._preload_thread = threading.Thread(
-                target=self._preload_ocr, name="trocr-preload", daemon=True,
-            )
-            self._preload_thread.start()
         except Exception as exc:
             logger.error("InkCorePipeline failed to initialise: %s", exc, exc_info=True)
             raise
@@ -132,14 +125,6 @@ class InkCorePipeline:
                 return False
             self.switch_profile(default_id)
         return self.profile_manager.delete_profile(profile_id, delete_data=delete_data)
-
-    @staticmethod
-    def _preload_ocr() -> None:
-        try:
-            from core.inkcore.auto_text import preload_trocr
-            preload_trocr()
-        except Exception as exc:
-            logger.debug("preload_ocr ignorado: %s", exc)
 
     def reload_extractor(self) -> None:
         """Reinicializa GlyphExtractor para tomar el nuevo GLYPH_DETECTOR desde config.

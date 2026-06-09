@@ -462,7 +462,7 @@ def _extract_grid(gray, lay, clf, char_to_label):
     casillas → recortes sobre líneas y letras partidas). Mismo formato de salida
     que extract_from_template: lista de (letra, glifo_RGBA, score).
     """
-    from core.inkcore.extractor_glyph_ops import assess_quality, to_rgba_smooth
+    from core.inkcore.glyph_ingest import assess_quality, to_rgba_smooth
 
     ang = _estimate_skew(gray)
     gray = _deskew(gray, ang)
@@ -565,7 +565,7 @@ def extract_from_template(
         return []
     from pathlib import Path
 
-    from core.inkcore.extractor_glyph_ops import assess_quality, to_rgba_smooth
+    from core.inkcore.glyph_ingest import assess_quality, to_rgba_smooth
     if not Path(image_path).exists():
         logger.warning("extract_from_template: no existe %s", image_path)
         return []
