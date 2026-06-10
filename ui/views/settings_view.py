@@ -203,20 +203,14 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
             except Exception as exc:
                 logger.warning("No se pudo actualizar OCREngine en StudyView: %s", exc)
 
-        # InkCorePipeline: recargar extractor si cambió el detector
-        if new_det != prev_det:
-            try:
-                if hasattr(self.app, "inkcore"):
-                    self.app.inkcore.reload_extractor()
-            except Exception as exc:
-                logger.warning("No se pudo recargar GlyphExtractor: %s", exc)
+        # El detector de glifos (config.GLYPH_DETECTOR) lo relee la Captura masiva
+        # en cada extracción (construye un GlyphExtractionPipeline fresco), así que
+        # el cambio aplica solo; ya no hay extractor que recargar.
 
     def _apply_save(self):
         # Guardar valores previos ANTES de leer los widgets (para comparar después)
         prev_ocr = self._settings.get("ocr_backend", config.OCR_BACKEND)
         prev_det = self._settings.get("glyph_detector", config.GLYPH_DETECTOR)
-        prev_fusion = self._settings.get("glyph_detector_fusion", config.GLYPH_DETECTOR_FUSION)
-        prev_extra_ui = self._settings.get("glyph_detectors_extra_ui", "(ninguno)")
 
         errors = []
         for key, (ftype, w) in self._field_widgets.items():
@@ -269,14 +263,6 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
         self._save_settings()
         _apply_settings_to_config(self._settings)
         self._notify_backends(prev_ocr, prev_det)
-        # Fase 2 — recargar el extractor también si cambió la fusión o el extra,
-        # no sólo el detector base (todos afectan _build_default_pipeline_config).
-        new_fusion = self._settings.get("glyph_detector_fusion", prev_fusion)
-        new_extra_ui = self._settings.get("glyph_detectors_extra_ui", prev_extra_ui)
-        if (new_fusion != prev_fusion or new_extra_ui != prev_extra_ui) and \
-                hasattr(self.app, "inkcore"):
-            with contextlib.suppress(Exception):
-                self.app.inkcore.reload_extractor()
         self.toast("Configuración guardada — reinicia la app para aplicar el tema", "success")
 
 

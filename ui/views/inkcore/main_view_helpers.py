@@ -11,12 +11,14 @@ Depende de atributos definidos en InkCoreView.__init__ / _build:
   self._thumb_cache, self._pipeline, self._tabs, self._tabs_dirty,
   self._writer_text, self.app
 y de métodos de otros mixins:
-  self._reload_and_refresh_all, self._refresh_detector_chip,
-  self._do_refresh_bank_ui, self._do_refresh_review_ui, self.toast
+  self._reload_and_refresh_all, self._do_refresh_bank_ui,
+  self._do_refresh_review_ui, self.toast
 """
 import contextlib
 import logging
 from pathlib import Path
+
+from ui import theme
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +67,27 @@ class InkCoreViewHelpersMixin:
         except Exception as exc:
             logger.error("on_show: reload_bank falló: %s", exc, exc_info=True)
         self._reload_and_refresh_all()
-        self._refresh_detector_chip()
         self._maybe_load_pending_text()
+
+    # ── Colores por tier (Gold/Silver/Bronze) ───────────────────────
+    # Reubicados desde extractor_tab_grid (eliminado en la limpieza v4.2); los
+    # usa el Banco (bank_tab_render) para colorear celdas según calidad.
+
+    @staticmethod
+    def _tier_text_color(tier: str) -> str:
+        return {
+            "Gold":   theme.ACCENT_YELLOW,
+            "Silver": "#C0C0C0",
+            "Bronze": "#CD7F32",
+        }.get(tier, "#888")
+
+    @staticmethod
+    def _tier_border(tier: str) -> str:
+        return {
+            "Gold":   theme.ACCENT_GREEN,
+            "Silver": theme.ACCENT_ORANGE,
+            "Bronze": theme.BORDER,
+        }.get(tier, theme.BORDER)
 
     def _on_tab_change(self) -> None:
         """Refresca de forma diferida un tab que quedó marcado como sucio.

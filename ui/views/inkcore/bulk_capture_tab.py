@@ -228,16 +228,17 @@ class BulkCaptureTabMixin:
         ).pack(side="left", padx=4)
 
     def _bulk_run_pdf(self, pdf_path: str):
-        cfg = self._get_pipeline_config() if self._use_pipeline_var.get() else None
-        if cfg is None:
-            from core.inkcore.extraction_pipeline import PipelineConfig
-            cfg = PipelineConfig(
-                detectors=["classic_cv"],
-                labelers=[],
-                detector_fusion="union",
-                labeler_voting="highest_conf",
-                min_quality=0.15,
-            )
+        # Config del pipeline de captura: clásico (classic_cv) sin labelers, que
+        # es lo que necesita la captura masiva. Antes se leía del panel del
+        # Extractor (eliminado en la limpieza v4.2); ahora es autónoma.
+        from core.inkcore.extraction_pipeline import PipelineConfig
+        cfg = PipelineConfig(
+            detectors=["classic_cv"],
+            labelers=[],
+            detector_fusion="union",
+            labeler_voting="highest_conf",
+            min_quality=0.15,
+        )
 
         import threading as _threading
         self._bulk_cancel_event = _threading.Event()
@@ -291,15 +292,13 @@ class BulkCaptureTabMixin:
         self._bulk_run(list(paths))
 
     def _bulk_run(self, paths: list[str]):
-        cfg = self._get_pipeline_config() if self._use_pipeline_var.get() else None
-        if cfg is None:
-            from core.inkcore.extraction_pipeline import PipelineConfig
-            cfg = PipelineConfig(
-                detectors=["classic_cv"],
-                labelers=[],
-                detector_fusion="union",
-                labeler_voting="highest_conf",
-            )
+        from core.inkcore.extraction_pipeline import PipelineConfig
+        cfg = PipelineConfig(
+            detectors=["classic_cv"],
+            labelers=[],
+            detector_fusion="union",
+            labeler_voting="highest_conf",
+        )
 
         import threading as _threading
         self._bulk_cancel_event = _threading.Event()

@@ -32,7 +32,7 @@ class ClassicCVDetector(GlyphDetector):
         if not _CV2_OK:
             return []
         try:
-            from core.inkcore.extractor import BBox
+            from core.inkcore.glyph_detectors.base import BBox
             gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
             # Salto 5 — multibinarización: Otsu solo se invierte en bajo contraste
             # (marca toda la página como tinta → 1 blob). best_binary elige por

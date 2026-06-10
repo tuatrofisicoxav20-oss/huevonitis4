@@ -1,12 +1,11 @@
 """InkCoreView — vista principal del módulo de tinta manuscrita.
 
 Hereda comportamiento por tab de mixins separados:
-  PipelinePanelMixin  → pipeline_panel.py
-  ExtractorTabMixin   → extractor_tab.py
   BulkCaptureTabMixin → bulk_capture_tab.py
   BankTabMixin        → bank_tab.py
   WriterTabMixin      → writer_tab.py
   ReviewTabMixin      → review_tab.py
+  TemplateTabMixin    → template_tab.py
 
 Sus helpers propios viven en sub-mixins separados:
   InkCoreViewHelpersMixin → main_view_helpers.py (thumbs, on_show, tabs, texto)
@@ -27,12 +26,8 @@ from ui.views.inkcore.bank_tab import BankTabMixin
 from ui.views.inkcore.bulk_capture_tab import BulkCaptureTabMixin
 from ui.views.inkcore.bulk_capture_tab_filters import BulkCaptureFiltersMixin
 from ui.views.inkcore.bulk_capture_tab_grid import BulkCaptureGridMixin
-from ui.views.inkcore.extractor_tab import ExtractorTabMixin
-from ui.views.inkcore.extractor_tab_build import ExtractorTabBuildMixin
-from ui.views.inkcore.extractor_tab_grid import ExtractorTabGridMixin
 from ui.views.inkcore.main_view_helpers import InkCoreViewHelpersMixin
 from ui.views.inkcore.main_view_profile import InkCoreViewProfileMixin
-from ui.views.inkcore.pipeline_panel import PipelinePanelMixin
 from ui.views.inkcore.review_tab import ReviewTabMixin
 from ui.views.inkcore.review_tab_row import ReviewTabRowMixin
 from ui.views.inkcore.template_tab import TemplateTabMixin
@@ -45,10 +40,6 @@ if TYPE_CHECKING:
 class InkCoreView(
     InkCoreViewHelpersMixin,
     InkCoreViewProfileMixin,
-    PipelinePanelMixin,
-    ExtractorTabBuildMixin,
-    ExtractorTabMixin,
-    ExtractorTabGridMixin,
     BulkCaptureTabMixin,
     BulkCaptureGridMixin,
     BulkCaptureFiltersMixin,
@@ -94,13 +85,11 @@ class InkCoreView(
             command=self._on_tab_change,
         )
         self._tabs.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        self._tabs.add("📷 Extractor")
         self._tabs.add("📦 Captura masiva")
         self._tabs.add("🗂 Banco")
         self._tabs.add("✍️ Escritor")
         self._tabs.add("✅ Revisión")
         self._tabs.add("🧩 Plantilla")
-        self._build_extractor(self._tabs.tab("📷 Extractor"))
         self._build_bulk_capture(self._tabs.tab("📦 Captura masiva"))
         self._build_bank(self._tabs.tab("🗂 Banco"))
         self._build_writer(self._tabs.tab("✍️ Escritor"))

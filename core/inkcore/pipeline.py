@@ -6,7 +6,6 @@ from pathlib import Path
 import config
 from core.diagnostics import diagnostics
 from core.inkcore.bank import GlyphBank
-from core.inkcore.extractor import ExtractionOptions, GlyphExtractor
 from core.inkcore.renderer import HandwritingRenderer
 from core.models import GlyphEntry
 
@@ -73,7 +72,6 @@ class InkCorePipeline:
                 )
                 self.active_profile_id = config.DEFAULT_PROFILE_ID
             self.bank = GlyphBank(profile_id=self.active_profile_id)
-            self.extractor = GlyphExtractor()
             self.renderer = HandwritingRenderer(self.bank)
             # Lock guards concurrent access to the bank from the extraction
             # thread and the main thread (e.g. save_glyphs_to_bank called
@@ -126,22 +124,6 @@ class InkCorePipeline:
             self.switch_profile(default_id)
         return self.profile_manager.delete_profile(profile_id, delete_data=delete_data)
 
-    def reload_extractor(self) -> None:
-        """Reinicializa GlyphExtractor para tomar el nuevo GLYPH_DETECTOR desde config.
-
-        Llamar cuando el usuario cambia el detector de glifos en Configuración.
-        Usa el mismo lock que reload_bank() para no colisionar con extracciones en curso.
-        """
-        with self._bank_lock:
-            try:
-                self.extractor = GlyphExtractor()
-                det = getattr(config, "GLYPH_DETECTOR", "classic_cv")
-                logger.info("GlyphExtractor reinicializado (detector: %s)", det)
-            except Exception as exc:
-                logger.error(
-                    "Error al reinicializar GlyphExtractor: %s", exc, exc_info=True
-                )
-
     def reload_bank(self):
         with self._bank_lock:
             t0 = time.perf_counter()
@@ -152,23 +134,6 @@ class InkCorePipeline:
                 self.renderer.bank = self.bank  # actualiza referencia, preserva cache
             elapsed_ms = (time.perf_counter() - t0) * 1000
             diagnostics.log_timing("reload_bank", elapsed_ms)
-
-    def extract(
-        self,
-        image_path: str,
-        reference_text: str,
-        options: ExtractionOptions | None = None,
-    ) -> list[GlyphEntry]:
-        t0 = time.perf_counter()
-        try:
-            result = self.extractor.extract_from_image(image_path, reference_text, options)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            diagnostics.log_timing("extract", elapsed_ms)
-            diagnostics.log_event("inkcore", "extract_done", f"{len(result)} glifos")
-            return result
-        except Exception as exc:
-            diagnostics.log_error("extract", exc)
-            raise
 
     def save_glyphs_to_bank(self, glyphs: list[GlyphEntry]) -> "dict | int":
         """BUG-11: devuelve dict con stats explícitos: saved/duplicates/missing_source/errors.

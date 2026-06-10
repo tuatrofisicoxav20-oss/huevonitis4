@@ -97,18 +97,17 @@ def _preprocess_image(image_path: str):
     try:
         import cv2  # noqa: F401
 
-        from core.inkcore.extractor import GlyphExtractor
-        from core.inkcore.extractor_preprocess import imread_oriented
+        from core.inkcore.glyph_ingest import ImagePreprocessor, imread_oriented
     except Exception as exc:
         print(f"  ⚠ no se pudo preprocesar ({exc})")
         return None
     img = imread_oriented(image_path)
     if img is None:
         return None
-    ext = GlyphExtractor()
-    img = ext._scale(img)
-    img = ext._autocrop(img)
-    img, _ = ext._deskew(img)
+    prep = ImagePreprocessor()
+    img = prep.scale(img)
+    img = prep.autocrop(img)
+    img, _ = prep.deskew(img)
     return img
 
 

@@ -291,12 +291,12 @@ def test_dedup_robusto_con_basura_degenerada(bank, tmp_path):
 
 
 def test_purge_temp_pngs_descarta_huerfanos(tmp_path):
-    """_purge_temp_pngs borra solo los PNG huérfanos, deja intactos otros archivos."""
-    from core.inkcore.extractor import _purge_temp_pngs
+    """purge_temp_pngs borra solo los PNG huérfanos, deja intactos otros archivos."""
+    from core.inkcore.glyph_ingest import purge_temp_pngs
     for i in range(3):
         (tmp_path / f"orphan_{i}.png").write_bytes(b"\x89PNG")
     (tmp_path / "keep.json").write_bytes(b"{}")
-    removed = _purge_temp_pngs(tmp_path)
+    removed = purge_temp_pngs(tmp_path)
     assert removed == 3
     assert not list(tmp_path.glob("*.png"))
     assert (tmp_path / "keep.json").exists()

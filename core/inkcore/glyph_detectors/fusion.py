@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.inkcore.extractor import BBox
+    from core.inkcore.glyph_detectors.base import BBox
 
 logger = logging.getLogger(__name__)
 
