@@ -103,9 +103,12 @@ class BulkCaptureTabMixin:
 
         self._bulk_placeholder = ctk.CTkLabel(
             self._bulk_grid_scroll,
-            text="↑ Carga un PDF de plantilla escaneada para empezar.\n\n"
-                 "Escribe en la plantilla con tu letra, escanéala con Adobe Scan\n"
-                 "y cárgala aquí para extraer 400–700 glifos en una sesión.",
+            text="↑ Carga tu plantilla llena para extraer los glifos.\n\n"
+                 "Llena la plantilla del paso 1 con tu letra y cárgala aquí:\n"
+                 "• 📄 PDF — escaneado (Adobe Scan, etc.) o foto exportada a PDF\n"
+                 "• 🖼 Imágenes sueltas — fotos del celular (PNG/JPG), una o varias\n\n"
+                 "Se extraen 400–700 glifos por sesión. Después pasa al paso 3\n"
+                 "(Revisión) para aprobar y guardar al banco.",
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
             justify="center",
         )

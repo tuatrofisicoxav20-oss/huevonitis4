@@ -379,7 +379,7 @@ class TemplateTabMixin:
                 self.toast(f"{stats['saved']} letras al banco", "success")
                 # Refrescar banco/revisión si la vista lo soporta
                 if hasattr(self, "_tabs_dirty"):
-                    self._tabs_dirty.update({"🗂 Banco", "✅ Revisión"})
+                    self._tabs_dirty.update({self._BANK_TAB, self._REVIEW_TAB})
 
             if self.winfo_exists():
                 self.after(0, _done)

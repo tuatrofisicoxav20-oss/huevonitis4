@@ -188,10 +188,14 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
 
         ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(4, 12))
 
-    def _notify_backends(self, prev_ocr: str, prev_det: str) -> None:
-        """Actualiza instancias vivas de OCREngine y GlyphExtractor sin reiniciar la app."""
+    def _notify_backends(self, prev_ocr: str) -> None:
+        """Actualiza la instancia viva de OCREngine sin reiniciar la app.
+
+        El detector de glifos (config.GLYPH_DETECTOR) lo relee la Captura masiva
+        en cada extracción (construye un GlyphExtractionPipeline fresco), así que
+        el cambio aplica solo; ya no hay extractor que recargar.
+        """
         new_ocr = self._settings.get("ocr_backend", prev_ocr)
-        new_det = self._settings.get("glyph_detector", prev_det)
         tess_changed = bool(self._settings.get("tesseract_path"))
 
         # StudyView._ocr: cambiar backend o recargar cmd de Tesseract en caliente
@@ -203,14 +207,9 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
             except Exception as exc:
                 logger.warning("No se pudo actualizar OCREngine en StudyView: %s", exc)
 
-        # El detector de glifos (config.GLYPH_DETECTOR) lo relee la Captura masiva
-        # en cada extracción (construye un GlyphExtractionPipeline fresco), así que
-        # el cambio aplica solo; ya no hay extractor que recargar.
-
     def _apply_save(self):
         # Guardar valores previos ANTES de leer los widgets (para comparar después)
         prev_ocr = self._settings.get("ocr_backend", config.OCR_BACKEND)
-        prev_det = self._settings.get("glyph_detector", config.GLYPH_DETECTOR)
 
         errors = []
         for key, (ftype, w) in self._field_widgets.items():
@@ -262,7 +261,7 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
 
         self._save_settings()
         _apply_settings_to_config(self._settings)
-        self._notify_backends(prev_ocr, prev_det)
+        self._notify_backends(prev_ocr)
         self.toast("Configuración guardada — reinicia la app para aplicar el tema", "success")
 
 

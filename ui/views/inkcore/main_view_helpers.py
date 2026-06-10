@@ -34,7 +34,7 @@ class InkCoreViewHelpersMixin:
 
     # Nombres exactos de los tabs que cuelgan del banco (con emoji).
     _BANK_TAB = "🗂 Banco"
-    _REVIEW_TAB = "✅ Revisión"
+    _REVIEW_TAB = "3 · ✅ Revisión"
 
     def _get_thumb(self, path: str, w: int, h: int) -> "ImageTk.PhotoImage | None":
         """Carga y cachea thumbnail de un glifo PNG."""

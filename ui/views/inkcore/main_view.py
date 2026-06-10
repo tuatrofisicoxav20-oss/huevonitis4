@@ -85,16 +85,21 @@ class InkCoreView(
             command=self._on_tab_change,
         )
         self._tabs.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        self._tabs.add("📦 Captura masiva")
+        # Pestañas en ORDEN DE FLUJO (izquierda → derecha = de crear el banco a
+        # usarlo). Los pasos 1-2-3 son el flujo de captura de glifos; Banco y
+        # Escritor son la etapa de "usar" el banco ya creado.
+        #   1·Plantilla (generar hoja) → 2·Captura (cargar foto) →
+        #   3·Revisión (aprobar) → Banco (ver) → Escritor (usar)
+        self._tabs.add("1 · 🧩 Plantilla")
+        self._tabs.add("2 · 📦 Captura masiva")
+        self._tabs.add("3 · ✅ Revisión")
         self._tabs.add("🗂 Banco")
         self._tabs.add("✍️ Escritor")
-        self._tabs.add("✅ Revisión")
-        self._tabs.add("🧩 Plantilla")
-        self._build_bulk_capture(self._tabs.tab("📦 Captura masiva"))
+        self._build_template(self._tabs.tab("1 · 🧩 Plantilla"))
+        self._build_bulk_capture(self._tabs.tab("2 · 📦 Captura masiva"))
+        self._build_review(self._tabs.tab("3 · ✅ Revisión"))
         self._build_bank(self._tabs.tab("🗂 Banco"))
         self._build_writer(self._tabs.tab("✍️ Escritor"))
-        self._build_review(self._tabs.tab("✅ Revisión"))
-        self._build_template(self._tabs.tab("🧩 Plantilla"))
         # Estado de sesión bulk
         self._bulk_session = None
         self._bulk_cancel_event = None
