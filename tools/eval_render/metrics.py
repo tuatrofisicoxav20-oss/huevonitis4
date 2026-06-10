@@ -389,6 +389,19 @@ def compute_metrics(img: Image.Image,
     out.update(_baseline_metrics(lines))
     out.update(_slant_metrics(mask, lines))
     out["phash_dup_rate"] = _dup_rate(mask, lines, dup_threshold)
+    # R4 — métricas de layout para calibración: variación del interlineado
+    # (CV de los pasos entre líneas) y σ del margen izquierdo (x0 de la
+    # primera caja por línea). Con <3 líneas no hay señal.
+    if len(lines) >= 3:
+        line_ys = [float(np.median([b[3] for b in ln])) for ln in lines]
+        steps = np.diff(sorted(line_ys))
+        _mu, _sig, lh_cv = _stats([float(s) for s in steps if s > 0])
+        out["line_height_cv"] = round(lh_cv, 4)
+        x0s = [float(ln[0][0]) for ln in lines]
+        out["left_margin_sigma"] = round(float(np.std(x0s)), 3)
+    else:
+        out["line_height_cv"] = 0.0
+        out["left_margin_sigma"] = 0.0
     return out
 
 

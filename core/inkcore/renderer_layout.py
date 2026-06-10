@@ -162,7 +162,8 @@ class LayoutMixin:
         sola excede el ancho, se parte con guion. Mantiene los \\n del user.
         """
         self._ensure_geometry()
-        word_space = max(4.0, options.font_size * 0.4)
+        word_space = max(4.0, options.font_size
+                         * getattr(options, "word_space_frac", 0.4))
         out_lines: list[str] = []
         for raw in text.split("\n"):
             words = raw.split(" ")
@@ -226,8 +227,13 @@ class LayoutMixin:
         self._last_line_slants.append(self._cur_line_slant)
 
         self._ensure_geometry()
-        word_space_base = max(4.0, options.font_size * 0.4)
-        spacing_gap_base = max(2, int(options.font_size * 0.08))
+        # R4: fracciones calibrables desde la página patrón del usuario
+        # (RenderOptions.from_calibration); defaults = comportamiento previo.
+        word_space_base = max(4.0, options.font_size
+                              * getattr(options, "word_space_frac", 0.4))
+        ws_cv = max(0.0, getattr(options, "word_space_cv", 0.18))
+        spacing_gap_base = max(2, int(options.font_size
+                                      * getattr(options, "letter_gap_frac", 0.08)))
         kj = max(0.0, min(1.0, options.kerning_jitter))
         # Jitter vertical por glifo: OU sutil (≤±2px) — el temblor blanco por
         # letra mataba la autocorrelación del baseline (tell #9).
@@ -252,14 +258,14 @@ class LayoutMixin:
         for word in text.split(" "):
             if word == "":
                 if not first_word:
-                    x_cursor += round(tnorm(rnd, word_space_base, word_space_base * 0.18,
-                                            word_space_base * 0.6, word_space_base * 1.6))
+                    x_cursor += round(tnorm(rnd, word_space_base, word_space_base * ws_cv,
+                                            word_space_base * 0.5, word_space_base * 2.2))
                 continue
             if not first_word:
                 # E1: espacio de palabra VARIABLE (gauss truncada) — era
                 # constante (R-BUG-05, tell #3).
-                x_cursor += round(tnorm(rnd, word_space_base, word_space_base * 0.18,
-                                        word_space_base * 0.6, word_space_base * 1.6))
+                x_cursor += round(tnorm(rnd, word_space_base, word_space_base * ws_cv,
+                                        word_space_base * 0.5, word_space_base * 2.2))
             first_word = False
 
             for ch in word:

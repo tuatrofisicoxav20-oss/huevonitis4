@@ -34,14 +34,39 @@ La segmentación es por componentes conexos (Otsu + union-find NumPy puro,
 sin cv2), con agrupación en líneas por centro vertical y fusión de
 diacríticos (punto de la i / tilde) con su letra base.
 
-## Protocolo A/B (resumen; el protocolo completo llega con R4)
+## Protocolo de calibración (R4) — la página patrón
 
-1. Escribí a mano una **frase patrón** en papel real: pangrama español con
-   ñ, acentos, mayúsculas y números. Escaneala/fotografiala igual que el
-   output sintético.
-2. Renderizá la MISMA frase con Huevonitis a tamaño aparente igual.
-3. `python -m tools.eval_render.compare real.png synth.png`
-4. Lo que salga ❌ es trabajo pendiente; las fases R1–R9 lo van moviendo.
+1. **Qué escribir.** En una hoja como las que usás de verdad (carpeta con
+   renglones), escribí a mano 5-8 líneas con un pangrama español repetido o
+   variado, que cubra ñ, acentos, mayúsculas y números, p. ej.:
+
+   > El veloz murciélago hindú comía feliz cardillo y kiwi. La cigüeña
+   > tocaba el saxofón detrás del palenque de paja. Año 2026: ¡qué
+   > extraño! 0123456789.
+
+   Escribí NATURAL, a tu velocidad normal — la calibración mide tus
+   varianzas reales; si escribís "bonito" el render saldrá más robótico
+   que tu letra de verdad.
+
+2. **Cómo escanear/fotografiar.** Luz pareja, hoja derecha (<1° de giro),
+   ≥150 DPI (foto de cel a página completa sirve). Sin sombras de mano.
+
+3. **Calibrar el perfil:**
+
+   ```bash
+   python -m tools.calibrate_profile pagina_real.png --profile default
+   ```
+
+   Esto escribe `tipografia/{perfil}/calibration.json`. El Writer lo usa
+   automáticamente (verás "🎯 calibrado con tu letra").
+
+4. **Cerrar el loop A/B:** renderizá la MISMA frase y comparala:
+
+   ```bash
+   python -m tools.eval_render.compare real.png synth.png
+   ```
+
+   Lo que salga ❌ es trabajo pendiente; cambiá UNA cosa y volvé a medir.
 
 ## Línea base
 

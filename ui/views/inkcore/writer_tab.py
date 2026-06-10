@@ -297,17 +297,41 @@ class WriterTabMixin:
     def _get_render_options(self, dpi: "int | None" = None) -> "RenderOptions":
         """Opciones ancladas al papel físico (carta). El tamaño de letra se
         deriva de line_spacing_mm en el renderer; con dpi != 150 TODO el render
-        escala consistente porque las medidas base están en mm."""
+        escala consistente porque las medidas base están en mm.
+
+        R4: si el perfil tiene calibration.json (tools/calibrate_profile.py
+        sobre una página real del usuario), las varianzas calibradas entran
+        por default — los sliders de la UI siguen mandando encima.
+        """
         from core.inkcore.renderer import RENDER_DPI
         dpi = int(dpi or RENDER_DPI)
         scale = dpi / RENDER_DPI
-        return RenderOptions(
+        kwargs = dict(
             render_dpi=dpi,
             line_spacing_mm=round(float(self._line_mm_slider.get()), 1),
             jitter_px=round(self._jitter_slider.get() * scale),
             style=self._style_menu.get(),
             background_style=self._bg_style_var.get(),
         )
+        profile_dir = self._calibration_profile_dir()
+        if profile_dir is not None:
+            opts = RenderOptions.from_calibration(profile_dir, **kwargs)
+            if not getattr(self, "_calib_toast_shown", False):
+                self._calib_toast_shown = True
+                self.toast("🎯 calibrado con tu letra", "success")
+            return opts
+        return RenderOptions(**kwargs)
+
+    def _calibration_profile_dir(self):
+        """Carpeta del perfil activo SI tiene calibration.json; si no, None."""
+        try:
+            renderer = self._pipeline.renderer
+            bank_dir = renderer.bank.bank_dir if renderer else None
+            if bank_dir is not None and (bank_dir / "calibration.json").exists():
+                return bank_dir
+        except Exception:
+            pass
+        return None
 
     def _render_pages(self, renderer, text: str, options: "RenderOptions") -> list:
         """Renderiza el texto actual a páginas.

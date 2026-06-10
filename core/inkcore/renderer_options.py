@@ -78,6 +78,14 @@ class RenderOptions:
     # sin glifo se OMITE y se reporta (coverage_report / last_missing_chars);
     # la UI avisa antes de exportar. True = placeholder rojo (sólo preview).
     allow_font_fallback: bool = False
+    # R4 — espaciado calibrable desde la página patrón del usuario (los σ
+    # dejan de ser números mágicos; ver from_calibration):
+    #   word_space_frac: espacio de palabra medio como fracción de font_size.
+    #   word_space_cv:   su coeficiente de variación (E1).
+    #   letter_gap_frac: hueco base entre letras como fracción de font_size.
+    word_space_frac: float = 0.4
+    word_space_cv: float = 0.18
+    letter_gap_frac: float = 0.08
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
@@ -164,3 +172,77 @@ class RenderOptions:
         return max(1, self.page_width - self.margin_left_px - self.margin_right_px)
 
 
+
+    @classmethod
+    def from_calibration(cls, profile_dir, **overrides) -> "RenderOptions":
+        """Opciones afinadas con la calibración del perfil (R4 — C2/H9).
+
+        Lee ``{profile_dir}/calibration.json`` (lo escribe
+        tools/calibrate_profile.py desde una página manuscrita REAL) y mapea
+        sus estadísticas a las opciones de render. Los CLAMPS son deliberados:
+        un mal escaneo (línea cortada, sombra) no debe producir un render
+        loco; fuera de rango se recorta al borde plausible.
+
+        Las medidas en px de la página real se normalizan por su altura media
+        de letra (height_mu); en render se reconvierten con la aproximación
+        altura_media ≈ 0.5·font_size (mezcla típica x-height/ascendentes).
+        Sin calibration.json devuelve RenderOptions(**overrides) tal cual.
+        """
+        import json
+        from pathlib import Path
+
+        opts = cls(**overrides)
+        path = Path(profile_dir) / "calibration.json"
+        if not path.exists():
+            return opts
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            m = data.get("metrics", {})
+        except Exception:
+            return opts
+
+        def _clamp(v, lo, hi):
+            return min(hi, max(lo, float(v)))
+
+        # Conversión px-reales → px-render: las longitudes de la página se
+        # normalizan por SU altura media de letra (height_mu) y se reconvierten
+        # con la proporción empírica altura_media ≈ 0.40·font_size (texto
+        # español: mezcla de x-height/ascendentes medida en el golden).
+        h_mu = float(m.get("height_mu", 0.0))
+        h_render = opts.font_size * 0.40
+        if h_mu > 1:
+            g_norm = float(m.get("word_gap_mu", 0.0)) / h_mu
+            l_norm = float(m.get("letter_gap_mu", 0.0)) / h_mu
+            if l_norm > 0:
+                opts.letter_gap_frac = _clamp(l_norm * h_render / opts.font_size,
+                                              0.02, 0.20)
+            if g_norm > 0:
+                # El gap MEDIDO es borde-a-borde: incluye el gap base entre
+                # letras; el word_space del render se coloca ENCIMA de él.
+                frac = (g_norm - max(0.0, l_norm)) * h_render / opts.font_size
+                opts.word_space_frac = _clamp(frac, 0.20, 0.70)
+                if m.get("word_gap_cv", 0) > 0:
+                    # cv borde-a-borde → cv del word_space puro (la media
+                    # medida es mayor que el word_space: σ igual, cv menor).
+                    factor = g_norm / max(1e-6, g_norm - max(0.0, l_norm))
+                    opts.word_space_cv = _clamp(m["word_gap_cv"] * factor,
+                                                0.08, 0.35)
+            if m.get("baseline_sigma", 0) > 0:
+                px = (m["baseline_sigma"] / h_mu) * h_render
+                opts.baseline_drift = _clamp(px, 1.0, 6.0)
+            if m.get("left_margin_sigma", 0) > 0:
+                px = (m["left_margin_sigma"] / h_mu) * h_render
+                opts.margin_walk_px = _clamp(px, 2.0, 14.0)
+        elif m.get("word_gap_cv", 0) > 0:
+            opts.word_space_cv = _clamp(m["word_gap_cv"], 0.08, 0.35)
+        if m.get("height_cv", 0) > 0:
+            # Parte del CV de alturas es entre-clases (asc vs x), no variación
+            # por instancia: sólo una fracción va a size_variation.
+            opts.size_variation = _clamp(m["height_cv"] * 0.45, 0.04, 0.25)
+        if "slant_mean" in m:
+            opts.slant_deg = _clamp(m["slant_mean"], -8.0, 8.0)
+        if m.get("slant_std", 0) > 0:
+            opts.rotation_range = _clamp(m["slant_std"] * 0.5, 0.5, 5.0)
+            opts.line_slant_deg = _clamp(m["slant_std"] * 0.4, 0.3, 3.0)
+        return opts
