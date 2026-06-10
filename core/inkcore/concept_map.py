@@ -163,7 +163,7 @@ class ConceptMapRenderer:
         self.hw = hw_renderer
 
     # -- API pública --
-    def render(self, text: str, options, page_height: int = 1122) -> list:
+    def render(self, text: str, options, page_height: int | None = None) -> list:
         """Texto indentado → lista con UNA página RGB (el mapa completo).
 
         Devuelve [] si no hay PIL, [] si el texto no produce nodos.

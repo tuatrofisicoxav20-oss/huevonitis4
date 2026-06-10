@@ -45,11 +45,13 @@ class DiagramRenderer:
     def __init__(self, hw_renderer):
         self.hw = hw_renderer
 
-    def render(self, text: str, options, page_height: int = 1122) -> list:
+    def render(self, text: str, options, page_height: int | None = None) -> list:
         if not PIL_OK:
             return []
         opts = self.hw.apply_style(options)
         self.hw._begin_render(opts)  # inicializa selección de variantes para etiquetas
+        if page_height is None:
+            page_height = getattr(opts, "page_height_px", 1122)
         W, H = opts.page_width, page_height
         canvas = Image.new("RGB", (W, H), opts.background_color or "#FFFFFF")
         draw = ImageDraw.Draw(canvas)

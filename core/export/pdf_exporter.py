@@ -65,20 +65,26 @@ def export_rendered_pages_pdf(
     output_path: str,
     title: str | None = None,
 ) -> bool:
-    """Pega lista de imágenes RGB (de renderer.render_pages) como páginas A4 de un PDF.
+    """Pega lista de imágenes RGB (de renderer.render_pages) como páginas CARTA de un PDF.
 
-    Cierra el flujo: OCR → reescribir con mi letra → exportar PDF.
+    Cada imagen ocupa la página COMPLETA, sin margen del PDF: el render ya trae
+    sus márgenes físicos en mm y un margen extra correría el texto, desfasando
+    el interlineado de los renglones de la hoja impresa. Una página de render
+    carta a 150 DPI (1275×1650 px) mapea 1:1 a los 612×792 pt del PDF carta.
+    Cierra el flujo: texto → reescribir con mi letra → PDF imprimible.
     """
     if not PIL_OK or not RL_OK:
         return False
     if not images:
         return False
 
+    from reportlab.lib.pagesizes import letter as RL_LETTER
+
     tmp_files: list[str] = []
     try:
-        c = rl_canvas.Canvas(output_path, pagesize=A4)
-        pw, ph = A4
-        margin = 1.5 * cm
+        c = rl_canvas.Canvas(output_path, pagesize=RL_LETTER)
+        pw, ph = RL_LETTER
+        margin = 0.0
 
         for i, img in enumerate(images):
             if getattr(img, "mode", None) == "RGBA":
@@ -118,7 +124,7 @@ def export_pages_streaming(
     output_path: str,
     *,
     page_size: str = "letter",
-    margin_cm: float = 1.0,
+    margin_cm: float = 0.0,
     progress_cb=None,
     total: "int | None" = None,
 ) -> bool:
@@ -130,7 +136,11 @@ def export_pages_streaming(
     importar cuántas páginas haya (clave para 36+ páginas en 16GB). No usa archivos
     temporales: cada página va a un buffer en memoria que se descarta enseguida.
 
-    page_size: "letter" (carta 8.5×11") o "a4". margin_cm: margen del PDF.
+    page_size: "letter" (carta 8.5×11") o "a4". margin_cm: margen del PDF —
+    default 0: el render ya trae sus márgenes físicos en mm, y un margen extra
+    correría el texto y desfasaría el interlineado de los renglones de la hoja
+    impresa (la imagen debe ocupar la página completa para que 1 px del render
+    caiga en su posición física exacta).
     progress_cb(actual, total): callback opcional para la barra de progreso.
     Devuelve False si no se escribió ninguna página.
     """

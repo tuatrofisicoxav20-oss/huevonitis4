@@ -194,21 +194,23 @@ def test_render_document_sin_bloques_cae_a_texto_plano(renderer, tmp_path):
 def test_render_document_cuerpo_snapea_a_renglones_libreta(renderer, tmp_path):
     """En libreta, los renglones de cuerpo caen con período = paso de la grilla.
 
-    El snap a libreta alinea cada línea base a un renglón del fondo (paso
-    base_line_h = font_size*line_height). Verificamos que las bandas de tinta del
-    cuerpo están espaciadas justo ese paso (y no a la deriva entre renglones).
+    El snap alinea cada línea base a un renglón FÍSICO de la hoja (paso
+    base_line_h = line_spacing_mm en px al DPI de render). Verificamos que las
+    bandas de tinta del cuerpo están espaciadas justo ese paso (y no a la
+    deriva entre renglones).
     """
     import numpy as np
 
     from core.inkcore.renderer import RenderOptions
     from core.ocr.document_model import BlockType, TextBlock
     _bank_con_a(renderer, tmp_path)
-    # Sin presets ni ruido vertical para medir el período limpio.
+    # Sin presets ni ruido vertical para medir el período limpio. font_size se
+    # deriva de line_spacing_mm (anclaje físico).
     opts = RenderOptions(
-        font_size=40, style="", background_style="libreta",
+        style="", background_style="libreta",
         size_variation=0.0, rotation_range=0.0, jitter_px=0, baseline_drift=0.0,
     )
-    base_line_h = int(opts.font_size * opts.line_height)  # 64
+    base_line_h = opts.line_height_px  # 7.5 mm a 150 DPI = 44 px
     doc = _doc([TextBlock(text=" ".join(["aaa"] * 60), block_type=BlockType.PARAGRAPH)])
     pages = renderer.render_document(doc, opts)
     lum = np.asarray(pages[0].convert("L"))
@@ -224,4 +226,60 @@ def test_render_document_cuerpo_snapea_a_renglones_libreta(renderer, tmp_path):
     # El período entre bandas debe ser el paso de la grilla (±2px por anti-aliasing).
     assert abs(int(np.median(gaps)) - base_line_h) <= 2, (
         f"el cuerpo no quedó pegado a la grilla: gaps={list(gaps)} vs paso={base_line_h}"
+    )
+
+
+# ── Anclaje físico a papel carta (mm → px) ──────────────────────────────────
+
+def test_anclaje_fisico_carta():
+    """La geometría default está anclada a carta a 150 DPI y a mm reales."""
+    from core.inkcore.renderer import RENDER_DPI, RenderOptions, mm_to_px
+    assert mm_to_px(25.4) == RENDER_DPI  # 1 pulgada = DPI px
+    opts = RenderOptions()
+    assert opts.paper == "letter"
+    assert opts.paper_size_px == (1275, 1650)  # 215.9 × 279.4 mm a 150 DPI
+    assert opts.page_width == 1275
+    assert opts.line_height_px == mm_to_px(7.5)
+    # font_size derivado del renglón: x-height ≈ 45% de 7.5 mm
+    assert opts.font_size == round(mm_to_px(7.5 * 0.45) / 0.48)
+
+
+def test_font_size_explicito_se_respeta():
+    """Un font_size explícito (encabezados, tests) no se pisa con el derivado."""
+    from core.inkcore.renderer import RenderOptions
+    assert RenderOptions(font_size=40).font_size == 40
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("PIL"),
+    reason="Pillow not installed",
+)
+def test_render_pages_interlineado_fisico_exacto(renderer, tmp_path):
+    """Texto plano en hoja blanca: bandas de tinta espaciadas EXACTO al renglón
+    físico (line_spacing_mm en px), páginas tamaño carta y varias páginas para
+    texto largo — el requisito para que cada línea caiga en un renglón real."""
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+    _bank_con_a(renderer, tmp_path)
+    opts = RenderOptions(
+        style="", background_style="hoja_blanca",
+        size_variation=0.0, rotation_range=0.0, jitter_px=0,
+        baseline_drift=0.0, line_slant_deg=0.0,
+    )
+    pages = renderer.render_pages("\n".join(["aaa aaa"] * 50), opts)
+    assert pages[0].size == (1275, 1650), f"no es carta a 150 DPI: {pages[0].size}"
+    assert len(pages) >= 2, "50 líneas deben repartirse en varias páginas carta"
+    lum = np.asarray(pages[0].convert("L"))
+    row_has_ink = (lum < 120).sum(axis=1) > 5
+    band_tops = [
+        i for i in range(1, len(row_has_ink))
+        if row_has_ink[i] and not row_has_ink[i - 1]
+    ]
+    assert len(band_tops) >= 10, f"esperaba muchas líneas, vi {len(band_tops)}"
+    gaps = np.diff(band_tops)
+    # TODOS los avances iguales al renglón físico: si se fuera desfasando
+    # línea a línea, el texto no caería sobre los renglones de la hoja.
+    assert all(abs(int(g) - opts.line_height_px) <= 1 for g in gaps), (
+        f"interlineado no físico: gaps={list(gaps)} vs {opts.line_height_px}"
     )

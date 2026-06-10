@@ -85,30 +85,31 @@ class BackgroundMixin:
             # Cuadrícula
             grid_size = style_def.get("grid_size", 28)
             line_col = style_def.get("line_color", "#C5D5F0")
-            x = options.page_margin
-            while x < options.page_width - options.page_margin:
+            x = options.margin_left_px
+            while x < options.page_width - options.margin_right_px:
                 draw.line([(x, 0), (x, canvas_h)], fill=line_col, width=1)
                 x += grid_size
-            y = options.page_margin
-            while y < canvas_h - options.page_margin:
+            y = options.margin_top_px
+            while y < canvas_h - options.margin_bottom_px:
                 draw.line([(0, y), (options.page_width, y)], fill=line_col, width=1)
                 y += grid_size
         elif options.draw_lines:
-            # Líneas horizontales ALINEADAS al baseline real del texto. El writer
-            # pega cada renglón en y = margin + i*line_height_px y, dentro de esa
-            # imagen, el baseline de los glifos cae en int(h*0.72) con
-            # h = int(font_size*2.5). Si dibujáramos las rayas a múltiplos de
-            # line_height_px, quedarían desfasadas y el texto "flotaría" sobre la
-            # línea. Replicando ese mismo offset, las letras se APOYAN en la raya.
-            h_line = int(options.font_size * 2.5)
-            baseline_off = int(h_line * 0.72)
-            y = options.page_margin + baseline_off
-            while y < canvas_h - options.page_margin:
+            # Líneas horizontales en los RENGLONES FÍSICOS de la hoja: la línea
+            # base del renglón k cae en margin_top + round(k*paso) (así pega el
+            # renderer, tanto la ruta clásica como el snap del flujo; el paso
+            # puede ser FLOTANTE — mm a px — y se redondea por renglón para no
+            # acumular desfase). Las rayas se dibujan en esas MISMAS y, así las
+            # letras se apoyan en ellas y el preview coincide con la hoja real.
+            k = 1
+            while True:
+                y = options.margin_top_px + round(k * line_height_px)
+                if y >= canvas_h - options.margin_bottom_px:
+                    break
                 draw.line(
-                    [(options.page_margin, y), (options.page_width - options.page_margin, y)],
+                    [(options.margin_left_px, y), (options.page_width - options.margin_right_px, y)],
                     fill=options.line_color, width=1,
                 )
-                y += line_height_px
+                k += 1
 
         # Línea de margen roja (solo libreta)
         if style_def.get("margin_color"):

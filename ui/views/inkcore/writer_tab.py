@@ -2,7 +2,6 @@
 import contextlib
 import logging
 import threading
-from dataclasses import replace
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -13,7 +12,10 @@ from ui import theme
 logger = logging.getLogger(__name__)
 
 # Fase 7 — RENDER_PARAMS "naturales" por defecto del escritor (reset/persistencia).
-_WRITER_DEFAULTS = {"font_size": 40, "jitter": 3, "style": "Limpio", "bg": "", "dpi": "150"}
+# line_mm = separación REAL entre renglones de la hoja de carpeta (calibrable
+# en 6-9 mm: no todas las marcas son iguales). El tamaño de letra se deriva de
+# este valor — anclado al papel físico, ya no hay slider de "Tamaño" suelto.
+_WRITER_DEFAULTS = {"line_mm": 7.5, "jitter": 3, "style": "Limpio", "bg": "", "dpi": "150"}
 
 try:
     from PIL import Image, ImageTk
@@ -54,16 +56,19 @@ class WriterTabMixin:
         opts.pack(fill="x", padx=12, pady=6)
         opts.columnconfigure(1, weight=1)
 
-        for row, (label, attr, lo, hi, default) in enumerate([
-            ("Tamaño:", "_size_slider", 20, 80, 40),
-            ("Jitter:",  "_jitter_slider", 0, 12, 3),
+        # "Renglón (mm)" = separación física entre renglones de la hoja de
+        # carpeta del usuario (pasos de 0.1 mm para calibrar la marca exacta).
+        # El tamaño de letra se deriva de este valor en el renderer.
+        for row, (label, attr, lo, hi, steps, default) in enumerate([
+            ("Renglón (mm):", "_line_mm_slider", 6.0, 9.0, 30, 7.5),
+            ("Jitter:",  "_jitter_slider", 0, 12, 12, 3),
         ]):
             ctk.CTkLabel(
                 opts, text=label,
                 font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
             ).grid(row=row, column=0, sticky="w")
             s = ctk.CTkSlider(
-                opts, from_=lo, to=hi, number_of_steps=hi - lo,
+                opts, from_=lo, to=hi, number_of_steps=steps,
                 progress_color=theme.ACCENT_GREEN,
                 button_color=theme.ACCENT_GREEN,
                 button_hover_color=theme.ACCENT_GREEN_HOVER,
@@ -71,6 +76,17 @@ class WriterTabMixin:
             s.set(default)
             s.grid(row=row, column=1, padx=8, sticky="ew")
             setattr(self, attr, s)
+
+        # Valor numérico del renglón visible junto al slider, para calibrar
+        # midiendo la hoja real con regla.
+        self._line_mm_value = ctk.CTkLabel(
+            opts, text="7.5", width=34,
+            font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+        )
+        self._line_mm_value.grid(row=0, column=2, sticky="e")
+        self._line_mm_slider.configure(
+            command=lambda v: self._line_mm_value.configure(text=f"{float(v):.1f}")
+        )
 
         ctk.CTkLabel(
             opts, text="Estilo:",
@@ -206,7 +222,9 @@ class WriterTabMixin:
     def _reset_render_params(self):
         """Fase 7 — volver a los 'valores naturales' por defecto."""
         d = _WRITER_DEFAULTS
-        self._size_slider.set(d["font_size"])
+        self._line_mm_slider.set(d["line_mm"])
+        with contextlib.suppress(Exception):
+            self._line_mm_value.configure(text=f"{d['line_mm']:.1f}")
         self._jitter_slider.set(d["jitter"])
         with contextlib.suppress(Exception):
             self._style_menu.set(d["style"])
@@ -221,7 +239,7 @@ class WriterTabMixin:
         """Persiste los RENDER_PARAMS del escritor entre sesiones (JSON propio)."""
         import json
         data = {
-            "font_size": int(self._size_slider.get()),
+            "line_mm": round(float(self._line_mm_slider.get()), 1),
             "jitter": int(self._jitter_slider.get()),
             "style": self._style_menu.get(),
             "bg": self._bg_style_var.get(),
@@ -239,8 +257,11 @@ class WriterTabMixin:
             d = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             return
+        # JSONs viejos traen "font_size" en vez de "line_mm": se ignoran en
+        # silencio y el slider queda en el default físico (7.5 mm).
         with contextlib.suppress(Exception):
-            self._size_slider.set(int(d["font_size"]))
+            self._line_mm_slider.set(float(d["line_mm"]))
+            self._line_mm_value.configure(text=f"{float(d['line_mm']):.1f}")
         with contextlib.suppress(Exception):
             self._jitter_slider.set(int(d["jitter"]))
         with contextlib.suppress(Exception):
@@ -273,10 +294,17 @@ class WriterTabMixin:
             if self._writer_mode_var.get() == "diagrama" and not self._writer_text.get("0.0", "end").strip():
                 self._writer_text.insert("0.0", self._DIAGRAM_EXAMPLE)
 
-    def _get_render_options(self) -> "RenderOptions":
+    def _get_render_options(self, dpi: "int | None" = None) -> "RenderOptions":
+        """Opciones ancladas al papel físico (carta). El tamaño de letra se
+        deriva de line_spacing_mm en el renderer; con dpi != 150 TODO el render
+        escala consistente porque las medidas base están en mm."""
+        from core.inkcore.renderer import RENDER_DPI
+        dpi = int(dpi or RENDER_DPI)
+        scale = dpi / RENDER_DPI
         return RenderOptions(
-            font_size=int(self._size_slider.get()),
-            jitter_px=int(self._jitter_slider.get()),
+            render_dpi=dpi,
+            line_spacing_mm=round(float(self._line_mm_slider.get()), 1),
+            jitter_px=round(self._jitter_slider.get() * scale),
             style=self._style_menu.get(),
             background_style=self._bg_style_var.get(),
         )
@@ -307,7 +335,7 @@ class WriterTabMixin:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
         return renderer.render_pages(text, options)
 
-    def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions", page_height: int = 1122):
+    def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions", page_height: "int | None" = None):
         """Páginas para exportar a PDF. Texto plano → iterador perezoso (RAM
         constante); mapa/documento → lista (casos acotados). El exportador
         streaming consume cualquiera de los dos."""
@@ -339,20 +367,12 @@ class WriterTabMixin:
         if not path:
             return
         self._save_writer_params()  # Fase 7 — persistir entre sesiones
-        options = self._get_render_options()
-        # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Escala TODO el render
-        # proporcionalmente (font, ancho y alto de página, margen) → el bitmap sale
-        # al doble de resolución sin cambiar el layout. Sube RAM y tamaño del PDF.
+        # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Como el layout
+        # está en mm, basta construir las opciones con el DPI elegido: el
+        # bitmap sale a más resolución con EXACTAMENTE el mismo layout físico.
         dpi = int(self._dpi_var.get()) if getattr(self, "_dpi_var", None) else 150
-        scale = dpi / 150.0
-        page_height = int(1122 * scale)
-        if scale != 1.0:
-            options = replace(
-                options,
-                font_size=int(options.font_size * scale),
-                page_width=int(options.page_width * scale),
-                page_margin=int(options.page_margin * scale),
-            )
+        options = self._get_render_options(dpi)
+        page_height = options.page_height_px
 
         def worker():
             try:
@@ -456,13 +476,7 @@ class WriterTabMixin:
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
-        bg_style = self._bg_style_var.get()
-        opts = RenderOptions(
-            font_size=int(self._size_slider.get()),
-            jitter_px=int(self._jitter_slider.get()),
-            style=self._style_menu.get(),
-            background_style=bg_style,
-        )
+        opts = self._get_render_options()
         renderer = self._pipeline.renderer
         if renderer is None:
             self.toast("El banco no está listo", "error")
