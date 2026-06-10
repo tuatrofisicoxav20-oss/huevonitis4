@@ -144,10 +144,11 @@ def test_golden_metricas_linea_base(stub_renderer):
     # R2 — escala proporcional + solape leve: el CV de alturas entra al rango
     # humano (>0.30; era 0.20 con la normalización por clase de R-BUG-01).
     assert m["height_cv"] > 0.30
-    # Pendiente R3: espacio de palabra CONSTANTE (R-BUG-05) → cv ≈ 0.
-    assert m["word_gap_cv"] < 0.10
-    # Pendiente R3: jitter blanco por letra → autocorr baja (humano > 0.4).
-    assert m["baseline_autocorr"] < 0.35
+    # R3 — espacio de palabra gauss truncada (E1): cv humano (>0.10; era 0.04).
+    assert m["word_gap_cv"] > 0.10
+    # R3 — drift OU + jitter correlacionado: el residuo del baseline es un
+    # paseo de mano (>0.4; era -0.10, ruido blanco).
+    assert m["baseline_autocorr"] > 0.40
     # Pendiente R5: 1 variante por char sin warp → efecto sello.
     assert m["phash_dup_rate"] > 0.30
 
@@ -239,6 +240,56 @@ def test_coverage_report_detecta_downgrade_de_caso(stub_renderer):
     assert "H" in rep["covered"] and "H" in rep["case_downgraded"]
     assert set("12ñ") <= set(rep["missing"])
     assert "u" in rep["covered"] and "u" not in rep["case_downgraded"]
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_misma_seed_png_identico(stub_renderer):
+    """R3 (C8/I6): misma seed → MISMOS bytes; seeds distintas → distintos.
+
+    El RNG inyectado no toca el random global: un render seedeado en paralelo
+    con la extracción no debe alterar el azar del resto del proceso.
+    """
+    import io
+    import random as _random
+
+    from core.inkcore.renderer import RenderOptions
+
+    def _png_bytes(seed):
+        opts = RenderOptions(style="", background_style="hoja_blanca", seed=seed)
+        page = stub_renderer.render_pages(FRASE_PATRON, opts)[0]
+        buf = io.BytesIO()
+        page.save(buf, format="PNG")
+        return buf.getvalue()
+
+    estado_global = _random.getstate()
+    a = _png_bytes(123)
+    b = _png_bytes(123)
+    c = _png_bytes(124)
+    assert a == b, "misma seed produjo PNGs distintos"
+    assert a != c, "seeds distintas produjeron el mismo PNG"
+    assert _random.getstate() == estado_global, "el render tocó el random global"
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_fallback_duro_omite_sin_fuente_de_sistema(stub_renderer):
+    """R3/H8: un char sin glifo se OMITE (cero glifos pegados, reportado);
+    con allow_font_fallback=True aparece el placeholder rojo del preview."""
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+
+    opts = RenderOptions(style="", background_style="hoja_blanca", seed=5)
+    pages = stub_renderer.render_pages("@@@", opts)
+    assert stub_renderer.last_missing_chars() == {"@"}
+    lum = np.asarray(pages[0].convert("L"))
+    assert int((lum < 150).sum()) == 0, "se pintó un fallback sin permiso"
+
+    opts2 = RenderOptions(style="", background_style="hoja_blanca", seed=5,
+                          allow_font_fallback=True)
+    pages2 = stub_renderer.render_pages("@@@", opts2)
+    arr = np.asarray(pages2[0].convert("RGB")).astype(int)
+    rojo = (arr[:, :, 0] > 150) & (arr[:, :, 1] < 100) & (arr[:, :, 2] < 100)
+    assert int(rojo.sum()) > 20, "el preview no marcó el faltante en rojo"
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")

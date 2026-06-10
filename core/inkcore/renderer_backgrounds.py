@@ -43,12 +43,15 @@ BACKGROUND_STYLES: dict[str, dict] = {
 }
 
 
+# R3 (I7): rotation_range ya NO es ruido blanco por letra sino la AMPLITUD del
+# proceso OU de rotación a lo largo del renglón — la misma sensación visual
+# necesita amplitudes menores que el ruido blanco de antes.
 STYLE_PRESETS: dict[str, dict] = {
-    "Limpio": {"jitter_px": 2, "size_variation": 0.08, "rotation_range": 2.0},
-    "Escolar": {"jitter_px": 4, "size_variation": 0.14, "rotation_range": 5.0, "draw_lines": True},
-    "Universitario": {"jitter_px": 2, "size_variation": 0.10, "rotation_range": 3.0},
-    "Relajado": {"jitter_px": 6, "size_variation": 0.20, "rotation_range": 8.0},
-    "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 3.0, "draw_lines": True},
+    "Limpio": {"jitter_px": 2, "size_variation": 0.08, "rotation_range": 1.2},
+    "Escolar": {"jitter_px": 4, "size_variation": 0.14, "rotation_range": 2.8, "draw_lines": True},
+    "Universitario": {"jitter_px": 2, "size_variation": 0.10, "rotation_range": 1.6},
+    "Relajado": {"jitter_px": 6, "size_variation": 0.20, "rotation_range": 4.0},
+    "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 1.8, "draw_lines": True},
 }
 
 

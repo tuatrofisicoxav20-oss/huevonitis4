@@ -208,66 +208,95 @@ class LayoutMixin:
         line_canvas = Image.new("RGBA", (max_width + headroom, h), (0, 0, 0, 0))
         x_cursor = 0
 
-        # Fase 6.5 — inclinación BASE de ESTE renglón (coherente dentro de la
-        # línea, distinta entre líneas). _load_glyph la suma al slant por glifo.
+        from core.inkcore.renderer_noise import OUProcess, tnorm
+        rnd = getattr(self, "_rng", None) or random.Random()
+
+        # R3 — inclinación BASE del renglón: proceso OU ENTRE líneas (la mano
+        # hereda el ángulo del renglón anterior y deriva; antes era i.i.d.).
         line_slant_amp = max(0.0, getattr(options, "line_slant_deg", 0.0))
-        _rng = getattr(self, "_sel_rng", None) or random
-        self._cur_line_slant = _rng.uniform(-line_slant_amp, line_slant_amp) if line_slant_amp else 0.0
+        if line_slant_amp > 0:
+            walk = self._line_slant_walk
+            if walk is None or walk.bound != line_slant_amp:
+                walk = OUProcess(rnd, sigma=line_slant_amp * 0.4, rho=0.9,
+                                 bound=line_slant_amp)
+                self._line_slant_walk = walk
+            self._cur_line_slant = walk.step()
+        else:
+            self._cur_line_slant = 0.0
         self._last_line_slants.append(self._cur_line_slant)
 
         self._ensure_geometry()
-        word_space = max(4, int(options.font_size * 0.4))
+        word_space_base = max(4.0, options.font_size * 0.4)
         spacing_gap_base = max(2, int(options.font_size * 0.08))
         kj = max(0.0, min(1.0, options.kerning_jitter))
-        # Jitter vertical SUTIL (±2px máx): el grueso del movimiento vertical
-        # lo pone el drift correlacionado de la línea base, no ruido por letra.
+        # Jitter vertical por glifo: OU sutil (≤±2px) — el temblor blanco por
+        # letra mataba la autocorrelación del baseline (tell #9).
         vjit = min(2, max(0, options.jitter_px))
+        y_walk = OUProcess(rnd, sigma=vjit * 0.4, rho=0.75, bound=vjit) if vjit else None
 
-        # Deriva de línea base: random walk acotado a lo largo del renglón.
-        drift = 0.0
+        # Deriva de línea base: OU acotado a lo largo del renglón. ρ alto: el
+        # vaivén es de MUÑECA (decenas de letras), no de dedo.
         drift_amp = max(0.0, options.baseline_drift)
+        drift_walk = OUProcess(rnd, sigma=drift_amp * 0.35, rho=0.95,
+                               bound=drift_amp) if drift_amp > 0 else None
         base_y = int(h * self._BASELINE_FACTOR)
+
+        # R3 — rotación por glifo CORRELACIONADA: la muñeca deriva a lo largo
+        # del renglón (OU), no tirita (ruido blanco ±rotation_range = "texto
+        # borracho"). rotation_range pasa a ser la AMPLITUD del proceso.
+        rot_amp = max(0.0, options.rotation_range)
+        rot_walk = OUProcess(rnd, sigma=rot_amp * 0.3, rho=0.85,
+                             bound=rot_amp) if rot_amp > 0 else None
 
         first_word = True
         for word in text.split(" "):
             if word == "":
                 if not first_word:
-                    x_cursor += word_space
+                    x_cursor += round(tnorm(rnd, word_space_base, word_space_base * 0.18,
+                                            word_space_base * 0.6, word_space_base * 1.6))
                 continue
             if not first_word:
-                x_cursor += word_space
+                # E1: espacio de palabra VARIABLE (gauss truncada) — era
+                # constante (R-BUG-05, tell #3).
+                x_cursor += round(tnorm(rnd, word_space_base, word_space_base * 0.18,
+                                        word_space_base * 0.6, word_space_base * 1.6))
             first_word = False
 
             for ch in word:
                 entry = self._select_entry(ch)
                 baseline_in = -1
                 if entry and Path(entry.image_path).exists():
-                    loaded = self._load_glyph(entry.image_path, options, ch,
-                                              geo=self._geo(entry))
+                    loaded = self._load_glyph(
+                        entry.image_path, options, ch, geo=self._geo(entry),
+                        rotation=rot_walk.step() if rot_walk else 0.0, rng=rnd)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
-                    # Glifo faltante: se registra (la UI avisa) y se marca
-                    # visible el fallback para que el usuario sepa qué capturar.
+                    # R3/H8 — glifo faltante: se OMITE y se registra (la UI
+                    # avisa antes de exportar). El placeholder de fuente de
+                    # sistema sólo con allow_font_fallback=True (preview).
                     if not ch.isspace():
                         self._missing_chars.add(ch)
-                    glyph_img = self._render_fallback_char(ch, options, missing=True)
+                    glyph_img = (
+                        self._render_fallback_char(ch, options, missing=True)
+                        if getattr(options, "allow_font_fallback", False) else None
+                    )
                 if glyph_img is None:
                     continue
 
                 gap = spacing_gap_base
                 if kj > 0:
                     # R2: el jitter puede dejar gap NEGATIVO leve (las letras
-                    # de una palabra real se rozan); el clamp viejo a ≥1px
-                    # impedía todo solape y delataba la separación perfecta.
-                    gap += round(random.uniform(-spacing_gap_base * (1 + kj), spacing_gap_base * kj))
+                    # de una palabra real se rozan); R3: gauss truncada.
+                    gap += round(tnorm(rnd, -spacing_gap_base * kj * 0.5,
+                                       spacing_gap_base * kj * 0.6,
+                                       -spacing_gap_base * (1 + kj),
+                                       spacing_gap_base * kj))
                     gap = max(-int(options.font_size * 0.06), gap)
                 else:
                     gap = max(1, gap)
 
-                jitter_y = random.randint(-vjit, vjit) if vjit > 0 else 0
-                if drift_amp > 0:
-                    drift += random.uniform(-drift_amp * 0.25, drift_amp * 0.25)
-                    drift = max(-drift_amp, min(drift_amp, drift))
+                jitter_y = round(y_walk.step()) if y_walk else 0
+                drift = drift_walk.step() if drift_walk else 0.0
                 baseline = base_y + round(drift)
                 if baseline_in >= 0:
                     # R2: posición por BASELINE REAL — la fila medida del glifo

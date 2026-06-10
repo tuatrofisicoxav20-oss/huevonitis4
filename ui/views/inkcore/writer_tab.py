@@ -354,11 +354,31 @@ class WriterTabMixin:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
         return renderer.iter_pages(text, options, page_height)
 
+    def _warn_missing_chars(self, text: str) -> None:
+        """R3/H8 — advertencia visible ANTES de exportar: los caracteres sin
+        glifo ya NO caen a fuente de sistema (delación instantánea), se omiten
+        del render. Acá el usuario se entera de qué capturar antes de entregar
+        un PDF con huecos."""
+        try:
+            renderer = self._pipeline.renderer
+            if renderer is None:
+                return
+            rep = renderer.coverage_report(text)
+        except Exception:
+            return
+        if rep.get("missing"):
+            self.toast("⚠ Sin glifo (se OMITEN): " + " ".join(rep["missing"]),
+                       "warning")
+        if rep.get("case_downgraded"):
+            self.toast("Mayúsculas usando su minúscula: "
+                       + " ".join(rep["case_downgraded"]), "info")
+
     def _export_writer_pdf(self):
         text = self._writer_text.get("0.0", "end").strip()
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
+        self._warn_missing_chars(text)
         path = filedialog.asksaveasfilename(
             title="Guardar PDF con mi letra",
             defaultextension=".pdf",
@@ -409,6 +429,9 @@ class WriterTabMixin:
             self.toast("Escribe algo primero", "warning")
             return
         opts = self._get_render_options()
+        # R3: en la PREVIEW el placeholder rojo sí ayuda (muestra dónde falta);
+        # en export queda apagado y el carácter se omite.
+        opts.allow_font_fallback = True
 
         def worker():
             try:
@@ -476,6 +499,7 @@ class WriterTabMixin:
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
+        self._warn_missing_chars(text)
         opts = self._get_render_options()
         renderer = self._pipeline.renderer
         if renderer is None:

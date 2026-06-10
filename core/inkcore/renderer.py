@@ -60,6 +60,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         self._advance_cache: dict[str, float] = {}  # fracción de em por char
         self._case_downgraded: set[str] = set()   # 'A' renderizada con glifo 'a'
         self._glyphs_placed = 0                   # glifos pegados (anti-pérdida)
+        # R3 — RNG inyectado (I6) y procesos correlacionados por render:
+        self._rng = random.Random()
+        self._line_slant_walk = None              # OU del slant entre renglones
+        self._margin_walk = None                  # OU del margen izquierdo
+        self._line_jitter_walk = None             # OU del jitter vertical de línea
+        self._line_index = 0                      # para el drift hacia adentro
 
     def last_missing_chars(self) -> set[str]:
         """Caracteres del último render que NO tenían glifo en el banco (Fase 6.5).
@@ -104,20 +110,17 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         }
 
     def _begin_render(self, options: RenderOptions) -> None:
-        """Reinicia el estado de selección de variantes para un render nuevo.
+        """Reinicia el estado por-render: selección de variantes, RNG y walks.
 
-        history vacía por render (la memoria corta no debe cruzar renders). Si
-        options.seed != None, resiembra el random GLOBAL para que TODO el azar del
-        render (selección de variante + jitter + rotación + carga) sea reproducible
-        con una sola línea, sin enhebrar un rng por los ~12 puntos de azar. Es
-        opt-in: con seed=None (lo normal) no se toca el estado global y el render
-        es aleatorio como siempre. (R3 migra esto a un rng inyectado.)
+        R3 (I6/C8): TODO el azar del render sale de self._rng, un
+        random.Random propio — seed=N reproduce el documento byte a byte sin
+        tocar el estado global del proceso (el hilo de extracción y la UI
+        comparten el random global; antes el seed los pisaba).
         """
         self._sel_history = {}
         seed = getattr(options, "seed", None)
-        if seed is not None:
-            random.seed(seed)
-        self._sel_rng = None
+        self._rng = random.Random(seed)  # seed=None → aleatorio de verdad
+        self._sel_rng = self._rng
         self._last_line_slants = []
         self._missing_chars = set()
         self._case_downgraded = set()
@@ -125,6 +128,36 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         # El banco pudo crecer entre renders (extracción concurrente): los
         # anchos cacheados del wrap se recalculan por render.
         self._advance_cache = {}
+        # R3 — procesos correlacionados nuevos por render:
+        from core.inkcore.renderer_noise import OUProcess
+        self._line_slant_walk = None      # lo crea _render_line con su amplitud
+        self._line_index = 0
+        jp = max(0, options.jitter_px)
+        self._line_jitter_walk = (
+            OUProcess(self._rng, sigma=jp * 0.5, rho=0.55, bound=jp) if jp else None
+        )
+        walk_amp = max(0.0, getattr(options, "margin_walk_px", 6.0))
+        self._margin_walk = (
+            OUProcess(self._rng, sigma=2.0, rho=0.8, bound=walk_amp) if walk_amp else None
+        )
+
+    def _next_line_y_jitter(self) -> int:
+        """Jitter vertical del PRÓXIMO renglón: OU, no ruido blanco (E5).
+
+        El interlineado respira de forma correlacionada alrededor del renglón
+        físico; con jitter_px=0 es exacto (anclaje a la hoja impresa intacto).
+        """
+        return round(self._line_jitter_walk.step()) if self._line_jitter_walk else 0
+
+    def _next_margin_offset(self, options) -> int:
+        """Offset X del PRÓXIMO renglón (E2): random walk acotado + drift lento
+        hacia adentro proporcional al índice de línea — el margen de una mano
+        no es láser y tiende a meterse conforme baja la página."""
+        self._line_index += 1
+        walk = self._margin_walk.step() if self._margin_walk else 0.0
+        per_line = max(0.0, getattr(options, "margin_drift_per_line", 0.2))
+        drift_in = min(10.0, per_line * self._line_index)
+        return round(walk + drift_in)
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})
@@ -152,10 +185,10 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         y_cursor = options.page_margin
         for line_img in rendered:
             if line_img:
-                jitter_y = random.randint(-options.jitter_px, options.jitter_px)
-                paste_y = max(0, y_cursor + jitter_y)
+                paste_y = max(0, y_cursor + self._next_line_y_jitter())
                 if paste_y + line_img.height <= total_h:
-                    canvas.paste(line_img, (options.page_margin, paste_y), line_img)
+                    x = options.page_margin + self._next_margin_offset(options)
+                    canvas.paste(line_img, (x, paste_y), line_img)
             y_cursor += line_height_px
         return canvas
 
@@ -202,14 +235,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         for i, line_img in enumerate(rendered_lines):
             y_cursor = options.margin_top_px + round(i * spacing)
             if line_img:
-                jitter_y = random.randint(-options.jitter_px, options.jitter_px)
-                # Bug fix #3: clamp paste position so it never goes above the canvas top
-                paste_y = max(0, y_cursor + jitter_y)
-                # Also ensure we don't paste past the bottom of the canvas
+                # R3: jitter vertical correlacionado (E5) y margen con deriva (E2)
+                paste_y = max(0, y_cursor + self._next_line_y_jitter())
+                x = options.margin_left_px + self._next_margin_offset(options)
                 if paste_y + line_img.height <= total_h:
-                    canvas.paste(line_img, (options.margin_left_px, paste_y), line_img)
+                    canvas.paste(line_img, (x, paste_y), line_img)
                 else:
-                    canvas.paste(line_img, (options.margin_left_px, max(0, total_h - line_img.height)), line_img)
+                    canvas.paste(line_img, (x, max(0, total_h - line_img.height)), line_img)
 
         return canvas.convert("RGB")
 
@@ -279,11 +311,14 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
 
             for k, line_img in enumerate(page_lines, start=1):
                 if line_img:
-                    jitter_y = random.randint(-options.jitter_px, options.jitter_px)
+                    # R3: jitter correlacionado (E5) + margen con deriva (E2);
+                    # con jitter_px=0 el anclaje al renglón físico es exacto.
                     y_cursor = options.margin_top_px + round(k * spacing) - boff
-                    paste_y = max(0, min(page_height - line_img.height, y_cursor + jitter_y))
+                    paste_y = max(0, min(page_height - line_img.height,
+                                         y_cursor + self._next_line_y_jitter()))
+                    x = options.margin_left_px + self._next_margin_offset(options)
                     if paste_y + line_img.height <= page_height:
-                        canvas.paste(line_img, (options.margin_left_px, paste_y), line_img)
+                        canvas.paste(line_img, (x, paste_y), line_img)
 
             pages.append(canvas.convert("RGB"))
 
@@ -399,8 +434,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
             boff = self._line_baseline_offset(fs)
             block_usable = max(1, usable_width - indent)
             # Offset POR BLOQUE (no por letra), acotado: natural pero no caótico.
-            bjx = random.randint(-4, 4)
-            bjy = random.randint(-3, 3)
+            bjx = self._rng.randint(-4, 4)
+            bjy = self._rng.randint(-3, 3)
 
             wrapped = self._soft_wrap_text(prefix + text, bopts, block_usable)
             for i, ln in enumerate(wrapped):
@@ -408,11 +443,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                 # Micro-rotación de renglón (±0.5°): expand=False conserva el tamaño
                 # para no descuadrar el offset ni encimar renglones vecinos.
                 if img is not None:
-                    angle = random.uniform(-0.5, 0.5)
+                    angle = self._rng.uniform(-0.5, 0.5)
                     img = img.rotate(angle, expand=False, resample=Image.BICUBIC)
                 items.append(_BlockLine(
                     img=img,
-                    x=options.margin_left_px + indent + bjx,
+                    x=options.margin_left_px + indent + bjx
+                      + self._next_margin_offset(options),
                     line_height=line_h,
                     # el hueco de bloque + el jitter Y sólo en el primer renglón
                     gap_before=(gap_extra + bjy) if i == 0 else 0,

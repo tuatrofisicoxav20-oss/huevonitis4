@@ -57,13 +57,27 @@ class RenderOptions:
     #     da espaciado irregular y leves solapes como en la letra real.
     #   slant_deg: inclinación (shear) de cada glifo en grados; >0 = cursiva
     #     ligeramente reclinada a la derecha.
-    baseline_drift: float = 1.2
+    # R3: 2.5 px (~0.4 mm a 150 DPI) — con 1.2 la señal del vaivén quedaba
+    # debajo del ruido de forma y el baseline parecía regla (tell #9).
+    baseline_drift: float = 2.5
     kerning_jitter: float = 0.5
     slant_deg: float = 0.0
-    # Fase 6.5 — inclinación BASE por renglón (macro): además del jitter por glifo,
-    # cada línea recibe un ángulo base al azar en ±line_slant_deg, coherente dentro
-    # de la línea. La mano no mantiene el mismo ángulo línea a línea. 0 = apagado.
+    # Fase 6.5/R3 — inclinación BASE por renglón (macro): cada línea hereda el
+    # ángulo de la anterior y deriva (proceso OU acotado a ±line_slant_deg).
+    # La mano no mantiene el mismo ángulo línea a línea, pero tampoco salta.
+    # 0 = apagado.
     line_slant_deg: float = 1.4
+    # R3 — espaciado humano:
+    #   margin_walk_px: excursión máx (px) del random walk del margen izquierdo
+    #     por renglón (E2) — el margen de una mano no es láser. 0 = apagado.
+    #   margin_drift_per_line: px/línea de deriva LENTA hacia adentro conforme
+    #     baja la página (acotada a 10 px), encima del walk.
+    margin_walk_px: float = 6.0
+    margin_drift_per_line: float = 0.2
+    # R3/H8 — fallback de FUENTE DE SISTEMA: apagado por default. Un carácter
+    # sin glifo se OMITE y se reporta (coverage_report / last_missing_chars);
+    # la UI avisa antes de exportar. True = placeholder rojo (sólo preview).
+    allow_font_fallback: bool = False
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.

@@ -74,16 +74,23 @@ class GlyphLoadMixin:
         return out
 
     def _load_glyph(self, path: str, options, char: "str | None" = None,
-                    geo: "dict | None" = None):
+                    geo: "dict | None" = None, rotation: "float | None" = None,
+                    rng: "random.Random | None" = None):
         """Carga un glifo listo para pegar. Devuelve (imagen, baseline_px) o None.
 
         ``baseline_px`` es la fila de la IMAGEN FINAL (ya escalada/rotada) donde
         asienta la línea base del glifo, o -1 si no hay métricas (el layout cae
         a la clase vertical legacy). ``geo`` es la geometría del entry (R1):
         baseline_off/em en PX DE CAPTURA del PNG original.
+
+        R3: ``rotation`` viene precalculada por el layout (proceso OU a lo
+        largo del renglón — la muñeca deriva, no tirita); None = sorteo local
+        legacy. ``rng`` es el RNG inyectado del render; None = random global
+        (compat con llamadas directas sin _begin_render).
         """
         if not PIL_OK:
             return None
+        rnd = rng or random
         try:
             # Cache de imagen raw (sin escalar/rotar) para no abrir archivo desde disco cada vez
             if path in self._raw_cache:
@@ -113,7 +120,11 @@ class GlyphLoadMixin:
             if img.width < 1 or img.height < 1:
                 return None
 
-            size_factor = 1.0 + random.uniform(-options.size_variation, options.size_variation)
+            # R3: gauss truncada en vez de uniform — la variación de tamaño de
+            # una mano es de campana, no de dado.
+            from core.inkcore.renderer_noise import tnorm
+            sv = options.size_variation
+            size_factor = 1.0 + (tnorm(rnd, 0.0, sv * 0.55, -sv, sv) if sv > 0 else 0.0)
             baseline_in = -1.0
             if geo and geo.get("em_px", 0) > 0 and geo.get("baseline_off", -1) >= 0:
                 # R2 — ESCALA PROPORCIONAL: la tinta ocupa en el render la misma
@@ -136,8 +147,13 @@ class GlyphLoadMixin:
             target_w = max(1, int(img.width * ratio))
             img = img.resize((target_w, target_h), Image.LANCZOS)
 
-            if options.rotation_range > 0:
-                angle = random.uniform(-options.rotation_range, options.rotation_range)
+            if rotation is not None:
+                angle = rotation
+            elif options.rotation_range > 0:
+                angle = rnd.uniform(-options.rotation_range, options.rotation_range)
+            else:
+                angle = 0.0
+            if abs(angle) > 0.05:
                 pre_h = img.height
                 img = img.rotate(angle, expand=True, resample=Image.BICUBIC)
                 # expand=True centra el contenido en el lienzo nuevo: el
@@ -167,7 +183,7 @@ class GlyphLoadMixin:
             # empuja los píxeles de borde hacia opaco. Luego la "presión" por glifo
             # (alpha_factor) lo atenúa un poco al azar, variando entre letras.
             ink_boost = getattr(options, "ink_boost", 1.0) or 1.0
-            alpha_factor = random.uniform(options.ink_alpha_min, options.ink_alpha_max)
+            alpha_factor = rnd.uniform(options.ink_alpha_min, options.ink_alpha_max)
             if ink_boost != 1.0 or alpha_factor < 1.0:
                 r, g, b, a = img.split()
                 if ink_boost != 1.0:

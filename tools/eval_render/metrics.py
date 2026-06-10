@@ -149,50 +149,53 @@ def _filter_boxes(boxes: list, w: int, h: int) -> list:
 
 
 def group_lines(boxes: list, mask: np.ndarray) -> list[list]:
-    """Agrupa cajas en líneas de texto por BANDAS de la proyección horizontal.
+    """Agrupa cajas en líneas de texto por el perfil de proyección horizontal.
 
     Los centros verticales de las letras de un mismo renglón varían demasiado
-    (ascendentes vs x-height) para agrupar por cercanía; las bandas de filas
-    con tinta separan renglones de forma estable mientras los renglones no se
-    toquen (interlineado normal). Asume página razonablemente derecha (<~1°),
-    que es como se escanea la frase patrón. Devuelve líneas top→bottom, cada
-    una ordenada por x.
+    (ascendentes vs x-height) para agrupar por cercanía. En su lugar: los
+    CORES de los renglones son los máximos del perfil suavizado de tinta por
+    fila (el cuerpo del renglón concentra la tinta), y la frontera entre dos
+    renglones es el VALLE del perfil entre cores — robusto incluso cuando una
+    cola toca un asta del renglón siguiente, como en letra real. Asume página
+    razonablemente derecha (<~1°). Devuelve líneas top→bottom, ordenadas por x.
     """
     if not boxes:
         return []
     row_ink = mask.sum(axis=1).astype(np.float64)
     if row_ink.max() <= 0:
         return []
-    # Umbral suave: ignora filas con motas sueltas sin partir trazos finos.
-    bands = _row_runs(row_ink > max(1.0, 0.02 * row_ink.max()))
-    if not bands:
+    smooth = np.convolve(row_ink, np.ones(7) / 7.0, mode="same")
+    cores = _row_runs(smooth > 0.15 * smooth.max())
+    if not cores:
         return []
-    # Bandas-fragmento (un extremo de trazo que el umbral cortó): mucho más
-    # bajas que un renglón → se absorben en la vecina más cercana. No se
-    # fusiona por gap: dos renglones reales pueden casi tocarse (cola contra
-    # asta) y un fragmento puede quedar lejos de su línea madre.
-    while len(bands) > 1:
-        heights = sorted(e - s for s, e in bands)
+    # Cores-fragmento (rebabas del umbral) se absorben en el vecino cercano.
+    while len(cores) > 1:
+        heights = sorted(e - s for s, e in cores)
         h_med = heights[len(heights) // 2]
-        idx = next((i for i, (s, e) in enumerate(bands)
+        idx = next((i for i, (s, e) in enumerate(cores)
                     if (e - s) < 0.25 * h_med), None)
         if idx is None:
             break
-        s, e = bands.pop(idx)
-        gap_prev = s - bands[idx - 1][1] if idx > 0 else None
-        gap_next = bands[idx][0] - e if idx < len(bands) else None
+        s, e = cores.pop(idx)
+        gap_prev = s - cores[idx - 1][1] if idx > 0 else None
+        gap_next = cores[idx][0] - e if idx < len(cores) else None
         if gap_next is None or (gap_prev is not None and gap_prev <= gap_next):
-            bands[idx - 1] = (bands[idx - 1][0], max(bands[idx - 1][1], e))
+            cores[idx - 1] = (cores[idx - 1][0], max(cores[idx - 1][1], e))
         else:
-            bands[idx] = (min(bands[idx][0], s), bands[idx][1])
-    centers = [(s + e) / 2.0 for s, e in bands]
-    lines: list[list] = [[] for _ in bands]
+            cores[idx] = (min(cores[idx][0], s), cores[idx][1])
+    # Fronteras: el valle (mínimo del perfil) entre el fin de un core y el
+    # inicio del siguiente; si se tocan, el punto medio.
+    seps: list[float] = []
+    for (s0, e0), (s1, e1) in zip(cores, cores[1:]):
+        lo, hi = min(e0, s1), max(e0, s1)
+        if hi - lo >= 2:
+            seps.append(lo + int(np.argmin(smooth[lo:hi])))
+        else:
+            seps.append((e0 + s1) / 2.0)
+    lines: list[list] = [[] for _ in cores]
     for b in boxes:
         cy = (b[1] + b[3]) / 2.0
-        # Banda que contiene el centro; si ninguna (caja a caballo), la más cercana.
-        idx = next((i for i, (s, e) in enumerate(bands) if s <= cy < e), None)
-        if idx is None:
-            idx = min(range(len(bands)), key=lambda i: abs(cy - centers[i]))
+        idx = sum(1 for s in seps if cy >= s)   # segmento entre fronteras
         lines[idx].append(b)
     return [sorted(ln, key=lambda b: b[0]) for ln in lines if ln]
 
@@ -258,6 +261,11 @@ def _baseline_metrics(lines: list[list]) -> dict:
 
     Ruido blanco (jitter por letra) da autocorr ≈ 0; el vaivén de una mano da
     un residuo correlacionado (>0.5). Una recta láser da σ ≈ 0.
+
+    Ajuste ROBUSTO en dos pasos: las DESCENDENTES cuelgan su y-inferior muy
+    por debajo del baseline real (un salto de forma, no de posición) y
+    ahogarían la señal del vaivén; se ajusta, se descartan los outliers
+    (>1.8σ) y se re-ajusta con las letras que asientan en la línea base.
     """
     residuals_all: list[np.ndarray] = []
     for line in lines:
@@ -266,7 +274,14 @@ def _baseline_metrics(lines: list[list]) -> dict:
         xs = np.asarray([(b[0] + b[2]) / 2.0 for b in line])
         ys = np.asarray([float(b[3]) for b in line])
         coeff = np.polyfit(xs, ys, 1)
-        residuals_all.append(ys - np.polyval(coeff, xs))
+        res = ys - np.polyval(coeff, xs)
+        sd = res.std()
+        if sd > 1e-9:
+            keep = np.abs(res) <= 1.8 * sd
+            if keep.sum() >= 4:
+                coeff = np.polyfit(xs[keep], ys[keep], 1)
+                res = ys[keep] - np.polyval(coeff, xs[keep])
+        residuals_all.append(res)
     if not residuals_all:
         return {"baseline_sigma": 0.0, "baseline_autocorr": 0.0}
     pooled = np.concatenate(residuals_all)
