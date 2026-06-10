@@ -12,35 +12,10 @@
 # -----------------------------------------------------------------------------
 
 # Tesseract ya viene en requirements.txt base — no repetir aquí.
-
-# PaddleOCR PP-OCRv5 — recomendado; mejor soporte español, det+rec integrado.
-# paddleocr>=3.0
-# paddlepaddle>=3.0          # CPU puro
-# paddlepaddle-gpu>=3.0      # GPU CUDA (alternativa, descomentar solo una)
-
-# docTR — bueno para texto impreso, layout complejo.
-# python-doctr[torch]>=0.8
-
-# EasyOCR — detector CRAFT moderno (reemplaza a craft-text-detector, muerto en
-# Python 3.14). Se registra como detector "easyocr" (EasyOCRDetector).
-# Instalar torchvision desde el índice CPU de PyTorch para que empareje con torch
-# y cargue el operador NMS (si no: "operator torchvision::nms does not exist"):
-#   pip install torchvision --index-url https://download.pytorch.org/whl/cpu
-#   pip install easyocr
-# NOTA medida (2026-06): activarlo NO mejora la extracción de letra suelta —
-# CRAFT agrupa por línea/palabra (2-4 cajas por hoja, no ~27 caracteres). El
-# cuello de botella es la segmentación, no la detección. Para un banco bueno usar
-# el MODO PLANTILLA (pestaña 🧩). Queda como opción, apagado por defecto.
-# easyocr>=1.7
-
-# -----------------------------------------------------------------------------
-# Detección de glifos alternativa
-# -----------------------------------------------------------------------------
-
-# CRAFT — detección a nivel de carácter (link_threshold bajo en CRAFTDetector).
-# craft-text-detector>=0.4.3
-
-# PaddleDetector usa el mismo paquete que PaddleOCR (ver arriba).
+# Los backends/detectores pesados (PaddleOCR, docTR, EasyOCR/CRAFT) se quitaron
+# en la limpieza v4.2: MEDIDO no mejoraban la extracción de letra suelta (CRAFT
+# agrupa por línea/palabra, no por carácter). El flujo bueno es el MODO PLANTILLA
+# (pestaña 🧩) + Captura masiva.
 
 # -----------------------------------------------------------------------------
 # Etiquetado automático de glifos (banco de tipografía)

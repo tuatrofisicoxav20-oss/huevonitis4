@@ -19,10 +19,11 @@ def test_default_pipeline_config_follows_config_detector(monkeypatch):
     monkeypatch.setattr(config, "GLYPH_DETECTOR", "classic_cv")
     assert _build_default_pipeline_config().detectors == ["classic_cv"]
 
-    # Otro detector → se fusiona con classic_cv (classic_cv siempre como base).
+    # Un detector no instalado (tras la limpieza v4.2 ya no hay detectores
+    # neuronales) se omite con un log; classic_cv queda SIEMPRE como base.
     monkeypatch.setattr(config, "GLYPH_DETECTOR", "easyocr")
     dets = _build_default_pipeline_config().detectors
-    assert "easyocr" in dets and "classic_cv" in dets
+    assert dets == ["classic_cv"]
 
 
 def test_extraction_options_default_pipeline_on():
