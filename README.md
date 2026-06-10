@@ -4,7 +4,10 @@ App de escritorio Python para producir apuntes escolares con tu letra real y ges
 
 ## Características
 
-- **InkCore** — extrae tu letra de fotos y renderiza texto con ella
+- **InkCore** — captura tu letra y renderiza texto con ella. Flujo guiado en 5
+  pestañas: **1·Plantilla** (genera una hoja para llenar) → **2·Captura** (sube
+  la foto/PDF y extrae los glifos) → **3·Revisión** (aprueba) → **Banco** (tu
+  tipografía) → **Escritor** (escribe con tu letra)
 - **Proyectos** — editor de páginas con canvas, undo/redo, exportación PNG/PDF
 - **Estudio** — importa texto/Word, genera resumen, flashcards y quiz automáticos
 - **Negocio** — cotizaciones en MXN, registro de pagos, dashboard de ingresos
@@ -29,15 +32,17 @@ huevonitis 4/
 │   ├── export/
 │   │   └── pdf_exporter.py   # Exporta texto e imágenes a PDF (ReportLab)
 │   ├── inkcore/
-│   │   ├── extractor.py      # GlyphExtractor — pipeline completo de extracción
-│   │   ├── extractor_preprocess.py  # ImagePreprocessor (desacoplado)
-│   │   ├── extractor_segments.py   # SegmentDetector (desacoplado)
+│   │   ├── template_sheet.py # Genera la hoja de plantilla (grilla de casillas)
+│   │   ├── template_extract.py # Extrae los glifos de la plantilla llena
+│   │   ├── glyph_ingest.py   # Motor de imagen (preprocesado + recorte de glifos)
+│   │   ├── extraction_pipeline.py # GlyphExtractionPipeline — detectar+fusionar+etiquetar
+│   │   ├── bulk_capture.py   # Captura masiva (foto/PDF → muchos glifos por sesión)
 │   │   ├── bank.py           # GlyphBank — almacén persistente de glifos con dedup
-│   │   ├── pipeline.py       # InkCorePipeline — orquesta extractor + banco + renderer
+│   │   ├── pipeline.py       # InkCorePipeline — orquesta banco + renderer + guardado
 │   │   ├── renderer.py       # HandwritingRenderer — renderiza texto con glifos
 │   │   ├── reporter.py       # InkCoreReporter — informe PDF/modal del banco
 │   │   ├── quality.py        # assess_glyph — scoring de calidad
-│   │   └── ai/               # FallbackGlyphClassifier (reglas); hooks para ONNX
+│   │   └── ai/               # EMNISTCharClassifier (CNN, juez de cortes) + hooks
 │   ├── ocr/
 │   │   └── engine.py         # OCREngine — Tesseract + lectura de .docx
 │   └── studycore/
@@ -54,10 +59,9 @@ huevonitis 4/
 │   │   └── toast.py          # ToastManager
 │   └── views/                # Una vista por sección de la app
 ├── tools/
-│   ├── compare_strategies.py # CLI para comparar estrategias de segmentación
 │   ├── doctor.py             # Diagnóstico de entorno (deps, dirs, settings)
 │   ├── clean.py              # Limpieza de temporales (--dry-run disponible)
-│   └── measure_fixture.py    # Genera expectations.json desde una imagen real
+│   └── eval/                 # Evaluación de la extracción contra ground-truth
 ├── docs/
 │   ├── ARCHITECTURE.md       # Arquitectura, módulos y flujos clave
 │   ├── ROADMAP.md            # Releases planeados (4.1.1 → 5.0)
@@ -65,9 +69,9 @@ huevonitis 4/
 │   ├── CHANGELOG.md
 │   ├── KNOWN_ISSUES.md
 │   └── ai-integration-notes.md  # Guía para integrar clasificador ONNX real
-├── tests/                    # pytest — 127 tests
+├── tests/                    # pytest — 279 tests
 ├── requirements.txt
-├── requirements-optional.txt # Backends extras (PaddleOCR, TrOCR, EasyOCR)
+├── requirements-optional.txt # Extras opcionales (TrOCR para etiquetado, scikit-image)
 ├── pyproject.toml            # ruff + pytest config
 ├── install.sh                # Instalador para Fedora/Ubuntu/Arch
 ├── uninstall.sh
@@ -110,7 +114,7 @@ estado de los directorios de datos.
 pytest -q
 ```
 
-127 tests, ~2 segundos. Solo tests de lógica core — UI no incluida.
+279 tests, ~40 segundos. Solo tests de lógica core — UI no incluida.
 
 ## Datos de usuario
 

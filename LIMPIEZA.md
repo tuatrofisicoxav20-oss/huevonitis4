@@ -42,13 +42,33 @@ El motor de imagen del "extractor viejo" está VIVO: lo usan la Captura masiva
 `wf_calibration`. También se conservó `tesseract_labeler` (cableado en el
 registry/config del pipeline vivo). El resto del extractor sí se eliminó.
 
-## Antes / Después
+- **Fase 5** ✅ — reorganización de UI: pestañas en orden de flujo con pasos
+  numerados (1·Plantilla → 2·Captura → 3·Revisión → Banco → Escritor); texto de
+  ayuda de Captura aclara que acepta fotos sueltas. Sin features nuevas.
+- **Fase 6** ✅ — limpieza final: ruff limpio (unused imports/vars), atributos
+  huérfanos del extractor fuera de `main_view`, README actualizado al flujo
+  nuevo, borrados `FLUJO_EXTRACTOR.md` y refs a tools eliminados.
 
-| Métrica            | Antes  | Tras Fase 4 | Meta     |
-|--------------------|--------|-------------|----------|
-| Archivos .py       | 229    | 187         | —        |
-| LOC totales        | 34 830 | 27 625      | −6 800+  |
-| Tests passed       | 322    | 279         | 100% ok  |
-| Arranque (import)  | 0.34s  | 0.23s       | + sin preload TrOCR |
+## Antes / Después (medido con git contra el tag `pre-limpieza`, solo `.py` trackeados)
 
-LOC eliminadas hasta Fase 4: **−7 205** (meta ~6 800 superada). Archivos: **−42**.
+| Métrica            | Antes (pre-limpieza) | Después | Δ        |
+|--------------------|----------------------|---------|----------|
+| Archivos .py       | 229                  | 191     | **−38**  |
+| Líneas .py         | 34 818               | 28 371  | **−6 447** neto |
+| Tests              | 322 passed / 3 skip  | 279 passed / 0 skip | −43 (todos de código muerto) |
+| Arranque           | preload TrOCR ~10s en background al iniciar | sin preload (TrOCR no se carga) | — |
+
+`git diff pre-limpieza HEAD -- '*.py'`: **7 735 líneas borradas**, 1 205 añadidas
+(el neto −6 447 incluye `glyph_ingest.py` + comentarios nuevos). Borrado bruto
+supera la meta de ~6 800.
+
+## Grep de verificación (GATE 6) — cero referencias vivas
+`replicator`/`Reproducir` = 0 · `auto_text` import = 0 (solo 1 comentario
+histórico) · detectores/backends neuronales como módulo = 0 · `GlyphExtractor` /
+`from core.inkcore.extractor import` = 0.
+
+## Lo que se CONSERVÓ a propósito (la auditoría se equivocaba)
+El motor de imagen del extractor viejo está VIVO (lo usan Captura + Plantilla):
+`extractor_preprocess`, `extractor_glyph_ops`, `extractor_align_basic`,
+`wf_calibration`, más `tesseract_labeler` (cableado en el pipeline). `BBox` se
+movió a `glyph_detectors/base.py`. Todo lo demás del extractor se eliminó.

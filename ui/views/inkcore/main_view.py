@@ -19,7 +19,6 @@ import customtkinter as ctk
 
 from core.inkcore.pipeline import InkCorePipeline
 from core.inkcore.reporter import InkCoreReporter
-from core.models import GlyphEntry
 from ui import theme
 from ui.views.base_view import BaseView
 from ui.views.inkcore.bank_tab import BankTabMixin
@@ -54,13 +53,10 @@ class InkCoreView(
         super().__init__(parent, app, **kwargs)
         self._pipeline: InkCorePipeline = app.inkcore
         self._reporter = InkCoreReporter()
-        self._extracted: list[GlyphEntry] = []
         self._preview_photo = None
         self._image_path: str | None = None
         self._glyph_photos: list = []
         self._review_photos: list = []
-        self._original_img = None
-        self._adj_collapsed = False
         self._review_checkboxes: list = []
         self._review_check_vars: list = []
         self._thumb_cache: dict[tuple, ImageTk.PhotoImage] = {}

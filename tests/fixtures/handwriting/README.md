@@ -19,11 +19,10 @@ Ejemplos:
 ## Cómo añadir nuevos fixtures
 
 1. Copia la imagen a este directorio con la convención de nombres.
-2. Corre `python tools/measure_fixture.py <ruta>` para obtener números
-   actuales con ambas estrategias.
+2. Corre `python tools/eval/run_eval.py <ruta>` para medir la extracción
+   contra el ground-truth.
 3. Edita `expectations.json` poniendo los mínimos ~85% de lo medido
    (deja margen — varianza natural en numpy/cv2 puede ser ±5%).
-4. Corre los tests con `pytest tests/test_e2e_extraction.py -m slow`.
 
 ## Nota sobre .gitignore
 
