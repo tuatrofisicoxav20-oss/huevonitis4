@@ -225,6 +225,30 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         empezar cada render."""
         return set(getattr(self, "_missing_chars", set()))
 
+    def coverage_report(self, text: str) -> dict:
+        """Cobertura del banco para `text` SIN renderizar (R0, R-BUG-06 parte 1).
+
+        Permite a la UI avisar ANTES de exportar qué caracteres caerían en el
+        fallback de fuente de sistema. El criterio de lookup es el MISMO que usa
+        _render_line hoy (lower primero — R-BUG-03 pendiente, se corrige en R2;
+        este reporte se actualizará junto con ese fix). Los espacios no cuentan.
+        """
+        missing: set[str] = set()
+        covered: set[str] = set()
+        for ch in set(text):
+            if ch.isspace():
+                continue
+            if self.bank.get_all(ch.lower()) or self.bank.get_all(ch):
+                covered.add(ch)
+            else:
+                missing.add(ch)
+        total = len(missing) + len(covered)
+        return {
+            "missing": sorted(missing),
+            "covered": sorted(covered),
+            "coverage": round(len(covered) / total, 4) if total else 1.0,
+        }
+
     def _begin_render(self, options: RenderOptions) -> None:
         """Reinicia el estado de selección de variantes para un render nuevo.
 
