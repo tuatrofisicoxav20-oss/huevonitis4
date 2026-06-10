@@ -283,6 +283,7 @@ class GlyphBank:
         detector_sources: "list | None" = None,
         quality_override: "dict | None" = None,
         skip_dedup: bool = False,
+        geometry: "dict | None" = None,
     ) -> "GlyphEntry | None":
         """Add glyph to bank. Returns None if it's a perceptual duplicate.
 
@@ -292,6 +293,10 @@ class GlyphBank:
           detector_sources  — detectores que encontraron este glifo.
           quality_override  — dict con score/tier/ink_coverage ya calculados
                               por el pipeline (evita doble cómputo de quality).
+          geometry          — métricas geométricas medidas (R1): nat_h_px,
+                              baseline_off, em_px, lsb/rsb, metrics_source.
+                              None = sin métricas (estimables después con
+                              tools/migrate_metrics.py).
           skip_dedup        — si True, NO rechaza por duplicado perceptual: se
                               guarda siempre (salvo error de I/O). Pensado para
                               el flujo de PLANTILLA, donde las casillas con
@@ -372,6 +377,11 @@ class GlyphBank:
                 profile_id=self.profile_id,
                 perceptual_hash=new_hash,
             )
+            if geometry:
+                # R1: setea sólo campos conocidos del entry (ignora claves
+                # internas); la validación vive en glyph_metrics.
+                from core.inkcore.glyph_metrics import apply_geometry
+                apply_geometry(entry, geometry)
             self._entries.append(entry)
             # Mantener índices consistentes (PERF-03)
             self._by_char.setdefault(char, []).append(entry)
@@ -504,6 +514,10 @@ class GlyphBank:
         alpha = set("abcdefghijklmnñopqrstuvwxyz")
         covered = chars & alpha
         missing = alpha - chars
+        # R1: procedencia de las métricas geométricas (cuántos glifos pueden
+        # renderizarse con geometría medida vs estimada vs ninguna).
+        measured = sum(1 for e in _entries_snap if e.metrics_source == "template")
+        estimated = sum(1 for e in _entries_snap if e.metrics_source == "estimada")
         return {
             "total_glyphs": len(_entries_snap),
             "unique_chars": len(chars),
@@ -512,6 +526,9 @@ class GlyphBank:
             "avg_quality": round(
                 sum(e.quality_score for e in _entries_snap) / max(1, len(_entries_snap)), 3
             ),
+            "metrics_measured": measured,
+            "metrics_estimated": estimated,
+            "metrics_missing": len(_entries_snap) - measured - estimated,
         }
 
     def variant_distribution(self, tier_filter: str = "") -> dict[str, int]:

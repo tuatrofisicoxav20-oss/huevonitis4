@@ -154,6 +154,20 @@ class GlyphEntry:
     profile_id: str = "default"
     # PERF-02: hash perceptual cacheado para dedup rápido sin re-abrir PNGs
     perceptual_hash: str = ""
+    # ── Métricas geométricas (R1, manifest v2 — R-BUG-04) ────────────────────
+    # Todas opcionales con default retrocompatible: un manifest v1 carga con
+    # estos valores y el renderer cae al estimador (glyph_metrics). Las unidades
+    # son PX DE CAPTURA del propio glifo: lo comparable entre hojas distintas es
+    # la fracción nat_h_px/em_px, no los píxeles absolutos.
+    nat_h_px: int = 0          # alto natural del crop en px de captura
+    nat_w_px: int = 0          # ancho natural del crop
+    baseline_off: int = -1     # px desde el TOP del crop al baseline; -1 = desconocido
+    em_px: int = 0             # alto de referencia (renglón/celda) de SU hoja de captura
+    lsb: int = 0               # sidebearing izquierdo medido (px de captura)
+    rsb: int = 0               # sidebearing derecho
+    # Procedencia de las métricas: "template" (medidas con la celda como
+    # referencia) | "estimada" (heurística sobre el PNG) | "" (sin métricas).
+    metrics_source: str = ""
 
 
 @dataclass

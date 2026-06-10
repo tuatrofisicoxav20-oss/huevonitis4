@@ -20,6 +20,11 @@ from __future__ import annotations
 import contextlib
 import logging
 
+from core.inkcore.glyph_metrics import (
+    finalize_sheet_geometry,
+    measure_ink_bbox,
+    template_geometry,
+)
 from core.inkcore.template_sheet import TemplateLayout
 
 logger = logging.getLogger(__name__)
@@ -258,11 +263,15 @@ def _rectify(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray:
                                flags=cv2.INTER_LINEAR, borderValue=255)
 
 
-def _clean_cell(cell_gray: np.ndarray) -> np.ndarray | None:
+def _clean_cell(cell_gray: np.ndarray, geom_out: "dict | None" = None) -> np.ndarray | None:
     """Binariza una casilla y deja sólo la tinta central (sin borde/rótulo).
 
     Devuelve una máscara uint8 (255=tinta) ya recortada al bbox de la letra, o
     None si la casilla está prácticamente vacía.
+
+    R1: si se pasa ``geom_out`` (dict), se rellena con ``ink_bbox`` = bbox de la
+    tinta en coords de la CELDA (pre-autocrop) — lo necesita la medición de
+    sidebearings sin re-segmentar. No cambia nada del comportamiento.
     """
     if cell_gray.size == 0:
         return None
@@ -293,6 +302,9 @@ def _clean_cell(cell_gray: np.ndarray) -> np.ndarray | None:
     ys, xs = np.where(keep > 0)
     if len(xs) == 0:
         return None
+    if geom_out is not None:
+        geom_out["ink_bbox"] = (int(xs.min()), int(ys.min()),
+                                int(xs.max()) + 1, int(ys.max()) + 1)
     pad = 6
     x0, x1 = max(0, xs.min() - pad), min(w, xs.max() + 1 + pad)
     y0, y1 = max(0, ys.min() - pad), min(h, ys.max() + 1 + pad)
@@ -506,6 +518,7 @@ def _extract_grid(gray, lay, clf, char_to_label):
             # separador de grilla entraría como pieza NUEVA → se rechaza. Así sólo
             # se beneficia a las casillas recortadas, sin reintroducir grilla en
             # las centradas.
+            inset_used = 0.13
             keep = _cell_ink_mask(_crop(r, c, 0.13))
             if keep is None:
                 continue
@@ -514,6 +527,7 @@ def _extract_grid(gray, lay, clf, char_to_label):
                     and (keep_big > 0).sum() >= 1.15 * (keep > 0).sum()
                     and _sizable_components(keep_big) <= _sizable_components(keep)):
                 keep = keep_big
+                inset_used = 0.04
             mask = _autocrop_mask(keep)
             if mask is None:
                 continue
@@ -530,6 +544,19 @@ def _extract_grid(gray, lay, clf, char_to_label):
                 )
                 continue
             glyph = to_rgba_smooth(mask)
+            # R1: geometría con la celda detectada como referencia. El "em"
+            # descuenta la franja del rótulo en su proporción canónica (la
+            # grilla detectada incluye el rótulo impreso dentro de la celda).
+            cw_full = float(xs[c + 1] - xs[c])
+            ch_full = float(ys[r + 1] - ys[r])
+            em = int(round(ch_full * (1.0 - lay.label_strip / lay.cell_h)))
+            bb = measure_ink_bbox(keep)
+            ins_x = inset_used * cw_full
+            glyph.info["geometry"] = template_geometry(
+                mask, ch, em_px=em,
+                lsb=int(round(ins_x + bb[0])) if bb else 0,
+                rsb=int(round(cw_full - (ins_x + bb[2]))) if bb else 0,
+            )
             try:
                 q = assess_quality(glyph)
                 score = float(q.get("quality_score", q.get("score", 0.5)))
@@ -543,6 +570,7 @@ def _extract_grid(gray, lay, clf, char_to_label):
                 except Exception:
                     pass
             results.append((ch, glyph, score))
+    finalize_sheet_geometry(results)  # R1: baselines de descendentes por hoja
     logger.info("_extract_grid: %d casillas con tinta", len(results))
     return results
 
@@ -610,10 +638,20 @@ def extract_from_template(
             continue
         wx, wy, ww, wh = lay.writing_rect(i)
         cell = canon[wy:wy + wh, wx:wx + ww]
-        mask = _clean_cell(cell)
+        geom: dict = {}
+        mask = _clean_cell(cell, geom_out=geom)
         if mask is None:
             continue
         glyph = to_rgba_smooth(mask)
+        # R1: geometría con el área de escritura de la casilla como referencia
+        # (su alto = "em" de la hoja). Viaja en Image.info para no cambiar la
+        # API (char, glifo, score); save_template_glyphs_to_bank la persiste.
+        bb = geom.get("ink_bbox")
+        glyph.info["geometry"] = template_geometry(
+            mask, ch, em_px=wh,
+            lsb=bb[0] if bb else 0,
+            rsb=(ww - bb[2]) if bb else 0,
+        )
         try:
             q = assess_quality(glyph)
             score = float(q.get("quality_score", q.get("score", 0.5)))
@@ -629,6 +667,9 @@ def extract_from_template(
             except Exception as _exc:
                 logger.debug("validación CNN omitida para '%s': %s", ch, _exc)
         results.append((ch, glyph, score))
+    # R1: el baseline de las descendentes se reconstruye con la x-height
+    # mediana de ESTA hoja (sólo se conoce con la extracción completa).
+    finalize_sheet_geometry(results)
     logger.info("extract_from_template: %d/%d casillas con tinta (repeats=%d)",
                 len(results), n_labeled, lay.repeats)
     return results
@@ -789,7 +830,10 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
         # pierde. ink_coverage se mide barato del alpha del glifo; el tier sale
         # del score con los mismos umbrales del banco.
         override = _quality_override_from_template(glyph, q, classify_tier)
-        entry = bank.add_glyph(ch, str(p), skip_dedup=True, quality_override=override)
+        # R1: la geometría medida en la extracción viaja en Image.info; acá se
+        # persiste al manifest junto con el glifo.
+        entry = bank.add_glyph(ch, str(p), skip_dedup=True, quality_override=override,
+                               geometry=glyph.info.get("geometry"))
         if entry is None:
             dupes += 1
         else:
