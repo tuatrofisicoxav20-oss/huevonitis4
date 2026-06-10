@@ -22,11 +22,33 @@ Tag de respaldo: **`pre-limpieza`** (sobre `356865e`). Rollback: `git reset --ha
 
 ---
 
-## Antes / Después (se completa en Fase 6)
+## Progreso por fase
 
-| Métrica            | Antes  | Después |
-|--------------------|--------|---------|
-| Archivos .py       | 229    | —       |
-| LOC totales        | 34 830 | —       |
-| Tests passed       | 322    | —       |
-| Arranque (import)  | 0.34s  | —       |
+- **Fase 1** ✅ — borrados detectores neuronales (craft/paddle/easyocr) y backends
+  OCR (doctr/paddleocr/easyocr). Suite 319.
+- **Fase 2** ✅ — eliminado "Reproducir"/replicator (3 archivos + test). Suite 315.
+- **Fase 3** ✅ — desacople: nuevo `glyph_ingest.py` (motor de imagen limpio);
+  Captura/Plantilla ya no dependen de la fachada `GlyphExtractor`; quitado el
+  preload de TrOCR. Suite 315.
+- **Fase 4** ✅ — borrado el extractor viejo: 13 módulos core + 6 UI + 8 tests +
+  5 tools. Suite 279, 0 fallos. App sin pestaña Extractor; TrOCR no se carga al
+  arrancar; Captura smoke 6/6.
+
+### Decisiones clave (la auditoría estaba parcialmente equivocada)
+El motor de imagen del "extractor viejo" está VIVO: lo usan la Captura masiva
+(`extraction_pipeline`) y la Plantilla (`template_extract`). Por eso se
+**conservaron** estos módulos (la auditoría los marcaba para borrar):
+`extractor_preprocess`, `extractor_glyph_ops`, `extractor_align_basic`,
+`wf_calibration`. También se conservó `tesseract_labeler` (cableado en el
+registry/config del pipeline vivo). El resto del extractor sí se eliminó.
+
+## Antes / Después
+
+| Métrica            | Antes  | Tras Fase 4 | Meta     |
+|--------------------|--------|-------------|----------|
+| Archivos .py       | 229    | 187         | —        |
+| LOC totales        | 34 830 | 27 625      | −6 800+  |
+| Tests passed       | 322    | 279         | 100% ok  |
+| Arranque (import)  | 0.34s  | 0.23s       | + sin preload TrOCR |
+
+LOC eliminadas hasta Fase 4: **−7 205** (meta ~6 800 superada). Archivos: **−42**.
