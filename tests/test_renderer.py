@@ -240,8 +240,9 @@ def test_anclaje_fisico_carta():
     assert opts.paper_size_px == (1275, 1650)  # 215.9 × 279.4 mm a 150 DPI
     assert opts.page_width == 1275
     assert opts.line_height_px == mm_to_px(7.5)
-    # font_size derivado del renglón: x-height ≈ 45% de 7.5 mm
-    assert opts.font_size == round(mm_to_px(7.5 * 0.45) / 0.48)
+    # R2: font_size = el renglón físico completo (em); cada glifo se escala
+    # por su fracción natural nat_h/em, no a una x-height despejada.
+    assert opts.font_size == round(opts.line_spacing_px)
 
 
 def test_font_size_explicito_se_respeta():

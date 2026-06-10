@@ -4,6 +4,12 @@ Se separa de renderer.py para mantener cada módulo bajo ~420 líneas. El
 HandwritingRenderer hereda de GlyphLoadMixin, así que estos métodos siguen
 accesibles en la clase (incluidos _recolor_ink / _vertical_class, que usan
 los tests directamente sobre HandwritingRenderer).
+
+R2 — escala PROPORCIONAL: cada glifo se escala por la fracción de renglón que
+SU tinta ocupaba en la hoja de captura (alto_tinta / em de su hoja), nunca
+normalizado a una altura de clase (eso era R-BUG-01: todas las x-height
+clavadas en el mismo px). El baseline medido viaja con la imagen para que el
+layout asiente cada glifo en la línea base real (R-BUG-02).
 """
 import logging
 import random
@@ -24,7 +30,9 @@ class GlyphLoadMixin:
     (cache path -> imagen RGBA cruda) inicializados en su __init__.
     """
 
-    # Categorías verticales para una línea base creíble (latina minúscula).
+    # Categorías verticales (latina minúscula). R2: ya NO posicionan cuando el
+    # glifo trae baseline medido/estimado; quedan como fallback para glifos
+    # ilegibles por el estimador y para el escalado sin métricas.
     _ASCENDERS = frozenset("bdfhklt")
     _DESCENDERS = frozenset("gjpqy")
 
@@ -65,7 +73,15 @@ class GlyphLoadMixin:
         out.putalpha(mask)
         return out
 
-    def _load_glyph(self, path: str, options, char: str | None = None) -> "Image.Image | None":
+    def _load_glyph(self, path: str, options, char: "str | None" = None,
+                    geo: "dict | None" = None):
+        """Carga un glifo listo para pegar. Devuelve (imagen, baseline_px) o None.
+
+        ``baseline_px`` es la fila de la IMAGEN FINAL (ya escalada/rotada) donde
+        asienta la línea base del glifo, o -1 si no hay métricas (el layout cae
+        a la clase vertical legacy). ``geo`` es la geometría del entry (R1):
+        baseline_off/em en PX DE CAPTURA del PNG original.
+        """
         if not PIL_OK:
             return None
         try:
@@ -73,13 +89,7 @@ class GlyphLoadMixin:
             if path in self._raw_cache:
                 raw = self._raw_cache[path].copy()
             else:
-                raw = Image.open(path)
-                # Bug fix #3: palette ("P") images must be converted before RGBA
-                # to avoid unexpected channel counts from split().
-                if raw.mode == "P":
-                    raw = raw.convert("RGBA")
-                else:
-                    raw = raw.convert("RGBA")
+                raw = Image.open(path).convert("RGBA")
                 # Limitar cache a 500 entradas (FIFO)
                 if len(self._raw_cache) >= 500:
                     oldest_key = next(iter(self._raw_cache))
@@ -87,51 +97,58 @@ class GlyphLoadMixin:
                 self._raw_cache[path] = raw
                 raw = raw.copy()
             img = raw
-            # Bug fix #4: guard against zero-dimension glyphs
             if img.width < 1 or img.height < 1:
                 return None
             # Recolorear la tinta al color del bolígrafo. Los glifos del extractor
             # son RGB blanco con la forma en el alpha; sobre papel claro serían
-            # invisibles. Repinta la forma con ink_color preservando el alpha
-            # (anti-aliasing). Maneja también glifos opacos (forma en luminancia).
+            # invisibles. Repinta la forma con ink_color preservando el alpha.
             img = self._recolor_ink(img, options.ink_color)
-            # Recortar al bounding box REAL de la tinta. Los glifos del banco
-            # vienen con padding transparente irregular (a veces 30-40px arriba y
-            # abajo). Sin esto, escalar por la altura total del recorte deja una
-            # 'a' diminuta y flotando sobre el baseline. Recortado al bbox del
-            # alpha, "altura del recorte" == altura real del glifo y el escalado
-            # por clase (abajo) es fiel y consistente entre glifos.
+            # Recortar al bounding box REAL de la tinta: el padding transparente
+            # del banco es irregular y mediría aire. ink_top queda en COORDS DEL
+            # PNG = las mismas del baseline_off del manifest.
             bbox = img.getchannel("A").getbbox()
+            ink_top = bbox[1] if bbox else 0
             if bbox:
                 img = img.crop(bbox)
             if img.width < 1 or img.height < 1:
                 return None
-            # ALTURA POR CLASE TIPOGRÁFICA. El bug anterior escalaba TODO glifo a
-            # font_size, así una 'o' (x-height) terminaba tan alta como una 'l'.
-            # Ahora la altura objetivo depende de la clase del carácter, partiendo
-            # de una x-height de referencia. NUNCA se normaliza por la altura total
-            # del recorte: un glifo con asta/cola ocupa más px y eso es correcto.
-            x_height = options.font_size * 0.48
-            cls = self._vertical_class(char) if char else "xheight"
-            base_h = x_height if cls == "xheight" else x_height * 1.45
-            # size_factor sigue variando ±size_variation, pero MULTIPLICANDO sobre
-            # la altura de la clase, no reemplazándola: varía alrededor de lo correcto.
+
             size_factor = 1.0 + random.uniform(-options.size_variation, options.size_variation)
-            target_h = max(1, int(base_h * size_factor))
+            baseline_in = -1.0
+            if geo and geo.get("em_px", 0) > 0 and geo.get("baseline_off", -1) >= 0:
+                # R2 — ESCALA PROPORCIONAL: la tinta ocupa en el render la misma
+                # fracción del renglón (font_size = em) que ocupaba en su hoja.
+                # Clamp de sanidad contra métricas corruptas, no contra la
+                # variación natural.
+                frac = min(1.6, max(0.04, img.height / geo["em_px"]))
+                target_h = max(1, round(options.font_size * frac * size_factor))
+                # Baseline en coords del crop, escalado con la imagen.
+                baseline_in = (geo["baseline_off"] - ink_top) * (target_h / img.height)
+                baseline_in = min(target_h * 1.4, max(0.0, baseline_in))
+            else:
+                # Fallback sin métricas: altura por clase tipográfica (legacy).
+                # x-height ≈ 45% del renglón, astas/colas ≈ 1.45×.
+                x_height = options.font_size * 0.45
+                cls = self._vertical_class(char) if char else "xheight"
+                base_h = x_height if cls == "xheight" else x_height * 1.45
+                target_h = max(1, int(base_h * size_factor))
             ratio = target_h / img.height
             target_w = max(1, int(img.width * ratio))
             img = img.resize((target_w, target_h), Image.LANCZOS)
+
             if options.rotation_range > 0:
                 angle = random.uniform(-options.rotation_range, options.rotation_range)
+                pre_h = img.height
                 img = img.rotate(angle, expand=True, resample=Image.BICUBIC)
-            # Fase 3 — inclinación tipo cursiva: shear horizontal. slant_deg>0
-            # recuesta el glifo a la derecha (la parte de arriba se corre). El
-            # mapeo afín toma input_x = x + shear*(y - h): en la base (y=h) no hay
-            # desplazamiento, arriba (y=0) se corre shear*h. Ensancha el lienzo
-            # para no recortar.
-            # Fase 6.5 — slant total = inclinación global (slant_deg) + inclinación
-            # BASE del renglón en curso (_cur_line_slant), así cada línea tiene su
-            # propio ángulo coherente sin perder el shear global.
+                # expand=True centra el contenido en el lienzo nuevo: el
+                # baseline baja media diferencia. (El giro del propio baseline
+                # es <1px a estos ángulos; no se modela.)
+                if baseline_in >= 0:
+                    baseline_in += (img.height - pre_h) / 2.0
+            # Inclinación tipo cursiva: shear horizontal. slant_deg>0 recuesta
+            # el glifo a la derecha. El mapeo afín toma input_x = x + shear*(y-h):
+            # en la base no hay desplazamiento, arriba se corre shear*h. No
+            # cambia alturas → el baseline no se ajusta.
             slant = (getattr(options, "slant_deg", 0.0) or 0.0) + (getattr(self, "_cur_line_slant", 0.0) or 0.0)
             if abs(slant) > 0.1:
                 import math
@@ -144,7 +161,6 @@ class GlyphLoadMixin:
                         (1, shear, -shear * img.height if shear > 0 else 0.0, 0, 1, 0),
                         resample=Image.BICUBIC,
                     )
-            # Guard again after rotation (expand=True can theoretically produce odd sizes)
             if img.width < 1 or img.height < 1:
                 return None
             # Trazo más sólido/oscuro (bolígrafo, no lápiz): gamma<1 sobre el alpha
@@ -160,7 +176,7 @@ class GlyphLoadMixin:
                 if alpha_factor < 1.0:
                     a = a.point(lambda v: int(v * alpha_factor))
                 img = Image.merge("RGBA", (r, g, b, a))
-            return img
+            return img, int(round(baseline_in)) if baseline_in >= 0 else -1
         except Exception as e:
             logger.debug(f"Could not load glyph {path}: {e}")
             return None

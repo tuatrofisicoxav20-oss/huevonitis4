@@ -1,7 +1,6 @@
 import logging
 import random
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import replace
 
 from core.inkcore.renderer_backgrounds import (
     BACKGROUND_STYLES,
@@ -9,6 +8,13 @@ from core.inkcore.renderer_backgrounds import (
     BackgroundMixin,
 )
 from core.inkcore.renderer_glyph import GlyphLoadMixin
+from core.inkcore.renderer_layout import LayoutMixin, _BlockLine
+from core.inkcore.renderer_options import (
+    PAPER_SIZES_MM,
+    RENDER_DPI,
+    RenderOptions,
+    mm_to_px,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,182 +36,13 @@ __all__ = [
     "mm_to_px",
 ]
 
-# DPI canónico del render. Todo el layout se ancla a MILÍMETROS y se convierte
-# a píxeles con este DPI, así el PDF impreso a tamaño real coincide con el
-# papel físico (el usuario imprime sobre hoja de carpeta con renglones reales).
-RENDER_DPI = 150
-
-# Tamaños de papel en mm (ancho, alto). "letter" = carta US, el papel de
-# carpeta común en México. A4 queda disponible como opción futura.
-PAPER_SIZES_MM: dict[str, tuple[float, float]] = {
-    "letter": (215.9, 279.4),
-    "a4": (210.0, 297.0),
-}
-
-
-def mm_to_px(mm: float, dpi: int = RENDER_DPI) -> int:
-    """Convierte milímetros a píxeles al DPI de render."""
-    return round(mm / 25.4 * dpi)
-
-
-@dataclass
-class RenderOptions:
-    # font_size en px al DPI de render. 0 (default) = DERIVARLO de
-    # line_spacing_mm, para que la letra llene el renglón físico sin chocar con
-    # el de arriba/abajo. Un valor explícito se respeta (encabezados, tests),
-    # pero entonces el texto puede descuadrarse de los renglones reales.
-    font_size: int = 0
-    jitter_px: int = 3
-    size_variation: float = 0.12
-    letter_spacing: float = 1.1
-    line_height: float = 1.6
-    rotation_range: float = 4.0
-    # Variación de "presión": el alpha de cada glifo se multiplica por un factor
-    # al azar en [min, max]. Floor más alto que antes (0.80) para que ninguna
-    # letra salga desteñida, manteniendo variación entre letras como un bolígrafo.
-    ink_alpha_min: float = 0.86
-    ink_alpha_max: float = 1.0
-    # ink_boost: gamma (<1) sobre el alpha de cada glifo. Sube los píxeles de
-    # borde (semi-transparentes por el anti-aliasing) hacia opaco, así el trazo
-    # se ve SÓLIDO y oscuro como tinta de bolígrafo y no fino/gris como lápiz.
-    # 1.0 = sin efecto.
-    ink_boost: float = 0.7
-    # Realismo de la escritura (Fase 3). Valores conservadores: suben la
-    # credibilidad sin volver el texto ilegible.
-    #   baseline_drift: amplitud máx (px) del vaivén lento de la línea base a lo
-    #     largo del renglón — una persona no escribe perfectamente recto.
-    #   kerning_jitter: fracción del hueco entre letras que varía al azar (0-1);
-    #     da espaciado irregular y leves solapes como en la letra real.
-    #   slant_deg: inclinación (shear) de cada glifo en grados; >0 = cursiva
-    #     ligeramente reclinada a la derecha.
-    baseline_drift: float = 1.2
-    kerning_jitter: float = 0.5
-    slant_deg: float = 0.0
-    # Fase 6.5 — inclinación BASE por renglón (macro): además del jitter por glifo,
-    # cada línea recibe un ángulo base al azar en ±line_slant_deg, coherente dentro
-    # de la línea. La mano no mantiene el mismo ángulo línea a línea. 0 = apagado.
-    line_slant_deg: float = 1.4
-    # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
-    # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
-    # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
-    ink_color: str = "#1A1A2E"
-    # Semilla opcional para reproducir un render idéntico (debug / regenerar).
-    # None = aleatorio cada vez.
-    seed: "int | None" = None
-    style: str = "Limpio"
-    mode: str = "PNG"
-    # page_width en px. 0 (default) = derivarlo del papel al DPI de render
-    # (carta a 150 DPI = 1275 px). Un valor explícito se respeta (diagramas
-    # con coordenadas en px, tests legacy).
-    page_width: int = 0
-    # page_margin queda como campo LEGACY: lo usan rutas no ancladas a papel
-    # (render_transparent del replicador). El layout de páginas usa los
-    # márgenes físicos en mm de abajo.
-    page_margin: int = 80
-    background_color: str = "#FAFAFA"
-    line_color: str = "#C8D8E8"
-    draw_lines: bool = False
-    # Estilo de fondo: "" | "hoja_blanca" | "libreta" | "hoja_cuadricula"
-    background_style: str = ""
-    # ── Geometría FÍSICA (mm) ─────────────────────────────────────────────
-    # El render se ancla a una hoja real: papel carta y separación de
-    # renglones configurable para igualar la hoja de carpeta del usuario
-    # (≈7-8 mm según la marca). El margen superior deja espacio al encabezado
-    # de la hoja (nombre/fecha).
-    paper: str = "letter"
-    render_dpi: int = RENDER_DPI
-    line_spacing_mm: float = 7.5
-    margin_top_mm: float = 25.0
-    margin_left_mm: float = 20.0
-    margin_right_mm: float = 12.0
-    margin_bottom_mm: float = 15.0
-
-    def __post_init__(self):
-        if self.page_width <= 0:
-            self.page_width = self.paper_size_px[0]
-        if self.font_size <= 0:
-            # x-height objetivo ≈ 45% del renglón; renderer_glyph escala cada
-            # glifo a x_height = font_size * 0.48 → se despeja font_size. Así
-            # font_size y line_spacing nunca quedan independientes.
-            x_height_px = mm_to_px(self.line_spacing_mm * 0.45, self.render_dpi)
-            self.font_size = max(1, round(x_height_px / 0.48))
-
-    @property
-    def paper_size_px(self) -> tuple[int, int]:
-        w_mm, h_mm = PAPER_SIZES_MM.get(self.paper, PAPER_SIZES_MM["letter"])
-        return mm_to_px(w_mm, self.render_dpi), mm_to_px(h_mm, self.render_dpi)
-
-    @property
-    def page_height_px(self) -> int:
-        return self.paper_size_px[1]
-
-    @property
-    def line_height_px(self) -> int:
-        """Avance vertical por renglón redondeado a px (para spans/estimaciones)."""
-        return max(1, mm_to_px(self.line_spacing_mm, self.render_dpi))
-
-    @property
-    def line_spacing_px(self) -> float:
-        """Paso del renglón en px SIN redondear. Las posiciones de grilla se
-        calculan como round(k * line_spacing_px): redondear el paso (44.29→44 a
-        150 DPI) acumularía ~1.5 mm de desfase al final de la página, y el
-        texto se saldría de los renglones físicos de la hoja."""
-        return max(1.0, self.line_spacing_mm / 25.4 * self.render_dpi)
-
-    @property
-    def margin_top_px(self) -> int:
-        return mm_to_px(self.margin_top_mm, self.render_dpi)
-
-    @property
-    def margin_left_px(self) -> int:
-        return mm_to_px(self.margin_left_mm, self.render_dpi)
-
-    @property
-    def margin_right_px(self) -> int:
-        return mm_to_px(self.margin_right_mm, self.render_dpi)
-
-    @property
-    def margin_bottom_px(self) -> int:
-        return mm_to_px(self.margin_bottom_mm, self.render_dpi)
-
-    @property
-    def usable_width_px(self) -> int:
-        return max(1, self.page_width - self.margin_left_px - self.margin_right_px)
-
-
 # Escalado de fuente por nivel de encabezado (h1 más grande que el cuerpo).
 # Niveles >3 caen al valor por defecto: apenas mayores que un párrafo.
 _HEADING_SCALE: dict[int, float] = {1: 1.5, 2: 1.3, 3: 1.15}
 _HEADING_SCALE_DEFAULT = 1.1
 
 
-@dataclass
-class _BlockLine:
-    """Un renglón ya renderizado listo para fluir en una página.
-
-    Lo produce render_document por bloque (encabezado/lista/párrafo) y lo
-    consume _flow_blocklines_to_pages, que sólo necesita saber dónde pegarlo
-    en X, cuánto avanzar en Y y cuánto hueco extra dejar antes del renglón.
-    """
-    img: "Image.Image | None"
-    x: int            # posición X absoluta de pegado (margen + sangría + jitter)
-    line_height: int  # avance vertical de este renglón (mayor en encabezados)
-    gap_before: int   # hueco extra antes del renglón (separación de bloque)
-    baseline_offset: int  # px del top del renglón a su línea base (para snap a libreta)
-
-
-class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
-    # Geometría del renglón. El lienzo de un renglón mide font_size*FACTOR de alto
-    # y la línea base se asienta en BASELINE_FACTOR de esa altura. Centralizados
-    # para que _render_line (que dibuja) y el snap a libreta (que alinea) usen el
-    # MISMO baseline; si divergen, el texto no caería sobre los renglones.
-    _LINE_CANVAS_FACTOR = 2.5
-    _BASELINE_FACTOR = 0.72
-
-    @classmethod
-    def _line_baseline_offset(cls, font_size: int) -> int:
-        """Distancia (px) del borde superior del renglón a su línea base."""
-        return int(int(font_size * cls._LINE_CANVAS_FACTOR) * cls._BASELINE_FACTOR)
+class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
 
     def __init__(self, bank):
         self.bank = bank
@@ -217,6 +54,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         self._cur_line_slant = 0.0        # inclinación base del renglón en curso
         self._last_line_slants: list[float] = []  # para verificar el gate
         self._missing_chars: set[str] = set()     # chars sin glifo en el banco
+        # R2 — geometría por glifo y conteos del render:
+        self._geo_overlay: dict[str, dict] = {}   # estimaciones en vivo (legacy)
+        self._geo_attempted: set[str] = set()
+        self._advance_cache: dict[str, float] = {}  # fracción de em por char
+        self._case_downgraded: set[str] = set()   # 'A' renderizada con glifo 'a'
+        self._glyphs_placed = 0                   # glifos pegados (anti-pérdida)
 
     def last_missing_chars(self) -> set[str]:
         """Caracteres del último render que NO tenían glifo en el banco (Fase 6.5).
@@ -225,27 +68,38 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         empezar cada render."""
         return set(getattr(self, "_missing_chars", set()))
 
+    def last_case_downgraded(self) -> set[str]:
+        """Mayúsculas del último render servidas con el glifo de su minúscula
+        (no había glifo exacto en el banco). R2: el lookup exacto va primero;
+        este set delata qué mayúsculas conviene capturar."""
+        return set(getattr(self, "_case_downgraded", set()))
+
     def coverage_report(self, text: str) -> dict:
         """Cobertura del banco para `text` SIN renderizar (R0, R-BUG-06 parte 1).
 
         Permite a la UI avisar ANTES de exportar qué caracteres caerían en el
-        fallback de fuente de sistema. El criterio de lookup es el MISMO que usa
-        _render_line hoy (lower primero — R-BUG-03 pendiente, se corrige en R2;
-        este reporte se actualizará junto con ese fix). Los espacios no cuentan.
+        fallback. R2: el criterio es char EXACTO; una mayúscula que sólo existe
+        como minúscula no es "missing" pero sí "case_downgraded" (se renderiza
+        con la minúscula y conviene capturarla). Los espacios no cuentan.
         """
         missing: set[str] = set()
         covered: set[str] = set()
+        downgraded: set[str] = set()
         for ch in set(text):
             if ch.isspace():
                 continue
-            if self.bank.get_all(ch.lower()) or self.bank.get_all(ch):
+            if self.bank.get_all(ch):
                 covered.add(ch)
+            elif ch.lower() != ch and self.bank.get_all(ch.lower()):
+                covered.add(ch)
+                downgraded.add(ch)
             else:
                 missing.add(ch)
         total = len(missing) + len(covered)
         return {
             "missing": sorted(missing),
             "covered": sorted(covered),
+            "case_downgraded": sorted(downgraded),
             "coverage": round(len(covered) / total, 4) if total else 1.0,
         }
 
@@ -257,7 +111,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         render (selección de variante + jitter + rotación + carga) sea reproducible
         con una sola línea, sin enhebrar un rng por los ~12 puntos de azar. Es
         opt-in: con seed=None (lo normal) no se toca el estado global y el render
-        es aleatorio como siempre.
+        es aleatorio como siempre. (R3 migra esto a un rng inyectado.)
         """
         self._sel_history = {}
         seed = getattr(options, "seed", None)
@@ -266,6 +120,11 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         self._sel_rng = None
         self._last_line_slants = []
         self._missing_chars = set()
+        self._case_downgraded = set()
+        self._glyphs_placed = 0
+        # El banco pudo crecer entre renders (extracción concurrente): los
+        # anchos cacheados del wrap se recalculan por render.
+        self._advance_cache = {}
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})
@@ -276,8 +135,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
     def render_transparent(self, text: str, options: RenderOptions) -> "Image.Image | None":
         """Como render_text pero sobre fondo TRANSPARENTE (RGBA), sin decoraciones.
 
-        Pensado para compositar un bloque en una posición arbitraria (replicador):
-        sólo la tinta queda, el resto es transparente, así no tapa lo de abajo.
+        Pensado para compositar un bloque en una posición arbitraria: sólo la
+        tinta queda, el resto es transparente, así no tapa lo de abajo.
         No aplica fondo/renglones (sería opaco); sí respeta wrap y la variación.
         """
         if not PIL_OK:
@@ -327,10 +186,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
         usable_width = options.usable_width_px
         spacing = options.line_spacing_px
 
-        # BUG-06 (faltaba en esta ruta): word-wrap antes de renderizar, igual que
-        # render_pages. Sin esto, _render_line trunca (break) las líneas más anchas
-        # que usable_width y se pierde texto — visible en el replicador, que llama
-        # render_text por bloque. El writer principal ya usa render_pages.
+        # BUG-06: word-wrap antes de renderizar, igual que render_pages. Sin
+        # esto se perdía texto en líneas más anchas que usable_width.
         wrapped_lines = self._soft_wrap_text(text, options, usable_width)
         rendered_lines = [self._render_line(line, options, usable_width) for line in wrapped_lines]
 
@@ -355,34 +212,6 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
                     canvas.paste(line_img, (options.margin_left_px, max(0, total_h - line_img.height)), line_img)
 
         return canvas.convert("RGB")
-
-    def _soft_wrap_text(
-        self, text: str, options: RenderOptions, usable_width: int,
-    ) -> list[str]:
-        """BUG-06: word-wrap propio para evitar que _render_line descarte chars.
-
-        Estima chars/línea con ancho promedio y parte palabras (no chars sueltos).
-        Mantiene los \\n originales del usuario; solo wrappea líneas largas.
-        """
-        avg_char_w = max(8, int(options.font_size * 0.55))
-        chars_per_line = max(10, usable_width // avg_char_w)
-        out_lines: list[str] = []
-        for raw in text.split("\n"):
-            if len(raw) <= chars_per_line:
-                out_lines.append(raw)
-                continue
-            words = raw.split(" ")
-            current = ""
-            for w in words:
-                tentative = (current + " " + w).strip()
-                if len(tentative) > chars_per_line and current:
-                    out_lines.append(current)
-                    current = w
-                else:
-                    current = tentative
-            if current:
-                out_lines.append(current)
-        return out_lines
 
     def render_pages(
         self, text: str, options: RenderOptions, page_height: "int | None" = None
@@ -591,199 +420,3 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin):
                 ))
 
         return self._flow_blocklines_to_pages(items, options, page_height, base_line_h)
-
-    def _flow_blocklines_to_pages(
-        self, items: list, options: RenderOptions, page_height: int, base_line_h: int,
-    ) -> list:
-        """Reparte los renglones ya renderizados en páginas de altura fija.
-
-        Mantiene un cursor vertical, abre página nueva cuando un renglón no entra y
-        nunca pega por encima del margen ni fuera de la hoja.
-
-        SNAP A RENGLÓN FÍSICO: salvo en cuadrícula, cada renglón se ALINEA para
-        que su línea base caiga EXACTO sobre un renglón de la hoja
-        (margin_top + k·base_line_h). Aplica también con fondo "hoja blanca":
-        el usuario imprime sobre una hoja con renglones REALES aunque el render
-        no los dibuje. Redondea al renglón MÁS CERCANO (no ceil): el
-        lienzo de un renglón reserva headroom mayor que base_line_h, así que un ceil
-        saltaría un renglón y dejaría el primero vacío. Una guarda de no-solape
-        (next_min_k) impide que un renglón caiga sobre el anterior, reservando los
-        renglones de grilla que ocupa cada línea (clave tras un encabezado alto).
-        Para renglones de cuerpo consecutivos el snap es transparente. El jitter
-        horizontal y la micro-rotación se conservan: el "hecho a mano" queda en X.
-        """
-        bottom = page_height - options.margin_bottom_px
-        margin = options.margin_top_px
-        # Paso de grilla FLOTANTE: las posiciones se calculan round(k·sf) para
-        # que el redondeo del paso no acumule desfase a lo largo de la hoja.
-        sf = options.line_spacing_px
-        style_def = BACKGROUND_STYLES.get(options.background_style, {})
-        snap = base_line_h > 0 and not style_def.get("draw_grid")
-
-        def _grid_y(k: int) -> int:
-            """Y de la línea base del renglón físico k (1=primero)."""
-            return margin + round(k * sf)
-
-        def _new_canvas():
-            c = Image.new("RGBA", (options.page_width, page_height), options.background_color)
-            self._draw_background_decorations(c, options, sf, page_height)
-            return c
-
-        def _snap_k(y_top: int, it, floor_k: int) -> int:
-            """Índice del renglón de grilla (1=primero) que recibe la línea base."""
-            desired = y_top + it.baseline_offset
-            k = round((desired - margin) / sf)
-            return max(1, floor_k, k)
-
-        pages = []
-        canvas = _new_canvas()
-        y = margin
-        next_min_k = 1
-        for it in items:
-            y += max(0, it.gap_before)
-            do_snap = snap and it.baseline_offset > 0
-            if do_snap:
-                k = _snap_k(y, it, next_min_k)
-                paste_y = _grid_y(k) - it.baseline_offset
-            else:
-                k = None
-                paste_y = y
-            # ¿Cabe este renglón? Si no, cierra la página y re-snapea arriba.
-            if it.line_height > 0 and paste_y + it.line_height > bottom and y > margin:
-                pages.append(canvas.convert("RGB"))
-                canvas = _new_canvas()
-                y = margin
-                next_min_k = 1
-                if do_snap:
-                    k = _snap_k(y, it, next_min_k)
-                    paste_y = _grid_y(k) - it.baseline_offset
-                else:
-                    paste_y = y
-            if it.img is not None:
-                x = max(0, it.x)
-                py = max(0, min(page_height - it.img.height, paste_y))
-                canvas.paste(it.img, (x, py), it.img)
-            if k is not None:
-                # Reservar los renglones de grilla que ocupa esta línea (ceil).
-                span = max(1, int(-(-it.line_height // sf)))
-                next_min_k = k + span
-            # El cursor continuo sigue desde la base de este renglón para que el
-            # siguiente caiga un renglón más abajo (snap transparente en el cuerpo).
-            y = paste_y + it.line_height
-
-        pages.append(canvas.convert("RGB"))
-        return pages
-
-    def _render_line(self, text: str, options: RenderOptions, max_width: int) -> "Image.Image | None":
-        if not PIL_OK:
-            return None
-        if not text.strip():
-            return None
-        # Bug fix #1: increase canvas height to accommodate descenders.
-        # 80% baseline means up to 20% below for ascenders and potentially
-        # the full glyph height above that.  Reserve font_size * 2.5 so that
-        # tall glyphs (ascenders) and deep glyphs (descenders g,p,q,y) never
-        # get clipped at the bottom.
-        h = int(options.font_size * self._LINE_CANVAS_FACTOR)
-        line_canvas = Image.new("RGBA", (max_width, h), (0, 0, 0, 0))
-        x_cursor = 0
-
-        # Fase 6.5 — inclinación BASE de ESTE renglón (coherente dentro de la línea,
-        # distinta entre líneas). _load_glyph la suma al slant_deg por glifo.
-        line_slant_amp = max(0.0, getattr(options, "line_slant_deg", 0.0))
-        _rng = getattr(self, "_sel_rng", None) or random
-        self._cur_line_slant = _rng.uniform(-line_slant_amp, line_slant_amp) if line_slant_amp else 0.0
-        self._last_line_slants.append(self._cur_line_slant)
-
-        # Bug fix #2: minimum word space of 4px for very small fonts
-        word_space = max(4, int(options.font_size * 0.4))
-        spacing_gap_base = max(2, int(options.font_size * 0.08))
-        kj = max(0.0, min(1.0, options.kerning_jitter))
-        # Jitter vertical SUTIL: como máx ±2px. Antes usaba jitter_px (≈3) y
-        # descuadraba letras vecinas; el horizontal sigue gobernado por jitter_px.
-        vjit = min(2, max(0, options.jitter_px))
-
-        # Fase 3 — deriva de línea base: un offset que se mueve poco a poco a lo
-        # largo del renglón (random walk acotado) en vez de una recta perfecta.
-        # Cada letra hereda casi todo el offset de la anterior + un pasito al
-        # azar, así el vaivén es suave y no un temblor letra-a-letra.
-        drift = 0.0
-        drift_amp = max(0.0, options.baseline_drift)
-
-        # WRAP POR PALABRA: se mide cada palabra entera y, si no entra en lo que
-        # queda del renglón, se pasa COMPLETA a la siguiente línea (el caller ya
-        # repartió en líneas lógicas). Sólo se parte una palabra si por sí sola
-        # excede el ancho total disponible. Así "la" nunca queda partida.
-        first_word = True
-        for word in text.split(" "):
-            if word == "":
-                if not first_word:
-                    x_cursor += word_space
-                continue
-            # Cargar los glifos de la palabra una sola vez (variation=True ⇒
-            # instancia distinta por aparición) y medir su ancho total.
-            glyphs = []  # (char, img, gap) de la palabra
-            word_w = 0
-            for ch in word:
-                # Selección con rotación de variantes (memoria corta + muestreo
-                # ponderado por tier + seed reproducible). El estado por-render
-                # (self._sel_history / self._sel_rng) lo fija cada método público.
-                hist = getattr(self, "_sel_history", None)
-                rng = getattr(self, "_sel_rng", None)
-                glyph_entry = self.bank.select_glyph(ch.lower(), history=hist, rng=rng)
-                if glyph_entry is None:
-                    glyph_entry = self.bank.select_glyph(ch, history=hist, rng=rng)
-                if glyph_entry and Path(glyph_entry.image_path).exists():
-                    glyph_img = self._load_glyph(glyph_entry.image_path, options, ch)
-                else:
-                    # Fase 6.5 — glifo faltante: en vez de sustituir en silencio,
-                    # se registra el carácter (la UI/preview lo reporta) y se marca
-                    # visible el fallback para que el usuario sepa qué capturar.
-                    if not ch.isspace():
-                        self._missing_chars.add(ch)
-                    glyph_img = self._render_fallback_char(ch, options, missing=True)
-                if glyph_img is None:
-                    continue
-                # Kerning variable: el hueco base puede encogerse (leve solape) o
-                # crecer al azar según kerning_jitter. Nunca baja de 1px.
-                gap = spacing_gap_base
-                if kj > 0:
-                    gap += round(random.uniform(-spacing_gap_base * kj, spacing_gap_base * kj))
-                gap = max(1, gap)
-                glyphs.append((ch, glyph_img, gap))
-                word_w += glyph_img.width + gap
-
-            if not glyphs:
-                continue
-
-            # ¿Cabe la palabra entera en lo que resta del renglón?
-            if not first_word and x_cursor + word_space + word_w > max_width:
-                break  # no parte la palabra: la deja para la siguiente línea
-            if not first_word:
-                x_cursor += word_space
-            first_word = False
-
-            for ch, glyph_img, gap in glyphs:
-                # Sólo se llega a cortar acá si la palabra sola excede max_width.
-                if x_cursor > 0 and x_cursor + glyph_img.width > max_width:
-                    break
-                jitter_y = random.randint(-vjit, vjit) if vjit > 0 else 0
-                # Avanza el random walk de la línea base, acotado a ±drift_amp,
-                # con paso reducido (±0.25) para que el renglón ondule muy poco.
-                if drift_amp > 0:
-                    drift += random.uniform(-drift_amp * 0.25, drift_amp * 0.25)
-                    drift = max(-drift_amp, min(drift_amp, drift))
-                baseline = int(h * self._BASELINE_FACTOR) + round(drift)
-                # Línea base por clase: las de x-height asientan su base en el
-                # baseline; las ascendentes (asta alta) suben; las descendentes
-                # (g,j,p,q,y) meten ~31% del glifo (su cola) bajo el baseline.
-                if self._vertical_class(ch) == "desc":
-                    y_pos = baseline - int(glyph_img.height * 0.69)
-                else:
-                    y_pos = baseline - glyph_img.height
-                # Apply jitter, then clamp to stay within the canvas vertically
-                y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
-                line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
-                x_cursor += glyph_img.width + gap
-
-        return line_canvas
