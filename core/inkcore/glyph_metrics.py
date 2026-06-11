@@ -90,8 +90,10 @@ def template_geometry(crop_mask: np.ndarray, ch: str, *,
     }
     # Sin renglón impreso en la celda, el baseline observable es el fondo de la
     # tinta — vale para todo lo que ASIENTA en la línea base. Las descendentes
-    # meten su cola debajo: se resuelven con la x-height de la hoja.
-    geo["baseline_off"] = None if ch in DESCENDERS else int(ink_bottom)
+    # meten su cola debajo: se resuelven con la x-height de la hoja. R10: una
+    # LIGADURA ("qu") es descendente si cualquiera de sus letras lo es.
+    desciende = any(c in DESCENDERS for c in ch)
+    geo["baseline_off"] = None if desciende else int(ink_bottom)
     return geo
 
 
@@ -136,7 +138,7 @@ def estimate_geometry_for_image(img: Image.Image, ch: str,
         return None
     _x0, ink_top, _x1, ink_bottom = bbox
     w, h = img.size
-    if ch in DESCENDERS:
+    if any(c in DESCENDERS for c in ch):  # R10: pares descendentes también
         body = x_height_px if x_height_px > 0 else (ink_bottom - ink_top) * _DESC_BODY_FRAC
         baseline = min(h, ink_top + int(round(body)))
     else:

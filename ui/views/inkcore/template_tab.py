@@ -76,6 +76,7 @@ class TemplateTabMixin:
             DIGITOS,
             MAYUSCULAS,
             MINUSCULAS,
+            PARES_FRECUENTES,
             PUNTUACION,
             VOCALES_ACENTUADAS,
         )
@@ -94,6 +95,9 @@ class TemplateTabMixin:
             ("dígitos", DIGITOS, False),
             ("puntuación", PUNTUACION, False),
             ("vocales acentuadas", VOCALES_ACENTUADAS, False),
+            # R10: pares frecuentes como ligaduras (se escriben JUNTOS en la
+            # casilla; el escritor los usa como semi-cursiva).
+            ("pares ligados (qu, ll…)", PARES_FRECUENTES, False),
         ):
             var = ctk.BooleanVar(value=default)
             ctk.CTkCheckBox(
@@ -164,9 +168,18 @@ class TemplateTabMixin:
 
     # ── Lógica ───────────────────────────────────────────────────
 
-    def _tpl_charset_from_ui(self) -> str:
-        """Charset combinado según los checkboxes marcados (en orden canónico)."""
+    def _tpl_charset_from_ui(self) -> "str | list[str]":
+        """Charset combinado según los checkboxes marcados (en orden canónico).
+
+        R10: si los PARES están marcados, el charset pasa a ser LISTA de
+        tokens (cada par ocupa UNA casilla); sin pares sigue siendo str.
+        """
         parts = [chars for _label, chars, var in self._tpl_set_specs if var.get()]
+        if any(not isinstance(p, str) for p in parts):
+            tokens: list[str] = []
+            for p in parts:
+                tokens.extend(list(p))
+            return tokens
         return "".join(parts)
 
     def _tpl_layout(self, *, use_snapshot: bool = False):

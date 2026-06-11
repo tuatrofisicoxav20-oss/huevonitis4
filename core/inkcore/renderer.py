@@ -66,6 +66,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         self._margin_walk = None                  # OU del margen izquierdo
         self._line_jitter_walk = None             # OU del jitter vertical de línea
         self._line_index = 0                      # para el drift hacia adentro
+        self._pair_chars: set[str] = set()        # R10: ligaduras del banco
 
     def last_missing_chars(self) -> set[str]:
         """Caracteres del último render que NO tenían glifo en el banco (Fase 6.5).

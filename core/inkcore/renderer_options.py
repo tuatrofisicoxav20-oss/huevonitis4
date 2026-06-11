@@ -97,6 +97,10 @@ class RenderOptions:
     #     a lo largo del renglón (C1), encima del slant global y de línea.
     warp_strength: float = 0.08
     glyph_slant_drift_deg: float = 1.0
+    # R10 (G3) — semi-cursiva básica: probabilidad de usar una LIGADURA del
+    # banco ("qu", "ll", "de"…) cuando el par aparece en el texto. Una mano
+    # liga unas veces sí y otras no; 0 = nunca (banco sin pares no se afecta).
+    ligature_prob: float = 0.6
     # R6 — pase de tinta:
     #   supersample: el render compone a N× y reduce LANCZOS al final (I1):
     #     bordes de rotación/shear limpios. Se aplica POR PÁGINA (memoria).

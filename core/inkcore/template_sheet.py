@@ -33,6 +33,11 @@ MAYUSCULAS = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
 DIGITOS = "0123456789"
 PUNTUACION = ".,;:¿?¡!()-\"'"
 VOCALES_ACENTUADAS = "áéíóúÁÉÍÓÚ"
+# R10 (G3) — pares frecuentes del español capturados como LIGADURAS: se
+# escriben juntos en una casilla y el banco/renderer los tratan como un
+# "carácter" de 2 letras (lookup de par antes que de char suelto). Atajo
+# barato a la semi-cursiva sin conectores Bézier.
+PARES_FRECUENTES: tuple[str, ...] = ("qu", "ll", "rr", "ch", "de", "en", "la", "es")
 
 # Compat: el alfabeto español base (las 27 minúsculas) sigue siendo el default.
 SPANISH_ALPHABET = MINUSCULAS
@@ -47,7 +52,10 @@ class TemplateLayout:
     fiducial: int = 56          # lado del cuadrado marcador de esquina
     label_strip: int = 30       # alto de la franja del rótulo (arriba de la casilla)
     inset: int = 10             # margen interno al recortar (evita bordes/rótulo)
-    charset: str = SPANISH_ALPHABET   # caracteres rotulados (uno por grupo de `repeats` casillas)
+    # Caracteres rotulados (uno por grupo de `repeats` casillas). Puede ser
+    # str (un char por casilla) o LISTA de tokens donde un token de 2 letras
+    # es una ligadura (R10): "qu" se escribe junta en una sola casilla.
+    charset: "str | list[str]" = SPANISH_ALPHABET
     repeats: int = 1            # muestras por letra (casillas consecutivas con la misma letra)
     cols: int = 0              # 0 = auto en __post_init__ según charset/repeats
 

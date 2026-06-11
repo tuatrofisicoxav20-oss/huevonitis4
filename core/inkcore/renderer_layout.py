@@ -73,6 +73,8 @@ class LayoutMixin:
         nuevos sin métricas (extracción concurrente incluida).
         """
         entries = self.bank.get_all()
+        # R10: ligaduras disponibles (chars de 2 letras capturados como par).
+        self._pair_chars = {e.char for e in entries if len(e.char) == 2}
         attempted: set = self._geo_attempted
         pending = [e for e in entries
                    if e.metrics_source == "" and e.image_path not in attempted]
@@ -277,7 +279,20 @@ class LayoutMixin:
                                         word_space_base * 0.5, word_space_base * 2.2))
             first_word = False
 
-            for ch in word:
+            # R10 (G3): lookup de LIGADURA antes que de char suelto. Si el
+            # banco tiene el par ("qu", "ll"…) se usa con probabilidad
+            # ligature_prob — una mano liga unas veces sí y otras no.
+            lig_p = max(0.0, min(1.0, getattr(options, "ligature_prob", 0.0)))
+            pairs = getattr(self, "_pair_chars", set())
+            idx = 0
+            while idx < len(word):
+                par = word[idx:idx + 2]
+                if (len(par) == 2 and lig_p > 0 and par in pairs
+                        and rnd.random() < lig_p):
+                    ch = par
+                else:
+                    ch = word[idx]
+                idx += len(ch)
                 entry = self._select_entry(ch)
                 baseline_in = -1
                 if entry and Path(entry.image_path).exists():
@@ -327,7 +342,7 @@ class LayoutMixin:
                         y_pos = baseline - glyph_img.height
                 y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
                 line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
-                self._glyphs_placed += 1
+                self._glyphs_placed += len(ch)  # una ligadura cubre 2 chars
                 x_cursor += glyph_img.width + gap
 
         return line_canvas
