@@ -109,6 +109,14 @@ class RenderOptions:
     ink_texture_strength: float = 0.12
     ink_bleed: float = 0.4
     ink_hsv_jitter: tuple = (0.04, 0.03)
+    # R7 — pase de papel:
+    #   paper_texture: nombre de PNG en tipografia/{perfil}/papers/ (scans del
+    #     usuario) o assets/papers/ (procedurales). None = papel liso. Los
+    #     BACKGROUND_STYLES traen su textura; esto permite forzar otra.
+    #   scan_skew: rotación global sub-grado (±1.2°) de la página final con
+    #     esquinas del color del papel — nadie alinea la hoja perfecto (F3).
+    paper_texture: "str | None" = None
+    scan_skew: bool = False
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.

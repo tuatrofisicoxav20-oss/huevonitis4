@@ -182,12 +182,17 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                           Image.LANCZOS)
 
     def _compose_page(self, ink, options, spacing, page_height):
-        """Pase de papel (R6/I2): papel + decoraciones, y la tinta encima con
-        composición multiply (la textura del papel atraviesa el trazo)."""
+        """Pase de papel (R6/I2 + R7/F1/F3): sustrato texturizado + decoraciones,
+        la tinta encima con multiply, y el skew de escaneo al cerrar. El skew
+        corre AQUÍ (resolución supersampleada) para que el downscale LANCZOS
+        pula el remuestreo de la rotación."""
         from core.inkcore.renderer_ink import apply_paper
-        paper = Image.new("RGB", ink.size, options.background_color)
+        from core.inkcore.renderer_paper import apply_scan_skew, make_paper
+        profile_dir = getattr(self.bank, "bank_dir", None)
+        paper = make_paper(ink.size, options, self._rng, profile_dir)
         self._draw_background_decorations(paper, options, spacing, page_height)
-        return apply_paper(ink, paper, options, self._rng)
+        page = apply_paper(ink, paper, options, self._rng)
+        return apply_scan_skew(page, options, self._rng)
 
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})

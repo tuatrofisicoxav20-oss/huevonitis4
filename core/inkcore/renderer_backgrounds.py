@@ -20,11 +20,16 @@ except ImportError:
     PIL_OK = False
 
 
+# R7 (F1): cada estilo trae su textura de papel (PNG en assets/papers/,
+# generadas proceduralmente por tools/gen_paper_textures.py; el usuario puede
+# meter scans propios en tipografia/{perfil}/papers/ con el mismo nombre y
+# tienen prioridad). texture=None ⇒ papel liso (color sólido, cero costo).
 BACKGROUND_STYLES: dict[str, dict] = {
     "hoja_blanca": {
         "bg": "#FFFFFF",
         "draw_lines": False,
         "margin_color": None,
+        "texture": "papel_fibra.png",
     },
     "libreta": {
         "bg": "#FEFCE8",
@@ -32,6 +37,7 @@ BACKGROUND_STYLES: dict[str, dict] = {
         "line_color": "#B9D5E0",
         "margin_color": "#F4A0A0",
         "margin_x": 80,
+        "texture": "papel_crema.png",
     },
     "hoja_cuadricula": {
         "bg": "#F0F4FF",
@@ -39,6 +45,7 @@ BACKGROUND_STYLES: dict[str, dict] = {
         "line_color": "#C5D5F0",
         "draw_grid": True,
         "grid_size": 28,
+        "texture": "papel_fibra.png",
     },
 }
 
@@ -46,12 +53,17 @@ BACKGROUND_STYLES: dict[str, dict] = {
 # R3 (I7): rotation_range ya NO es ruido blanco por letra sino la AMPLITUD del
 # proceso OU de rotación a lo largo del renglón — la misma sensación visual
 # necesita amplitudes menores que el ruido blanco de antes.
+# R7 (I7): "Escolar"/"Examen" anclan a libreta (E10: el texto se APOYA en los
+# renglones impresos); "Limpio" es hoja blanca sin skew de escaneo.
 STYLE_PRESETS: dict[str, dict] = {
-    "Limpio": {"jitter_px": 2, "size_variation": 0.08, "rotation_range": 1.2},
-    "Escolar": {"jitter_px": 4, "size_variation": 0.14, "rotation_range": 2.8, "draw_lines": True},
+    "Limpio": {"jitter_px": 2, "size_variation": 0.08, "rotation_range": 1.2,
+               "background_style": "hoja_blanca", "scan_skew": False},
+    "Escolar": {"jitter_px": 4, "size_variation": 0.14, "rotation_range": 2.8,
+                "draw_lines": True, "background_style": "libreta"},
     "Universitario": {"jitter_px": 2, "size_variation": 0.10, "rotation_range": 1.6},
     "Relajado": {"jitter_px": 6, "size_variation": 0.20, "rotation_range": 4.0},
-    "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 1.8, "draw_lines": True},
+    "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 1.8,
+               "draw_lines": True, "background_style": "libreta"},
 }
 
 
@@ -69,6 +81,10 @@ class BackgroundMixin:
             options.draw_lines = style_def["draw_lines"]
         if "line_color" in style_def:
             options.line_color = style_def["line_color"]
+        # R7 (F1): el estilo trae su textura de papel; solo si el caller no
+        # forzó una propia (paper_texture explícito gana al estilo).
+        if options.paper_texture is None and "texture" in style_def:
+            options.paper_texture = style_def["texture"]
         return options
 
     def _draw_background_decorations(

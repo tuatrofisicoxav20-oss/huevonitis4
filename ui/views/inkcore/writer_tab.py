@@ -178,6 +178,7 @@ class WriterTabMixin:
         ).pack(side="left", padx=(0, 6))
 
         self.secondary_button(btn_row, "💾 Exportar PNG", self._export_png, 130).pack(side="left", padx=(0, 6))
+        self.secondary_button(btn_row, "📷 Foto de tarea", self._export_photo, 140).pack(side="left", padx=(0, 6))
         self.primary_button(btn_row, "📄 Exportar PDF con mi letra", self._export_writer_pdf, 220).pack(side="left")
 
         right = self.card_frame(main)
@@ -585,3 +586,54 @@ class WriterTabMixin:
                 for i, pg in enumerate(pages, 1):
                     pg.save(f"{base}_p{i:02d}.png")
                 self.toast(f"{len(pages)} PNGs exportados", "success")
+
+    def _export_photo(self):
+        """R7 (F4/F2/I4) — export '📷 Foto de tarea': la página se renderiza
+        con skew de escaneo y se guarda como JPEG estilo foto de celular
+        (iluminación direccional + viñeta + grano + q85 ~3000px)."""
+        text = self._writer_text.get("0.0", "end").strip()
+        if not text:
+            self.toast("Escribe algo primero", "warning")
+            return
+        self._warn_missing_chars(text)
+        opts = self._get_render_options()
+        opts.scan_skew = True  # la hoja fotografiada nunca está alineada
+        renderer = self._pipeline.renderer
+        if renderer is None:
+            self.toast("El banco no está listo", "error")
+            return
+        self.toast("Renderizando foto…", "info")
+
+        def _render():
+            try:
+                pages = self._render_pages(renderer, text, opts)
+            except Exception as exc:
+                logger.error("render foto error: %s", exc, exc_info=True)
+                self.after(0, lambda: self.toast("Error al renderizar", "error"))
+                return
+            self.after(0, lambda: self._export_photo_finish(pages))
+
+        threading.Thread(target=_render, daemon=True).start()
+
+    def _export_photo_finish(self, pages):
+        if not pages:
+            self.toast("Error al renderizar", "error")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".jpg",
+            filetypes=[("JPEG", "*.jpg")],
+            title=f"Exportar foto{'s' if len(pages) > 1 else ''} de tarea",
+        )
+        if not path:
+            return
+        try:
+            import random as _random
+
+            from core.export.photo_export import export_photo_pages
+            seed = getattr(self._get_render_options(), "seed", None)
+            rng = _random.Random(seed)
+            outs = export_photo_pages(pages, path, rng)
+            self.toast(f"📷 {len(outs)} foto{'s' if len(outs) > 1 else ''} exportada{'s' if len(outs) > 1 else ''}", "success")
+        except Exception as exc:
+            logger.error("export foto error: %s", exc, exc_info=True)
+            self.toast(f"Error al exportar foto: {exc}", "error")
