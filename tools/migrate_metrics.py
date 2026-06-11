@@ -47,7 +47,7 @@ def migrate_profile(profile_id: str, *, force: bool = False) -> dict:
     return stats
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Estima métricas geométricas (R1) para bancos sin ellas.")
     parser.add_argument("--profile", default=None,

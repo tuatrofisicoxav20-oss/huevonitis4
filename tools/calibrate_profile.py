@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def calibrate(image_path: str, out_path: "str | Path") -> dict:
+def calibrate(image_path: str, out_path: str | Path) -> dict:
     """Mide la página y escribe calibration.json. Devuelve el dict guardado."""
     from tools.eval_render.metrics import metrics_from_path
 
@@ -37,7 +37,7 @@ def calibrate(image_path: str, out_path: "str | Path") -> dict:
     return data
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Calibra las varianzas del render desde una página real.")
     parser.add_argument("image", help="foto/escaneo de la página patrón")

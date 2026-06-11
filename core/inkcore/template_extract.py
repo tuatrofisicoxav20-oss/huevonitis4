@@ -263,7 +263,7 @@ def _rectify(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray:
                                flags=cv2.INTER_LINEAR, borderValue=255)
 
 
-def _clean_cell(cell_gray: np.ndarray, geom_out: "dict | None" = None) -> np.ndarray | None:
+def _clean_cell(cell_gray: np.ndarray, geom_out: dict | None = None) -> np.ndarray | None:
     """Binariza una casilla y deja sólo la tinta central (sin borde/rótulo).
 
     Devuelve una máscara uint8 (255=tinta) ya recortada al bbox de la letra, o
