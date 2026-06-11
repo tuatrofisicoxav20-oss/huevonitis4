@@ -20,9 +20,14 @@ from PIL import Image
 # Distancia de Hamming reutilizada del banco (misma semántica que el dedup).
 from core.inkcore.bank_hashing import _hamming
 
-# Umbral default de "gemelos" perceptuales: a ≤6/64 bits dos letras son el
-# mismo sello con micro-ruido. El warp de R5 debe empujar los pares por encima.
-DUP_HAMMING_THRESHOLD = 6
+# Detector de "sellos" (R5): dHash de 16×16 (256 bits) con umbral ≤8 (~3%).
+# Calibrado empíricamente con tres páginas de control: sello puro (pipeline de
+# variación apagado) → dup_rate 0.97; variación humana genuina (cada instancia
+# redibujada con parámetros perturbados) → 0.03; render R5 → 0.00. El dHash
+# clásico de 64 bits NO separa: a ese tamaño dos letras chicas distintas
+# colapsan al mismo hash (humana daba 0.79 con umbral 6).
+DUP_HAMMING_THRESHOLD = 8
+_DHASH_GRID = 16
 
 
 # ── Binarización ─────────────────────────────────────────────────────────────
@@ -57,7 +62,10 @@ def _ink_mask(img: Image.Image) -> np.ndarray:
         img = img.convert("RGB")
     gray = np.asarray(img.convert("L"))
     thr = _otsu_threshold(gray)
-    return gray < thr
+    # Inclusivo: en una imagen binaria pura (0/255, sin anti-aliasing) la
+    # varianza inter-clase es plana y argmax cae en t=0; con < la tinta
+    # desaparecería. <= incluye siempre el bin del umbral.
+    return gray <= thr
 
 
 # ── Componentes conexos (NumPy puro) ────────────────────────────────────────
@@ -323,14 +331,15 @@ def _slant_metrics(mask: np.ndarray, lines: list[list]) -> dict:
     return {"slant_mean": round(mu, 3), "slant_std": round(sigma, 3)}
 
 
-def _dhash_mask(crop: np.ndarray) -> str:
-    """dHash 64-bit de un crop binario (resize 9×8 + gradiente horizontal).
+def _dhash_mask(crop: np.ndarray, grid: int = _DHASH_GRID) -> str:
+    """dHash de un crop binario (resize (grid+1)×grid + gradiente horizontal).
 
     No reutiliza bank_hashing._dhash porque aquélla espera el RGBA del banco
-    (forma en alpha); acá la entrada es la máscara de tinta de la página. La
-    distancia sí es la misma (_hamming del banco)."""
+    (forma en alpha) y trabaja a 64 bits; acá la entrada es la máscara de
+    tinta de la página y la resolución es mayor (ver DUP_HAMMING_THRESHOLD).
+    La distancia sí es la misma (_hamming del banco)."""
     img = Image.fromarray((crop * 255).astype(np.uint8)).resize(
-        (9, 8), Image.LANCZOS)
+        (grid + 1, grid), Image.LANCZOS)
     arr = np.asarray(img, dtype=np.int16)
     bits = (arr[:, 1:] > arr[:, :-1]).ravel()
     return "".join("1" if b else "0" for b in bits)

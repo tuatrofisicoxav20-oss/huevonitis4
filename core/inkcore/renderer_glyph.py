@@ -75,7 +75,8 @@ class GlyphLoadMixin:
 
     def _load_glyph(self, path: str, options, char: "str | None" = None,
                     geo: "dict | None" = None, rotation: "float | None" = None,
-                    rng: "random.Random | None" = None):
+                    rng: "random.Random | None" = None,
+                    size_drift: float = 0.0, slant_extra: float = 0.0):
         """Carga un glifo listo para pegar. Devuelve (imagen, baseline_px) o None.
 
         ``baseline_px`` es la fila de la IMAGEN FINAL (ya escalada/rotada) donde
@@ -87,6 +88,9 @@ class GlyphLoadMixin:
         largo del renglón — la muñeca deriva, no tirita); None = sorteo local
         legacy. ``rng`` es el RNG inyectado del render; None = random global
         (compat con llamadas directas sin _begin_render).
+
+        R5: ``size_drift``/``slant_extra`` son la deriva OU intra-renglón (C1):
+        el tamaño y la inclinación del vecino se heredan, no se sortean i.i.d.
         """
         if not PIL_OK:
             return None
@@ -121,10 +125,12 @@ class GlyphLoadMixin:
                 return None
 
             # R3: gauss truncada en vez de uniform — la variación de tamaño de
-            # una mano es de campana, no de dado.
+            # una mano es de campana, no de dado. R5: encima va size_drift (la
+            # deriva OU del renglón); el componente i.i.d. queda reducido.
             from core.inkcore.renderer_noise import tnorm
             sv = options.size_variation
-            size_factor = 1.0 + (tnorm(rnd, 0.0, sv * 0.55, -sv, sv) if sv > 0 else 0.0)
+            iid = tnorm(rnd, 0.0, sv * 0.3, -sv * 0.6, sv * 0.6) if sv > 0 else 0.0
+            size_factor = max(0.5, 1.0 + iid + size_drift)
             baseline_in = -1.0
             if geo and geo.get("em_px", 0) > 0 and geo.get("baseline_off", -1) >= 0:
                 # R2 — ESCALA PROPORCIONAL: la tinta ocupa en el render la misma
@@ -143,6 +149,15 @@ class GlyphLoadMixin:
                 cls = self._vertical_class(char) if char else "xheight"
                 base_h = x_height if cls == "xheight" else x_height * 1.45
                 target_h = max(1, int(base_h * size_factor))
+            # R5 (C4): warp elástico POR INSTANCIA — dos apariciones del mismo
+            # glifo nunca son idénticas, ni con 1 variante en el banco. Se
+            # aplica ANTES del resize (en px de captura hay resolución para que
+            # el remuestreo BICUBIC deforme de verdad; después sería sub-píxel).
+            warp = max(0.0, getattr(options, "warp_strength", 0.0))
+            if warp > 0:
+                from core.inkcore.renderer_warp import elastic_warp
+                img = elastic_warp(img, rnd, warp)
+
             ratio = target_h / img.height
             target_w = max(1, int(img.width * ratio))
             img = img.resize((target_w, target_h), Image.LANCZOS)
@@ -165,7 +180,9 @@ class GlyphLoadMixin:
             # el glifo a la derecha. El mapeo afín toma input_x = x + shear*(y-h):
             # en la base no hay desplazamiento, arriba se corre shear*h. No
             # cambia alturas → el baseline no se ajusta.
-            slant = (getattr(options, "slant_deg", 0.0) or 0.0) + (getattr(self, "_cur_line_slant", 0.0) or 0.0)
+            slant = ((getattr(options, "slant_deg", 0.0) or 0.0)
+                     + (getattr(self, "_cur_line_slant", 0.0) or 0.0)
+                     + slant_extra)
             if abs(slant) > 0.1:
                 import math
                 shear = math.tan(math.radians(slant))

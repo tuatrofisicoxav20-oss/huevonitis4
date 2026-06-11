@@ -54,7 +54,8 @@ def test_calibrate_recupera_word_gap_cv(tmp_path):
     img = _render_pagina(tmp_path, word_space_cv=objetivo, jitter_px=0,
                          rotation_range=0.0, size_variation=0.0,
                          baseline_drift=0.0, line_slant_deg=0.0,
-                         kerning_jitter=0.0)
+                         kerning_jitter=0.0, warp_strength=0.0,
+                         glyph_slant_drift_deg=0.0)
     out = tmp_path / "calibration.json"
     data = calibrate(str(img), out)
     medido = data["metrics"]["word_gap_cv"]
@@ -98,7 +99,8 @@ def test_calibrate_recupera_espaciado_medio(tmp_path):
     img = _render_pagina(tmp_path, word_space_frac=0.55, word_space_cv=0.10,
                          jitter_px=0, rotation_range=0.0, size_variation=0.0,
                          baseline_drift=0.0, line_slant_deg=0.0,
-                         kerning_jitter=0.0)
+                         kerning_jitter=0.0, warp_strength=0.0,
+                         glyph_slant_drift_deg=0.0)
     data = calibrate(str(img), tmp_path / "c.json")
     m = data["metrics"]
     # word_space configurado: 0.55·font_size(44) ≈ 24.2 px. El gap de CAJAS

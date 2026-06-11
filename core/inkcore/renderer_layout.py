@@ -253,6 +253,15 @@ class LayoutMixin:
         rot_amp = max(0.0, options.rotation_range)
         rot_walk = OUProcess(rnd, sigma=rot_amp * 0.3, rho=0.85,
                              bound=rot_amp) if rot_amp > 0 else None
+        # R5 (C1) — tamaño y slant por glifo también DERIVAN (OU intra-renglón)
+        # en vez de sortearse i.i.d.: la mano que venía escribiendo chico sigue
+        # chico unas letras más.
+        sv = max(0.0, options.size_variation)
+        size_walk = OUProcess(rnd, sigma=sv * 0.25, rho=0.88,
+                              bound=sv * 0.8) if sv > 0 else None
+        sl_amp = max(0.0, getattr(options, "glyph_slant_drift_deg", 1.0))
+        slant_walk = OUProcess(rnd, sigma=sl_amp * 0.3, rho=0.85,
+                               bound=sl_amp) if sl_amp > 0 else None
 
         first_word = True
         for word in text.split(" "):
@@ -274,7 +283,9 @@ class LayoutMixin:
                 if entry and Path(entry.image_path).exists():
                     loaded = self._load_glyph(
                         entry.image_path, options, ch, geo=self._geo(entry),
-                        rotation=rot_walk.step() if rot_walk else 0.0, rng=rnd)
+                        rotation=rot_walk.step() if rot_walk else 0.0, rng=rnd,
+                        size_drift=size_walk.step() if size_walk else 0.0,
+                        slant_extra=slant_walk.step() if slant_walk else 0.0)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
                     # R3/H8 — glifo faltante: se OMITE y se registra (la UI

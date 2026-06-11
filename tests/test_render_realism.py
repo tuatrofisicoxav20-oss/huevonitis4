@@ -127,19 +127,24 @@ def stub_renderer(tmp_path):
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
 def test_golden_metricas_linea_base(stub_renderer):
-    """Snapshot de las métricas del renderer con seed fija (post-R2)."""
+    """Snapshot de las métricas del renderer con seed fija.
+
+    Una PÁGINA LLENA (15 líneas): con 3 líneas el estimador de autocorr/cv
+    tiene tanta varianza de muestreo que el assert mediría suerte, no señal.
+    """
     from core.inkcore.renderer import RenderOptions
     from tools.eval_render.metrics import compute_metrics
 
+    texto = "\n".join([FRASE_PATRON] * 5)
     opts = RenderOptions(style="", background_style="hoja_blanca", seed=42)
-    pages = stub_renderer.render_pages(FRASE_PATRON, opts)
+    pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])
     print("\nGOLDEN:", m)
 
-    # Sanidad estructural: 3 líneas de texto con decenas de letras.
-    assert m["n_lines"] == 3
-    assert m["n_boxes"] > 50
+    # Sanidad estructural: 15 líneas de texto con cientos de letras.
+    assert m["n_lines"] == 15
+    assert m["n_boxes"] > 300
 
     # R2 — escala proporcional + solape leve: el CV de alturas entra al rango
     # humano (>0.30; era 0.20 con la normalización por clase de R-BUG-01).
@@ -149,8 +154,9 @@ def test_golden_metricas_linea_base(stub_renderer):
     # R3 — drift OU + jitter correlacionado: el residuo del baseline es un
     # paseo de mano (>0.4; era -0.10, ruido blanco).
     assert m["baseline_autocorr"] > 0.40
-    # Pendiente R5: 1 variante por char sin warp → efecto sello.
-    assert m["phash_dup_rate"] > 0.30
+    # R5 — warp elástico por instancia: cero sellos incluso con UNA variante
+    # por char (era 0.77; el detector está calibrado: ver test anti-sello).
+    assert m["phash_dup_rate"] < 0.05
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
@@ -240,6 +246,33 @@ def test_coverage_report_detecta_downgrade_de_caso(stub_renderer):
     assert "H" in rep["covered"] and "H" in rep["case_downgraded"]
     assert set("12ñ") <= set(rep["missing"])
     assert "u" in rep["covered"] and "u" not in rep["case_downgraded"]
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_anti_sello_bilateral(stub_renderer):
+    """R5 (C3/C4): el detector de sellos FUNCIONA y el render lo pasa.
+
+    Bilateral a propósito: con el pipeline de variación APAGADO el dup_rate
+    debe dispararse (si no, la métrica se volvió ciega y el assert de abajo
+    no probaría nada); con R5 activo debe caer a <5% AUN con una sola
+    variante por carácter.
+    """
+    from core.inkcore.renderer import RenderOptions
+    from tools.eval_render.metrics import compute_metrics
+
+    sello = RenderOptions(style="", background_style="hoja_blanca", seed=42,
+                          rotation_range=0.0, size_variation=0.0,
+                          warp_strength=0.0, glyph_slant_drift_deg=0.0,
+                          line_slant_deg=0.0, kerning_jitter=0.0,
+                          jitter_px=0, baseline_drift=0.0)
+    m_sello = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, sello)[0])
+    assert m_sello["phash_dup_rate"] > 0.85, (
+        f"el detector dejó de ver sellos: {m_sello['phash_dup_rate']}")
+
+    humano = RenderOptions(style="", background_style="hoja_blanca", seed=42)
+    m_humano = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, humano)[0])
+    assert m_humano["phash_dup_rate"] < 0.05, (
+        f"efecto sello vivo: {m_humano['phash_dup_rate']}")
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")

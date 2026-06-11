@@ -39,10 +39,11 @@ class RenderOptions:
     letter_spacing: float = 1.1
     line_height: float = 1.6
     rotation_range: float = 4.0
-    # Variación de "presión": el alpha de cada glifo se multiplica por un factor
-    # al azar en [min, max]. Floor más alto que antes (0.80) para que ninguna
-    # letra salga desteñida, manteniendo variación entre letras como un bolígrafo.
-    ink_alpha_min: float = 0.86
+    # DEPRECADO (R5/C7): el fade de alpha POR LETRA era el tell #5 — letras
+    # enteras más claras al azar no pasan en tinta real. Defaults en 1.0 (sin
+    # efecto); la variación de tinta vive DENTRO del trazo desde R6. Los
+    # campos quedan por compat con presets/params guardados.
+    ink_alpha_min: float = 1.0
     ink_alpha_max: float = 1.0
     # ink_boost: gamma (<1) sobre el alpha de cada glifo. Sube los píxeles de
     # borde (semi-transparentes por el anti-aliasing) hacia opaco, así el trazo
@@ -57,9 +58,9 @@ class RenderOptions:
     #     da espaciado irregular y leves solapes como en la letra real.
     #   slant_deg: inclinación (shear) de cada glifo en grados; >0 = cursiva
     #     ligeramente reclinada a la derecha.
-    # R3: 2.5 px (~0.4 mm a 150 DPI) — con 1.2 la señal del vaivén quedaba
-    # debajo del ruido de forma y el baseline parecía regla (tell #9).
-    baseline_drift: float = 2.5
+    # R3/R5: 3.0 px (~0.5 mm a 150 DPI) — con menos, la señal del vaivén queda
+    # debajo del ruido de forma y el baseline parece regla (tell #9).
+    baseline_drift: float = 3.0
     kerning_jitter: float = 0.5
     slant_deg: float = 0.0
     # Fase 6.5/R3 — inclinación BASE por renglón (macro): cada línea hereda el
@@ -86,6 +87,16 @@ class RenderOptions:
     word_space_frac: float = 0.4
     word_space_cv: float = 0.18
     letter_gap_frac: float = 0.08
+    # R5 — variación por instancia:
+    #   warp_strength: amplitud del warp elástico por glifo (fracción del
+    #     alto, malla 4×4 con BORDE anclado sobre el PNG de captura). 0.08
+    #     rompe el hash perceptual de 16×16 incluso en una página llena de
+    #     texto repetido, sin verse deformado a tamaño de lectura y sin mover
+    #     el contorno (baseline/alturas estables).
+    #   glyph_slant_drift_deg: amplitud de la deriva OU del slant por glifo
+    #     a lo largo del renglón (C1), encima del slant global y de línea.
+    warp_strength: float = 0.08
+    glyph_slant_drift_deg: float = 1.0
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
