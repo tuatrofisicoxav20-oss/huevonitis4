@@ -166,10 +166,7 @@ class BankTabEditMixin:
 
     def _update_bank_selection_bar(self) -> None:
         """Pack/forget la barra de batch según haya o no seleccionados."""
-        try:
-            count = sum(1 for v in self._bank_selection_vars.values() if v.get())
-        except Exception:
-            count = 0
+        count = len(getattr(self, "_bank_selected_paths", ()) or ())
         if count > 0:
             self._bank_selection_count_lbl.configure(
                 text=f"{count} glifo{'s' if count != 1 else ''} seleccionado{'s' if count != 1 else ''}",
@@ -187,16 +184,16 @@ class BankTabEditMixin:
                 pass
 
     def _bank_clear_selection(self) -> None:
-        for var in self._bank_selection_vars.values():
-            with contextlib.suppress(Exception):
-                var.set(False)
+        if getattr(self, "_bank_selected_paths", None):
+            self._bank_selected_paths.clear()
+        # U4: solo se actualizan los visuales de las celdas vivas — sin re-render
+        with contextlib.suppress(Exception):
+            self._bank_clear_selection_visuals()
         self._update_bank_selection_bar()
-        # Re-render para limpiar checkboxes visualmente
-        self._do_refresh_bank_ui()
 
     def _bank_batch_delete(self) -> None:
         """Elimina todos los glifos seleccionados con confirmación única."""
-        selected_paths = [p for p, v in self._bank_selection_vars.items() if v.get()]
+        selected_paths = list(getattr(self, "_bank_selected_paths", ()) or ())
         if not selected_paths:
             self.toast("Sin selección", "warning")
             return
@@ -221,6 +218,7 @@ class BankTabEditMixin:
                 logger.error("_bank_batch_delete: error en %s: %s", p, exc, exc_info=True)
         logger.info("_bank_batch_delete: %d/%d eliminados", removed, len(selected_paths))
         self.toast(f"{removed} glifos eliminados", "success" if removed else "warning")
+        self._bank_selected_paths.clear()
         self._reload_and_refresh_all()
 
     def _reload_and_refresh_all(self):

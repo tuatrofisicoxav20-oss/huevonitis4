@@ -3,14 +3,15 @@ import logging
 
 import customtkinter as ctk
 
-from ui import theme
+from ui import perf, theme
+from ui.views.inkcore.bank_tab_cells import BankCellsMixin
 from ui.views.inkcore.bank_tab_edit import BankTabEditMixin
 from ui.views.inkcore.bank_tab_render import BankTabRenderMixin
 
 logger = logging.getLogger(__name__)
 
 
-class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
+class BankTabMixin(BankTabRenderMixin, BankCellsMixin, BankTabEditMixin):
     """Tab del banco de glifos y su lógica de refresco; mezclado en InkCoreView."""
 
     # ── Build ──────────────────────────────────────────────────────
@@ -68,7 +69,11 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
             text_color=theme.TEXT_PRIMARY, border_color=theme.BORDER,
         )
         self._bank_filter_entry.pack(side="left", padx=8)
-        self._bank_filter_entry.bind("<Return>", lambda e: self._refresh_bank())
+        # U4/UI-07: filtros con debounce de 300ms (sin releer disco); Enter
+        # refresca al instante.
+        _debounced = perf.debounce(self, 300, self._do_refresh_bank_ui)
+        self._bank_filter_entry.bind("<KeyRelease>", _debounced)
+        self._bank_filter_entry.bind("<Return>", lambda e: self._do_refresh_bank_ui())
 
         self._tier_filter = ctk.CTkOptionMenu(
             filter_row,
@@ -78,7 +83,7 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
             button_hover_color=theme.ACCENT_ORANGE_HOVER,
             text_color=theme.TEXT_PRIMARY,
             width=110,
-            command=lambda v: self._refresh_bank(),
+            command=_debounced,
         )
         self._tier_filter.pack(side="left")
 
@@ -88,9 +93,9 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
             filter_row, text="Selección múltiple",
             variable=self._bank_select_mode,
             onvalue=True, offvalue=False,
-            progress_color=theme.ACCENT_BLUE,
+            progress_color=theme.ACCENT_CYAN,
             font=theme.FONT_SMALL,
-            command=self._refresh_bank,
+            command=self._on_select_mode_toggle,
         ).pack(side="right", padx=8)
 
         self._bank_scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
@@ -144,10 +149,13 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
             command=self._bank_clear_selection,
         ).pack(side="right", padx=12, pady=8)
 
-        # Estado de selección — image_path → BooleanVar
-        self._bank_selection_vars: dict[str, ctk.BooleanVar] = {}
-
     # ── Logic ──────────────────────────────────────────────────────
+
+    def _on_select_mode_toggle(self):
+        """U4: el modo selección ya no re-renderiza el grid — la selección
+        es por click en la celda (borde cian); al apagarlo se limpia."""
+        if not bool(self._bank_select_mode.get()):
+            self._bank_clear_selection()
 
     def _refresh_bank(self):
         # Viene de guardar desde el Extractor (otro tab): los datos cambiaron
