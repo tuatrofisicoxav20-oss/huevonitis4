@@ -7,7 +7,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from core.inkcore.renderer import RenderOptions
-from ui import theme
+from ui import icons, theme
 
 logger = logging.getLogger(__name__)
 
@@ -160,26 +160,36 @@ class WriterTabMixin:
             fg_color=theme.BG_TERTIARY, button_color=theme.ACCENT_GREEN,
             button_hover_color=theme.ACCENT_GREEN_HOVER, text_color=theme.TEXT_PRIMARY,
         ).pack(side="left", padx=8)
-        self.secondary_button(
-            ctrl_frame, "↺ Valores naturales", self._reset_render_params, 170,
-        ).pack(side="left")
+        btn_reset = self.secondary_button(
+            ctrl_frame, "Valores naturales", self._reset_render_params, 170,
+        )
+        btn_reset.configure(image=icons.get_icon("undo", 13), compound="left")
+        btn_reset.pack(side="left")
 
         btn_row = ctk.CTkFrame(left, fg_color="transparent")
         btn_row.pack(fill="x", padx=12, pady=6)
 
         ctk.CTkButton(
-            btn_row, text="👁  Preview",
+            btn_row, text="Preview",
+            image=icons.get_icon("eye", 15, theme.ACCENT_TEXT_ON), compound="left",
             command=self._preview_handwriting,
             height=34,
-            fg_color=theme.ACCENT_GREEN,
-            hover_color=theme.ACCENT_GREEN_HOVER,
+            fg_color=theme.ACCENT_PRIMARY,
+            hover_color=theme.ACCENT_PRIMARY_HOVER,
+            text_color=theme.ACCENT_TEXT_ON,
             font=theme.get_font("bold", 11),
-            corner_radius=8,
+            corner_radius=theme.RADIUS["m"],
         ).pack(side="left", padx=(0, 6))
 
-        self.secondary_button(btn_row, "💾 Exportar PNG", self._export_png, 130).pack(side="left", padx=(0, 6))
-        self.secondary_button(btn_row, "📷 Foto de tarea", self._export_photo, 140).pack(side="left", padx=(0, 6))
-        self.primary_button(btn_row, "📄 Exportar PDF con mi letra", self._export_writer_pdf, 220).pack(side="left")
+        btn_png = self.secondary_button(btn_row, "Exportar PNG", self._export_png, 130)
+        btn_png.configure(image=icons.get_icon("image", 14), compound="left")
+        btn_png.pack(side="left", padx=(0, 6))
+        btn_photo = self.secondary_button(btn_row, "Foto de tarea", self._export_photo, 140)
+        btn_photo.configure(image=icons.get_icon("camera", 14), compound="left")
+        btn_photo.pack(side="left", padx=(0, 6))
+        btn_pdf = self.primary_button(btn_row, "Exportar PDF con mi letra", self._export_writer_pdf, 220)
+        btn_pdf.configure(image=icons.get_icon("export", 14, theme.ACCENT_TEXT_ON), compound="left")
+        btn_pdf.pack(side="left")
 
         right = self.card_frame(main)
         right.grid(row=0, column=1, sticky="nsew")

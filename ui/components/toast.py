@@ -23,15 +23,19 @@ class ToastManager:
         self.parent.bind("<Configure>", self._on_parent_resize, add="+")
 
     def show(self, message: str, kind: str = "info", duration: int = 3500):
+        # U3: iconos vectoriales en vez de glifos de texto; info usa el cian
+        # secundario y warning el ámbar (semántica Orbital).
+        from ui import icons as _icons
         colors = {
-            "info": theme.ACCENT_BLUE,
+            "info": theme.ACCENT_CYAN,
             "success": theme.ACCENT_GREEN,
-            "warning": theme.ACCENT_ORANGE,
+            "warning": theme.ACCENT_PRIMARY,
             "error": theme.ACCENT_RED,
         }
-        icons = {"info": "\u2139", "success": "✓", "warning": "⚠", "error": "✕"}
-        color = colors.get(kind, theme.ACCENT_BLUE)
-        icon = icons.get(kind, "\u2139")
+        icon_names = {"info": "info", "success": "check",
+                      "warning": "warning", "error": "x"}
+        color = colors.get(kind, theme.ACCENT_CYAN)
+        icon_img = _icons.get_icon(icon_names.get(kind, "info"), 16, color)
 
         # Evict oldest if at max
         if len(self._toasts) >= self._max:
@@ -54,9 +58,8 @@ class ToastManager:
         toast_row.pack(padx=theme.SPACE["m"], pady=(theme.SPACE["s"], theme.SPACE["xs"]), fill="x")
 
         ctk.CTkLabel(
-            toast_row, text=icon, text_color=color,
-            font=theme.get_font("bold", 14),
-        ).pack(side="left", padx=(0, 8))
+            toast_row, text="", image=icon_img,
+        ).pack(side="left", padx=(0, theme.SPACE["s"]))
 
         ctk.CTkLabel(
             toast_row,

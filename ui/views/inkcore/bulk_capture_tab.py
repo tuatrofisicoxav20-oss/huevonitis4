@@ -5,6 +5,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+from ui import icons as _icons
 from ui import theme
 from ui.modal_utils import safe_grab
 
@@ -133,7 +134,8 @@ class BulkCaptureTabMixin:
         self._bulk_approve_all_btn.pack(side="left", padx=4)
 
         self._bulk_commit_btn = ctk.CTkButton(
-            footer, text="💾 Guardar aprobados al banco", state="disabled",
+            footer, text="Guardar aprobados al banco", state="disabled",
+            image=_icons.get_icon("save", 15), compound="left",
             command=self._bulk_commit_to_bank, width=240,
             fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
             font=theme.FONT_SMALL,

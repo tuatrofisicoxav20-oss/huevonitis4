@@ -28,7 +28,9 @@ class CollapsibleSidebar(ctk.CTkFrame):
         self.pack_propagate(False)
 
     def _build(self):
-        # ── Logo area ──────────────────────────────────────────────
+        from ui import icons
+
+        # ── Logo area (U3: marca orbital dibujada con PIL) ─────────
         logo_frame = ctk.CTkFrame(
             self,
             fg_color=theme.BG_PRIMARY,
@@ -38,25 +40,10 @@ class CollapsibleSidebar(ctk.CTkFrame):
         logo_frame.pack(fill="x")
         logo_frame.pack_propagate(False)
 
-        # Coloured pill behind the logo text
-        logo_pill = ctk.CTkFrame(
-            logo_frame,
-            fg_color=theme.ACCENT_ORANGE,
-            corner_radius=10,
-            width=48, height=38,
-        )
-        logo_pill.place(relx=0.5, rely=0.5, anchor="center")
-        logo_pill.pack_propagate(False)
-
         self._logo_label = ctk.CTkLabel(
-            logo_pill,
-            text="H4",
-            font=theme.get_font("bold", 18),
-            text_color=theme.ACCENT_TEXT_ON,
+            logo_frame, text="", image=icons.get_logo(46),
         )
         self._logo_label.place(relx=0.5, rely=0.5, anchor="center")
-
-        self._logo_pill = logo_pill   # keep ref for collapse
 
         # Thin accent line at the bottom of the logo area
         ctk.CTkFrame(self, height=2, fg_color=theme.ACCENT_ORANGE, corner_radius=0).pack(fill="x")
@@ -73,9 +60,12 @@ class CollapsibleSidebar(ctk.CTkFrame):
         # ── Bottom separator + toggle ──────────────────────────────
         ctk.CTkFrame(self, height=1, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", padx=0)
 
+        from ui import icons as _icons
         self._toggle_btn = ctk.CTkButton(
             self,
-            text="◀  Colapsar",
+            text="  Colapsar",
+            image=_icons.get_icon("chevron-l", 14, theme.TEXT_MUTED),
+            compound="left",
             font=theme.get_font(size=10),
             fg_color="transparent",
             hover_color=theme.BG_TERTIARY,
@@ -88,6 +78,7 @@ class CollapsibleSidebar(ctk.CTkFrame):
         self._toggle_btn.pack(fill="x", padx=0, pady=6)
 
     def _make_nav_btn(self, view_id: str, icon: str, label: str):
+        from ui import icons
         accent_color = theme.NAV_ACCENT.get(view_id, theme.ACCENT_BLUE)
 
         row = ctk.CTkFrame(self._nav_frame, fg_color="transparent", height=48)
@@ -99,9 +90,12 @@ class CollapsibleSidebar(ctk.CTkFrame):
         indicator.pack(side="left", fill="y", padx=(2, 0))
         indicator.pack_propagate(False)
 
+        # U3: icono vectorial + texto (el emoji se fue)
         btn = ctk.CTkButton(
             row,
-            text=f"   {icon}   {label}",
+            text=f"  {label}",
+            image=icons.get_icon(icon, 18),
+            compound="left",
             font=theme.FONT_SIDEBAR,
             anchor="w",
             fg_color="transparent",
@@ -206,19 +200,21 @@ class CollapsibleSidebar(ctk.CTkFrame):
             self._expand()
 
     def _collapse(self):
+        from ui import icons
         self._expanded = False
-        self._toggle_btn.configure(text="▶")
-        self._logo_label.configure(text="H")
-        self._logo_pill.configure(width=34)
+        self._toggle_btn.configure(
+            text="", image=icons.get_icon("chevron-r", 14, theme.TEXT_MUTED))
+        self._logo_label.configure(image=icons.get_logo(30, mini=True))
         for btn in self._buttons.values():
-            btn.configure(text=f"   {btn._icon}")
+            btn.configure(text="")
         animate_width(self, config.SIDEBAR_EXPANDED_WIDTH, config.SIDEBAR_COLLAPSED_WIDTH)
 
     def _expand(self):
+        from ui import icons
         self._expanded = True
-        self._toggle_btn.configure(text="◀  Colapsar")
-        self._logo_label.configure(text="H4")
-        self._logo_pill.configure(width=48)
+        self._toggle_btn.configure(
+            text="  Colapsar", image=icons.get_icon("chevron-l", 14, theme.TEXT_MUTED))
+        self._logo_label.configure(image=icons.get_logo(46))
         for btn in self._buttons.values():
-            btn.configure(text=f"   {btn._icon}   {btn._label}")
+            btn.configure(text=f"  {btn._label}")
         animate_width(self, config.SIDEBAR_COLLAPSED_WIDTH, config.SIDEBAR_EXPANDED_WIDTH)

@@ -57,17 +57,18 @@ class InkCoreViewProfileMixin:
         self._profile_dropdown.set(active_name)
         self._profile_dropdown.pack(side="left", padx=4)
 
-        # Botones +/✏️/🗑️
-        for emoji, _tip, cmd, color in (
-            ("➕", "Crear perfil",  self._profile_create, theme.ACCENT_GREEN),
-            ("✏️", "Renombrar perfil", self._profile_rename, theme.ACCENT_BLUE),
-            ("🗑️", "Eliminar perfil", self._profile_delete, theme.ACCENT_RED),
+        # Botones crear/renombrar/eliminar (U3: iconos vectoriales)
+        from ui import icons
+        for icon_name, _tip, cmd, color in (
+            ("plus",  "Crear perfil",     self._profile_create, theme.ACCENT_GREEN),
+            ("pen",   "Renombrar perfil", self._profile_rename, theme.ACCENT_PRIMARY),
+            ("trash", "Eliminar perfil",  self._profile_delete, theme.ACCENT_RED),
         ):
             ctk.CTkButton(
-                bar, text=emoji, width=34, height=28,
-                font=theme.get_font(size=12),
+                bar, text="", image=icons.get_icon(icon_name, 14),
+                width=34, height=28,
                 fg_color=theme.BG_TERTIARY, hover_color=color,
-                text_color=theme.TEXT_PRIMARY, corner_radius=6,
+                corner_radius=theme.RADIUS["s"],
                 command=cmd,
             ).pack(side="left", padx=2)
 

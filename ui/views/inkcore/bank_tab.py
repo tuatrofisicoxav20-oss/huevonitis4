@@ -25,25 +25,31 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
         )
         self._bank_summary.pack(side="left")
 
+        from ui import icons
         ctk.CTkButton(
-            top, text="🔄  Recargar", width=100, height=30,
+            top, text="Recargar", width=100, height=30,
+            image=icons.get_icon("refresh", 14), compound="left",
             fg_color=theme.BG_TERTIARY, font=theme.FONT_SMALL,
             hover_color=theme.BORDER,
             command=self._refresh_bank,
         ).pack(side="right", padx=4)
 
         ctk.CTkButton(
-            top, text="📊 Ver Informe", width=130, height=30,
-            fg_color=theme.ACCENT_BLUE,
-            hover_color=theme.ACCENT_BLUE_HOVER,
+            top, text="Ver informe", width=130, height=30,
+            image=icons.get_icon("doc", 14, theme.ACCENT_TEXT_ON), compound="left",
+            fg_color=theme.ACCENT_PRIMARY,
+            hover_color=theme.ACCENT_PRIMARY_HOVER,
+            text_color=theme.ACCENT_TEXT_ON,
             font=theme.FONT_SMALL,
             command=self._show_report,
         ).pack(side="right", padx=4)
 
         ctk.CTkButton(
-            top, text="➕ Agregar desde imagen", width=180, height=30,
-            fg_color=theme.ACCENT_GREEN,
-            hover_color=theme.ACCENT_GREEN_HOVER,
+            top, text="Agregar desde imagen", width=180, height=30,
+            image=icons.get_icon("plus", 14, theme.ACCENT_TEXT_ON), compound="left",
+            fg_color=theme.ACCENT_PRIMARY,
+            hover_color=theme.ACCENT_PRIMARY_HOVER,
+            text_color=theme.ACCENT_TEXT_ON,
             font=theme.FONT_SMALL,
             command=self._add_glyph_manual,
         ).pack(side="right", padx=4)
@@ -103,7 +109,8 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
         self._bank_selection_count_lbl.pack(side="left", padx=12, pady=8)
 
         self._bank_batch_delete_btn = ctk.CTkButton(
-            self._bank_batch_bar, text="🗑️  Eliminar seleccionados",
+            self._bank_batch_bar, text="Eliminar seleccionados",
+            image=icons.get_icon("trash", 14), compound="left",
             width=200, height=30,
             fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
             font=theme.FONT_SMALL,
@@ -113,7 +120,8 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
 
         # Mover a perfil — disabled hasta F3
         self._bank_batch_move_btn = ctk.CTkButton(
-            self._bank_batch_bar, text="📁  Mover a perfil…",
+            self._bank_batch_bar, text="Mover a perfil…",
+            image=icons.get_icon("folder", 14), compound="left",
             width=160, height=30,
             fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
             text_color=theme.TEXT_MUTED, font=theme.FONT_SMALL,
@@ -128,7 +136,8 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
         ).pack(side="left", padx=4)
 
         ctk.CTkButton(
-            self._bank_batch_bar, text="✖ Limpiar selección",
+            self._bank_batch_bar, text="Limpiar selección",
+            image=icons.get_icon("x", 14), compound="left",
             width=140, height=30,
             fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
             font=theme.FONT_SMALL,

@@ -291,13 +291,14 @@ FONT_MONO       = (MONO_FONT, 10)
 FONT_SIDEBAR    = (UI_FONT, 12)
 
 # ── Navigation items ──────────────────────────────────────────────────────────
+# U3: el segundo campo es el NOMBRE DE ICONO de ui/icons.py (ya no emoji).
 NAV_ITEMS = [
-    ("dashboard", "🏠", "Dashboard"),
-    ("projects",  "📁", "Proyectos"),
-    ("study",     "📖", "Estudio"),
-    ("inkcore",   "✍️", "Mi Letra"),
-    ("business",  "💼", "Negocio"),
-    ("settings",  "⚙️", "Config"),
+    ("dashboard", "home",      "Dashboard"),
+    ("projects",  "folder",    "Proyectos"),
+    ("study",     "book",      "Estudio"),
+    ("inkcore",   "pen",       "Mi Letra"),
+    ("business",  "briefcase", "Negocio"),
+    ("settings",  "gear",      "Config"),
 ]
 
 # U2: fin del arcoíris por sección — TODAS las vistas usan el ámbar primario.

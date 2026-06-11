@@ -53,13 +53,14 @@ class AppLayoutMixin:
         self._topbar_accent = ctk.CTkFrame(bar, fg_color=theme.ACCENT_ORANGE, height=2, corner_radius=0)
         self._topbar_accent.pack(side="bottom", fill="x")
 
-        # View icon + title
+        # View icon + title (U3: icono vectorial)
+        from ui import icons
         self._topbar_icon = ctk.CTkLabel(
             bar,
-            text="🏠",
-            font=theme.get_font(size=18),
+            text="",
+            image=icons.get_icon("home", 20, theme.ACCENT_PRIMARY),
         )
-        self._topbar_icon.pack(side="left", padx=(18, 4))
+        self._topbar_icon.pack(side="left", padx=(theme.SPACE["l"], theme.SPACE["xs"]))
 
         self._view_title = ctk.CTkLabel(
             bar, text="Dashboard",

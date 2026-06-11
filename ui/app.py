@@ -113,10 +113,12 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
         with perf.measure("navigate:chrome"):
             self._view_title.configure(text=name)
 
-            # Update topbar icon from nav items
+            # Update topbar icon from nav items (U3: icono dibujado, no emoji)
             for item_id, icon, _label in theme.NAV_ITEMS:
                 if item_id == view_id:
-                    self._topbar_icon.configure(text=icon)
+                    from ui import icons
+                    self._topbar_icon.configure(
+                        image=icons.get_icon(icon, 20, theme.ACCENT_PRIMARY))
                     # U1/UI-22: lerp de color de la línea de acento (referencia
                     # directa creada en app_layout, sin escanear hijos)
                     accent = theme.NAV_ACCENT.get(view_id, theme.ACCENT_BLUE)
