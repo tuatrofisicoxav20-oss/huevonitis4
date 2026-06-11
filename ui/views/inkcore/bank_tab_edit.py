@@ -243,8 +243,11 @@ class BankTabEditMixin:
             self._BANK_TAB: self._do_refresh_bank_ui,
             self._REVIEW_TAB: self._do_refresh_review_ui,
         }
+        built = getattr(self, "_tabs_built", None)
         for name, fn in refreshers.items():
-            if name == visible:
+            # U1 lazy tabs: un tab visible pero aún sin construir se marca
+            # sucio — _after_tab_built lo puebla cuando termine su build.
+            if name == visible and (built is None or name in built):
                 try:
                     fn()
                 except Exception as exc:

@@ -68,7 +68,9 @@ class InkCoreView(
         self._build()
 
     def _build(self):
-        self._build_profile_bar()
+        from ui import perf
+        with perf.measure("inkcore:_build_profile_bar"):
+            self._build_profile_bar()
         self._tabs = ctk.CTkTabview(
             self,
             fg_color="transparent",
@@ -91,12 +93,8 @@ class InkCoreView(
         self._tabs.add("3 · ✅ Revisión")
         self._tabs.add("🗂 Banco")
         self._tabs.add("✍️ Escritor")
-        self._build_template(self._tabs.tab("1 · 🧩 Plantilla"))
-        self._build_bulk_capture(self._tabs.tab("2 · 📦 Captura masiva"))
-        self._build_review(self._tabs.tab("3 · ✅ Revisión"))
-        self._build_bank(self._tabs.tab("🗂 Banco"))
-        self._build_writer(self._tabs.tab("✍️ Escritor"))
-        # Estado de sesión bulk
+        # Estado de sesión bulk — ANTES de cualquier builder (con lazy tabs
+        # los builders pueden correr en cualquier orden).
         self._bulk_session = None
         self._bulk_cancel_event = None
         self._bulk_selected_idx: int | None = None
@@ -104,3 +102,16 @@ class InkCoreView(
         self._bulk_filter_conf_val: str = "Todos"
         self._bulk_filter_status_val: str = "Pendientes"
         self._bulk_filter_char_val: str = "(todos)"
+        # U1/UI-02: lazy tabs — el contenido de cada tab se construye la
+        # PRIMERA vez que se muestra (skeleton mientras tanto); al entrar solo
+        # se construye el tab visible. Los refresh diferidos siguen el patrón
+        # _tabs_dirty existente (ver _ensure_tab_built/_on_tab_change).
+        self._tab_builders = {
+            "1 · 🧩 Plantilla": self._build_template,
+            "2 · 📦 Captura masiva": self._build_bulk_capture,
+            "3 · ✅ Revisión": self._build_review,
+            "🗂 Banco": self._build_bank,
+            "✍️ Escritor": self._build_writer,
+        }
+        self._tabs_built: set[str] = set()
+        self._ensure_tab_built(self._tabs.get(), defer=False)

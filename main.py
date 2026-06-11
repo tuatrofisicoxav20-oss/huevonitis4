@@ -133,6 +133,33 @@ def _patch_customtkinter_py314(logger: logging.Logger) -> None:
     CTkScrollbar._h4_set_guard = True
     logger.info("Aplicado guard anti-recursión de CTkScrollbar (set + _draw)")
 
+    # Workaround 3 (U1): CTkOptionMenu._draw llama self._canvas.update_idletasks()
+    # — flushea la cola de geometría de TODA la app en cada redraw. Durante la
+    # construcción de una vista con backlog grande eso cuesta ~1 s POR
+    # OptionMenu (medido: Settings con 8 menús tardaba ~25 s en crearse).
+    # Mismo tratamiento que el scrollbar: update_idletasks neutralizado solo
+    # durante el _draw; el canvas se mide igual en el siguiente ciclo idle.
+    try:
+        from customtkinter.windows.widgets.ctk_optionmenu import CTkOptionMenu
+    except Exception as exc:
+        logger.debug("patch ctk optionmenu omitido (import falló): %s", exc)
+        return
+    if getattr(CTkOptionMenu, "_h4_draw_guard", False):
+        return
+    _orig_om_draw = CTkOptionMenu._draw
+
+    def _safe_om_draw(self, *args, **kwargs):
+        prev_upd = _tk.Misc.update_idletasks
+        _tk.Misc.update_idletasks = lambda s: None
+        try:
+            return _orig_om_draw(self, *args, **kwargs)
+        finally:
+            _tk.Misc.update_idletasks = prev_upd
+
+    CTkOptionMenu._draw = _safe_om_draw
+    CTkOptionMenu._h4_draw_guard = True
+    logger.info("Aplicado guard de update_idletasks en CTkOptionMenu._draw")
+
 
 def main():
     logger = _bootstrap()

@@ -168,7 +168,7 @@ class TemplateTabMixin:
 
     # ── Lógica ───────────────────────────────────────────────────
 
-    def _tpl_charset_from_ui(self) -> "str | list[str]":
+    def _tpl_charset_from_ui(self) -> str | list[str]:
         """Charset combinado según los checkboxes marcados (en orden canónico).
 
         R10: si los PARES están marcados, el charset pasa a ser LISTA de

@@ -20,7 +20,9 @@ import time
 from pathlib import Path
 from typing import ClassVar
 
-from ui import theme
+import customtkinter as ctk
+
+from ui import perf, theme
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,70 @@ class InkCoreViewHelpersMixin:
     # Nombres exactos de los tabs que cuelgan del banco (con emoji).
     _BANK_TAB = "🗂 Banco"
     _REVIEW_TAB = "3 · ✅ Revisión"
+    _WRITER_TAB = "✍️ Escritor"
+
+    # ── Lazy tabs (U1/UI-02) ─────────────────────────────────────────
+
+    def _ensure_tab_built(self, name: str, defer: bool = True) -> bool:
+        """Construye el contenido del tab si aún no existe.
+
+        defer=True (cambio de tab por click): muestra un skeleton
+        "Cargando…" y construye en un after(30) para que el placeholder
+        alcance a pintarse — devuelve False y _after_tab_built remata el
+        refresh pendiente. defer=False (tab default al entrar / necesidad
+        programática): construye síncrono y devuelve True.
+        """
+        builders = getattr(self, "_tab_builders", None)
+        if not builders or name not in builders or name in self._tabs_built:
+            return True
+        self._tabs_built.add(name)
+        parent = self._tabs.tab(name)
+        builder = builders[name]
+        if not defer:
+            with perf.measure(f"build_tab({name})"):
+                builder(parent)
+            return True
+        placeholder = ctk.CTkLabel(
+            parent, text="Cargando…",
+            font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
+        )
+        placeholder.pack(expand=True, pady=60)
+
+        def _do_build():
+            with contextlib.suppress(Exception):
+                placeholder.destroy()
+            with perf.measure(f"build_tab({name})"):
+                builder(parent)
+            self._after_tab_built(name)
+
+        self.after(30, _do_build)
+        return False
+
+    def _after_tab_built(self, name: str) -> None:
+        """Tras un build diferido: si el tab sigue visible y quedó sucio,
+        puebla su contenido (el builder solo crea la estructura)."""
+        try:
+            if self._tabs.get() != name:
+                return
+        except Exception:
+            return
+        if name not in self._tabs_dirty:
+            return
+        self._tabs_dirty.discard(name)
+        try:
+            if name == self._BANK_TAB:
+                self._do_refresh_bank_ui()
+            elif name == self._REVIEW_TAB:
+                self._do_refresh_review_ui()
+        except Exception as exc:
+            logger.error("_after_tab_built(%s) falló: %s", name, exc, exc_info=True)
+
+    def _show_tab(self, name: str) -> None:
+        """Cambia de tab programáticamente. CTkTabview.set() NO dispara el
+        command, así que el build lazy / refresh diferido se invoca a mano."""
+        with contextlib.suppress(Exception):
+            self._tabs.set(name)
+        self._on_tab_change()
 
     def _get_thumb(self, path: str, w: int, h: int) -> "ImageTk.PhotoImage | None":
         """Carga y cachea thumbnail de un glifo PNG."""
@@ -205,6 +271,13 @@ class InkCoreViewHelpersMixin:
             name = self._tabs.get()
         except Exception:
             return
+        if not self._ensure_tab_built(name):
+            # Build diferido en curso: pausar los renders de otros tabs y
+            # dejar que _after_tab_built haga el refresh al terminar.
+            for tab, key in self._TAB_RENDER_KEYS.items():
+                if tab != name:
+                    self._pause_chunked(key)
+            return
         for tab, key in self._TAB_RENDER_KEYS.items():
             if tab == name:
                 self._resume_chunked(key)
@@ -231,6 +304,8 @@ class InkCoreViewHelpersMixin:
         pending_doc = getattr(st, "study_document", None)
         if not pending:
             return
+        # Lazy tabs: el Escritor puede no estar construido aún.
+        self._ensure_tab_built(self._WRITER_TAB, defer=False)
         current = self._writer_text.get("0.0", "end").strip()
         if not current:
             self._writer_text.delete("0.0", "end")
@@ -240,8 +315,7 @@ class InkCoreViewHelpersMixin:
             # edite; si el usuario lo cambia, cae a texto plano automáticamente.
             self._pending_document = pending_doc
             self._pending_document_text = pending.strip()
-            with contextlib.suppress(Exception):
-                self._tabs.set("✍️ Escritor")
+            self._show_tab(self._WRITER_TAB)
             self.toast("Texto importado desde Estudio", "success")
         st.study_text = ""
         st.study_document = None

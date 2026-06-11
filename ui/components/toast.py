@@ -16,7 +16,10 @@ class ToastManager:
         self.parent = parent
         self._toasts: list = []
         self._max = 4
-        # Reposition toasts whenever the window is resized
+        # U1/UI-08: el <Configure> de un resize llega en ráfagas — agrupar
+        # los reposicionamientos en un after(50) cancelable.
+        from ui import perf
+        self._restack_debounced = perf.debounce(parent, 50, self._restack)
         self.parent.bind("<Configure>", self._on_parent_resize, add="+")
 
     def show(self, message: str, kind: str = "info", duration: int = 3500):
@@ -177,7 +180,7 @@ class ToastManager:
 
     def _on_parent_resize(self, event):
         if event.widget is self.parent and self._toasts:
-            self._restack()
+            self._restack_debounced()
 
     def _dismiss(self, toast):
         try:

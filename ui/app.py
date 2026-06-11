@@ -14,7 +14,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 import config
-from ui import perf, theme
+from ui import motion, perf, theme
 from ui.app_chrome import AppChromeMixin
 from ui.app_layout import AppLayoutMixin
 from ui.components.toast import ToastManager
@@ -96,8 +96,8 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
         self._schedule_autosave()
         self._schedule_title_update()
 
-        # Window entrance animation
-        self.after(50, self._entrance_animation)
+        # U1: fade-in del contenido (la geometry de la ventana no se anima)
+        self.after(50, self._content_fade_in)
 
     # ── Navigation ──────────────────────────────────────────────────────────
 
@@ -107,80 +107,86 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
             logger.warning("navigate(): unknown view_id %r — ignoring", view_id)
             return
 
+        if perf.ENABLED:
+            perf.logger.info("navigate(%s): inicio", view_id)
         name = VIEW_NAMES.get(view_id, view_id.title())
-        self._view_title.configure(text=name)
+        with perf.measure("navigate:chrome"):
+            self._view_title.configure(text=name)
 
-        # Update topbar icon from nav items
-        for item_id, icon, _label in theme.NAV_ITEMS:
-            if item_id == view_id:
-                self._topbar_icon.configure(text=icon)
-                # Colour the topbar accent line per section
-                accent = theme.NAV_ACCENT.get(view_id, theme.ACCENT_BLUE)
-                # Find the accent line widget (first child packed at bottom)
-                for child in self._topbar.winfo_children():
-                    try:
-                        if child.cget("height") == 2:
-                            child.configure(fg_color=accent)
-                    except Exception:
-                        pass
-                break
+            # Update topbar icon from nav items
+            for item_id, icon, _label in theme.NAV_ITEMS:
+                if item_id == view_id:
+                    self._topbar_icon.configure(text=icon)
+                    # U1/UI-22: lerp de color de la línea de acento (referencia
+                    # directa creada en app_layout, sin escanear hijos)
+                    accent = theme.NAV_ACCENT.get(view_id, theme.ACCENT_BLUE)
+                    self._animate_topbar_accent(accent)
+                    break
 
-        self._sidebar.set_active(view_id)
+            self._sidebar.set_active(view_id)
         self.app_state.active_view = view_id
 
+        first_view = self._current_view is None
         if self._current_view:
-            with contextlib.suppress(Exception):
+            with perf.measure("navigate:on_hide"), contextlib.suppress(Exception):
                 self._current_view.on_hide()
-            self._current_view.pack_forget()
+            self._current_view.place_forget()
 
         # Issue #6: reuse cached view instances; only create each view once.
         if view_id not in self._views:
             cls = VIEW_CLASSES[view_id]
-            self._views[view_id] = cls(self._content, app=self)
+            with perf.measure(f"create_view({view_id})"):
+                self._views[view_id] = cls(self._content, app=self)
 
         view = self._views[view_id]
-        # Issue #5: pack (map) the widget before calling on_show() so that any
-        # geometry queries inside on_show() (winfo_width, winfo_height, etc.)
-        # return valid values rather than 1x1 defaults.
-        view.pack(fill="both", expand=True)
+        # Issue #5: map the widget before calling on_show() so that geometry
+        # queries inside on_show() return valid values rather than 1x1.
+        # U1: place (no pack) — la transición slide solo mueve la subventana
+        # del view con tamaño constante: cero relayouts del root.
+        start_x = 0 if first_view else 12
+        view.place(x=start_x, y=0, relwidth=1.0, relheight=1.0)
         self._current_view = view
-        view.on_show()
+        with perf.measure(f"navigate:on_show({view_id})"):
+            view.on_show()
         self.set_status(f"{name}")
         perf.note_navigate(self, view_id)
+        if start_x:
+            motion.animate(
+                view,
+                lambda t: view.place_configure(x=round(start_x * (1.0 - t))),
+                steps=11, step_ms=16, kind="motion", easing="ease_out",
+                key="view_slide",
+            )
 
-    # ── Entrance animation ───────────────────────────────────────────────────
-
-    def _entrance_animation(self):
-        from ui import motion
-        if not motion.should_animate("motion"):
+    def _animate_topbar_accent(self, accent: str):
+        line = getattr(self, "_topbar_accent", None)
+        if line is None:
             return
-        w = config.WINDOW_DEFAULT_WIDTH
-        h = config.WINDOW_DEFAULT_HEIGHT
-        steps = 18
-        step_ms = 11
-        start_scale = 0.92
+        try:
+            current = line.cget("fg_color")
+            if isinstance(current, (list, tuple)):
+                current = current[0]
+        except Exception:
+            return
+        motion.animate(
+            line,
+            lambda t: line.configure(fg_color=motion.lerp_color(current, accent, t)),
+            steps=8, step_ms=16, kind="color", key="accent",
+        )
 
-        sx = (self.winfo_screenwidth() - w) // 2
-        sy = (self.winfo_screenheight() - h) // 2
+    # ── Entrance ─────────────────────────────────────────────────────────────
 
-        def step(i):
-            from ui.animations import ease_out
-            t = ease_out(i / steps)
-            scale = start_scale + (1.0 - start_scale) * t
-            cur_w = int(w * scale)
-            cur_h = int(h * scale)
-            cx = sx + (w - cur_w) // 2
-            cy = sy + (h - cur_h) // 2
-            try:
-                self.geometry(f"{cur_w}x{cur_h}+{cx}+{cy}")
-            except Exception:
-                return
-            if i < steps:
-                self.after(step_ms, lambda: step(i + 1))
-            else:
-                self.geometry(f"{w}x{h}+{sx}+{sy}")
-
-        step(1)
+    def _content_fade_in(self):
+        """U1/UI-04: la ventana raíz YA NO anima geometry (en un WM de tiling
+        eso pelea con el compositor). El "entrance" es un fade barato del
+        fondo de la vista inicial vía ui/motion."""
+        view = self._current_view or self._content
+        start, end = theme.BG_SECONDARY, theme.BG_PRIMARY
+        motion.animate(
+            view,
+            lambda t: view.configure(fg_color=motion.lerp_color(start, end, t)),
+            steps=9, step_ms=16, kind="color", key="fg_color",
+        )
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 

@@ -48,9 +48,10 @@ class AppLayoutMixin:
         )
         bar.pack_propagate(False)
 
-        # Accent line at the very bottom of the topbar
-        accent_line = ctk.CTkFrame(bar, fg_color=theme.ACCENT_ORANGE, height=2, corner_radius=0)
-        accent_line.pack(side="bottom", fill="x")
+        # Accent line at the very bottom of the topbar (U1/UI-22: referencia
+        # directa — navigate ya no escanea hijos buscando height==2)
+        self._topbar_accent = ctk.CTkFrame(bar, fg_color=theme.ACCENT_ORANGE, height=2, corner_radius=0)
+        self._topbar_accent.pack(side="bottom", fill="x")
 
         # View icon + title
         self._topbar_icon = ctk.CTkLabel(

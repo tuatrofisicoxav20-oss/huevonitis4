@@ -27,6 +27,40 @@ Notas:
 - El conteo de widgets del Banco es con la paginación actual (78 ops por
   página); el banco completo sin paginar serían ~6 widgets por glifo.
 
+## Hallazgo de entorno (medido en U1, 2026-06-11)
+
+En esta máquina (Fedora 43, **Tk 9.0.2**, GNOME Wayland → XWayland) el primer
+dibujo de CADA subventana X cuesta ~60–100 ms — reproducido con tkinter puro
+(60 `tk.Frame` planos sin texto bloquean el mainloop ~6 s; con la ventana
+`withdraw()` no hay bloqueo; GPU acelerada según glxinfo; desactivar
+`xwayland-native-scaling` no cambió nada). Es independiente de la app: el
+costo domina cualquier vista nueva y NO se arregla desde Python. La palanca
+real es REDUCIR WIDGETS (lazy tabs, celdas compactas, acordeón) — que es lo
+que hacen U1/U3/U4. Los presupuestos absolutos se evalúan con esto en mente;
+el conteo de widgets es la métrica primaria.
+
+## Resultados U1 (lazy tabs + patch CTkOptionMenu)
+
+Dos causas raíz arregladas en U1:
+
+1. **CTkOptionMenu._draw llama `self._canvas.update_idletasks()`** → flushea
+   la cola de geometría de TODA la app en cada redraw (~1 s por OptionMenu
+   durante construcción; medido con cProfile). Patcheado en main.py
+   (workaround 3, mismo guard que CTkScrollbar).
+2. **UI-02**: los 5 tabs de inkcore se construían de golpe → lazy builders.
+
+| Métrica | Base | U1 |
+|---|---:|---:|
+| create_view(inkcore) | 8 336 ms | **833 ms** |
+| inkcore:_build_profile_bar | 6 462 ms | **196 ms** |
+| build_tab(Banco) | 2 009 ms | **295 ms** |
+| Cambio a tab Banco (síncrono) | 3 642 ms | **366 ms** |
+| Widgets tras navigate(inkcore) | 572 | **311** |
+| navigate(inkcore) completo (sin el paint storm del entorno) | — | **870 ms** |
+
+El "paint storm" post-navegación (~10 s con el banco real) es el costo de
+entorno de arriba: se reduce ~proporcional al conteo de widgets en U3/U4.
+
 ## Cómo re-medir
 
 ```bash
