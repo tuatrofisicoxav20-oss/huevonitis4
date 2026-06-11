@@ -196,7 +196,7 @@ class BankTabRenderMixin:
             ctk.CTkLabel(cell, image=photo, text="").pack(pady=(4, 0))
         else:
             ctk.CTkLabel(
-                cell, text=glyph.char, font=("Segoe UI", 20),
+                cell, text=glyph.char, font=theme.get_font(size=20),
                 text_color=theme.TEXT_PRIMARY,
             ).pack(pady=8)
 
@@ -215,7 +215,7 @@ class BankTabRenderMixin:
 
         ctk.CTkButton(
             btn_row, text="✏️", width=20, height=20,
-            font=("Segoe UI", 10),
+            font=theme.get_font(size=10),
             fg_color=theme.BG_TERTIARY, hover_color=theme.ACCENT_BLUE,
             text_color=theme.TEXT_PRIMARY, corner_radius=4,
             command=lambda g=glyph: self._open_rename_modal(g),
@@ -223,7 +223,7 @@ class BankTabRenderMixin:
 
         ctk.CTkButton(
             btn_row, text="⬆️", width=20, height=20,
-            font=("Segoe UI", 10),
+            font=theme.get_font(size=10),
             fg_color=theme.BG_TERTIARY, hover_color=theme.ACCENT_GREEN,
             text_color=theme.TEXT_PRIMARY, corner_radius=4,
             command=lambda g=glyph: self._bank_cycle_tier(g),
@@ -231,7 +231,7 @@ class BankTabRenderMixin:
 
         ctk.CTkButton(
             btn_row, text="🗑️", width=20, height=20,
-            font=("Segoe UI", 10),
+            font=theme.get_font(size=10),
             fg_color=theme.BG_TERTIARY, hover_color=theme.ACCENT_RED,
             text_color=theme.TEXT_PRIMARY, corner_radius=4,
             command=lambda g=glyph: self._bank_delete_glyph(g),

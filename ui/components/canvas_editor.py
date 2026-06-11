@@ -54,12 +54,12 @@ class CanvasEditor(ctk.CTkFrame):
 
         zoom_frame = ctk.CTkFrame(toolbar, fg_color="transparent")
         zoom_frame.pack(side="right", padx=8)
-        ctk.CTkButton(zoom_frame, text="\u2212", width=28, height=28, font=("Segoe UI", 14),
+        ctk.CTkButton(zoom_frame, text="\u2212", width=28, height=28, font=theme.get_font(size=14),
                       fg_color=theme.BG_SECONDARY, command=self._zoom_out).pack(side="left")
         self._zoom_label = ctk.CTkLabel(zoom_frame, text="100%", font=theme.FONT_SMALL,
                                         text_color=theme.TEXT_SECONDARY, width=44)
         self._zoom_label.pack(side="left")
-        ctk.CTkButton(zoom_frame, text="+", width=28, height=28, font=("Segoe UI", 14),
+        ctk.CTkButton(zoom_frame, text="+", width=28, height=28, font=theme.get_font(size=14),
                       fg_color=theme.BG_SECONDARY, command=self._zoom_in).pack(side="left")
 
         canvas_frame = ctk.CTkFrame(self, fg_color=theme.BG_PRIMARY, corner_radius=0)
@@ -104,7 +104,7 @@ class CanvasEditor(ctk.CTkFrame):
 
         ctk.CTkButton(
             props_frame, text="🗑 Eliminar", width=90, height=32,
-            fg_color=theme.ACCENT_RED, hover_color="#DC2626",
+            fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
             font=theme.FONT_SMALL, command=self._delete_selected,
         ).pack(side="right", padx=8, pady=6)
 
@@ -137,7 +137,7 @@ class CanvasEditor(ctk.CTkFrame):
 
         self._canvas.configure(scrollregion=(0, 0, pw + 60, ph + 60))
         self._canvas.create_rectangle(ox, oy, ox + pw, oy + ph,
-                                      fill=self._page.background_color, outline="#888888", width=1)
+                                      fill=self._page.background_color, outline=theme.CANVAS_PAPER_OUTLINE, width=1)
         self._draw_grid(ox, oy, pw, ph)
 
         for el in self._page.elements:
@@ -148,9 +148,9 @@ class CanvasEditor(ctk.CTkFrame):
     def _draw_grid(self, ox, oy, pw, ph):
         grid_size = int(20 * self._zoom)
         for x in range(0, pw, grid_size):
-            self._canvas.create_line(ox + x, oy, ox + x, oy + ph, fill="#E8E8E8", width=1, dash=(2, 8))
+            self._canvas.create_line(ox + x, oy, ox + x, oy + ph, fill=theme.CANVAS_MARGIN, width=1, dash=(2, 8))
         for y in range(0, ph, grid_size):
-            self._canvas.create_line(ox, oy + y, ox + pw, oy + y, fill="#E8E8E8", width=1, dash=(2, 8))
+            self._canvas.create_line(ox, oy + y, ox + pw, oy + y, fill=theme.CANVAS_MARGIN, width=1, dash=(2, 8))
 
     def _draw_element(self, el, ox, oy, z):
         x1 = ox + el.x * z
@@ -168,8 +168,8 @@ class CanvasEditor(ctk.CTkFrame):
             )
         elif hasattr(el, 'text'):
             self._canvas.create_rectangle(x1, y1, x2, y2,
-                                          fill="#FFFFFF" if not selected else "#EEF4FF",
-                                          outline="#AAAAAA" if not selected else theme.ACCENT_BLUE,
+                                          fill=theme.CANVAS_ELEMENT_BG if not selected else theme.CANVAS_ELEMENT_SELECTED_BG,
+                                          outline=theme.CANVAS_ELEMENT_OUTLINE if not selected else theme.ACCENT_BLUE,
                                           width=1 if not selected else 2,
                                           tags=("element", el.id))
             font_size = max(8, int(el.font_size * z))
@@ -200,7 +200,7 @@ class CanvasEditor(ctk.CTkFrame):
                 self._canvas_images[el.id] = photo
                 self._canvas.create_image(x1, y1, anchor="nw", image=photo, tags=("element", el.id))
             except Exception:
-                self._canvas.create_rectangle(x1, y1, x2, y2, fill="#CCCCCC", outline="#999999",
+                self._canvas.create_rectangle(x1, y1, x2, y2, fill=theme.CANVAS_IMAGE_FILL, outline=theme.CANVAS_IMAGE_OUTLINE,
                                               tags=("element", el.id))
                 self._canvas.create_text((x1+x2)//2, (y1+y2)//2, text="[img]", tags=("element", el.id))
 

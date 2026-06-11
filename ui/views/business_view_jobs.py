@@ -54,7 +54,7 @@ class BusinessJobsMixin:
         ctk.CTkLabel(row1, text=job.client_name or "Sin nombre", font=theme.FONT_SUBHEADING,
                      text_color=theme.TEXT_PRIMARY).pack(side="left")
 
-        status_color = theme.STATUS_COLORS.get(job.status, "#888")
+        status_color = theme.STATUS_COLORS.get(job.status, theme.TEXT_MUTED)
         badge = ctk.CTkFrame(row1, fg_color=status_color, corner_radius=12)
         badge.pack(side="right")
         ctk.CTkLabel(badge, text=f" {job.status} ", font=theme.FONT_SMALL,
@@ -66,7 +66,7 @@ class BusinessJobsMixin:
                      font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(side="left")
         if job.price_mxn > 0:
             ctk.CTkLabel(row2, text=f"${job.price_mxn:,.2f} MXN",
-                         font=("Segoe UI", 12, "bold"),
+                         font=theme.get_font("bold", 12),
                          text_color=theme.ACCENT_GREEN).pack(side="right")
 
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -127,10 +127,10 @@ class BusinessJobsMixin:
 
         total_row = ctk.CTkFrame(scroll, fg_color="transparent")
         total_row.pack(fill="x")
-        ctk.CTkLabel(total_row, text="TOTAL:", font=("Segoe UI", 16, "bold"),
+        ctk.CTkLabel(total_row, text="TOTAL:", font=theme.get_font("bold", 16),
                      text_color=theme.TEXT_SECONDARY).pack(side="left")
         ctk.CTkLabel(total_row, text=f"${breakdown['total']:,.2f} MXN",
-                     font=("Segoe UI", 24, "bold"), text_color=theme.ACCENT_GREEN).pack(side="left", padx=16)
+                     font=theme.get_font("bold", 24), text_color=theme.ACCENT_GREEN).pack(side="left", padx=16)
 
         ctk.CTkLabel(scroll, text=f"Anticipo sugerido (50%): ${breakdown['advance_suggested']:,.2f} MXN",
                      font=theme.FONT_BODY, text_color=theme.ACCENT_ORANGE).pack(anchor="w", pady=6)
@@ -160,10 +160,10 @@ class BusinessJobsMixin:
         btn_row.pack(fill="x", pady=12)
         self.primary_button(btn_row, "✓ Aplicar Precio", apply_price).pack(side="left", padx=6)
         ctk.CTkButton(btn_row, text="📋 Copiar WhatsApp", width=160,
-                      fg_color=theme.ACCENT_GREEN, hover_color="#16A34A",
+                      fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
                       font=theme.FONT_BODY, command=copy_whatsapp).pack(side="left", padx=(0, 6))
         ctk.CTkButton(btn_row, text="📱 Abrir WhatsApp", width=160,
-                      fg_color="#25D366", hover_color="#128C7E",
+                      fg_color=theme.BRAND_WHATSAPP, hover_color=theme.BRAND_WHATSAPP_HOVER,
                       font=theme.FONT_BODY, command=open_whatsapp).pack(side="left")
 
     def _new_job_dialog(self):
@@ -253,7 +253,7 @@ class BusinessJobsMixin:
                      font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY).pack(pady=16, padx=20)
 
         for status in JOB_STATUSES:
-            color = theme.STATUS_COLORS.get(status, "#888")
+            color = theme.STATUS_COLORS.get(status, theme.TEXT_MUTED)
             ctk.CTkButton(
                 dlg, text=status, fg_color=color, hover_color=theme.BG_TERTIARY,
                 font=theme.FONT_BODY, height=36,

@@ -53,7 +53,7 @@ class BaseView(ctk.CTkFrame):
         frame = ctk.CTkFrame(
             parent,
             fg_color=theme.CARD_BG,
-            corner_radius=10,
+            corner_radius=theme.RADIUS["l"],
             border_width=1,
             border_color=theme.BORDER,
             **kwargs,
@@ -69,22 +69,25 @@ class BaseView(ctk.CTkFrame):
         return frame
 
     def primary_button(self, parent, text: str, command, width: int = 140) -> ctk.CTkButton:
+        # U2: el primario es ámbar (claro) → texto oscuro para contraste AA
         return ctk.CTkButton(
             parent, text=text, command=command, width=width,
-            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
-            font=theme.FONT_BODY, corner_radius=8,
+            fg_color=theme.ACCENT_PRIMARY, hover_color=theme.ACCENT_PRIMARY_HOVER,
+            text_color=theme.ACCENT_TEXT_ON,
+            font=theme.FONT_BODY, corner_radius=theme.RADIUS["m"],
         )
 
     def secondary_button(self, parent, text: str, command, width: int = 140) -> ctk.CTkButton:
         return ctk.CTkButton(
             parent, text=text, command=command, width=width,
             fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
-            text_color=theme.TEXT_SECONDARY, font=theme.FONT_BODY, corner_radius=8,
+            text_color=theme.TEXT_SECONDARY, font=theme.FONT_BODY,
+            corner_radius=theme.RADIUS["m"],
         )
 
     def danger_button(self, parent, text: str, command, width: int = 140) -> ctk.CTkButton:
         return ctk.CTkButton(
             parent, text=text, command=command, width=width,
             fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
-            font=theme.FONT_BODY, corner_radius=8,
+            font=theme.FONT_BODY, corner_radius=theme.RADIUS["m"],
         )

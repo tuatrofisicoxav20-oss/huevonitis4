@@ -136,7 +136,7 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     ctk.CTkButton(
         btn_bar, text="🔧 Arreglar todos los seguros", width=240, height=36,
         fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
-        font=("Segoe UI", 11, "bold"),
+        font=theme.get_font("bold", 11),
         command=_fix_all_safe,
     ).pack(side="left")
 
@@ -159,7 +159,7 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     ctk.CTkButton(
         btn_bar, text="→ Continuar", width=140, height=36,
         fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-        font=("Segoe UI", 11, "bold"),
+        font=theme.get_font("bold", 11),
         command=_close_continue,
     ).pack(side="right", padx=8)
 

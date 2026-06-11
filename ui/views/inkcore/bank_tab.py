@@ -124,7 +124,7 @@ class BankTabMixin(BankTabRenderMixin, BankTabEditMixin):
         ctk.CTkLabel(
             self._bank_batch_bar,
             text="(Disponible al activar perfiles)",
-            font=("Segoe UI", 8), text_color=theme.TEXT_MUTED,
+            font=theme.get_font(size=8), text_color=theme.TEXT_MUTED,
         ).pack(side="left", padx=4)
 
         ctk.CTkButton(

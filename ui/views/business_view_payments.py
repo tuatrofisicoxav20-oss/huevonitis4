@@ -34,7 +34,7 @@ class BusinessPaymentsMixin:
                          text_color=theme.TEXT_SECONDARY).pack(side="left")
             kind = "Anticipo" if pay.is_advance else "Pago"
             ctk.CTkLabel(inner, text=f"${pay.amount:,.2f} ({kind})",
-                         font=("Segoe UI", 12, "bold"),
+                         font=theme.get_font("bold", 12),
                          text_color=theme.ACCENT_GREEN).pack(side="right")
 
     def _new_payment_dialog(self):

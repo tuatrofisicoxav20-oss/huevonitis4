@@ -18,33 +18,46 @@ class DashboardView(BaseView):
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=24, pady=20)
 
-        # ── Greeting header ────────────────────────────────────────
-        header = ctk.CTkFrame(scroll, fg_color="transparent")
-        header.pack(fill="x", pady=(0, 20))
+        # ── Greeting header (U2: banner orbital estático generado con PIL,
+        # cacheado en disco — cero animación) ──────────────────────
+        header = ctk.CTkFrame(scroll, fg_color="transparent", height=110)
+        header.pack(fill="x", pady=(0, theme.SPACE["l"]))
+        header.pack_propagate(False)
+
+        banner = self._load_header_banner()
+        if banner is not None:
+            ctk.CTkLabel(header, image=banner, text="").place(
+                x=0, y=0, relwidth=1.0, relheight=1.0)
 
         now = datetime.now()
         if now.hour < 12:
             greeting = "Buenos días"
-            greet_color = theme.ACCENT_YELLOW
         elif now.hour < 19:
             greeting = "Buenas tardes"
-            greet_color = theme.ACCENT_ORANGE
         else:
             greeting = "Buenas noches"
-            greet_color = theme.ACCENT_BLUE
+        # Ámbar de día, cian de noche (secundario informativo)
+        greet_color = theme.ACCENT_CYAN if now.hour >= 19 else theme.ACCENT_PRIMARY
 
+        # Los labels llevan fondo sólido BG_PRIMARY: la zona izquierda del
+        # banner es plana de ese mismo color, así que no se nota costura
+        # (Tk no compone transparencia entre widgets hermanos).
         ctk.CTkLabel(
             header,
             text=f"{greeting} 👋",
-            font=("Segoe UI", 22, "bold"),
+            font=theme.get_font("bold", 22),
             text_color=greet_color,
-        ).pack(anchor="w")
+            fg_color=theme.BG_PRIMARY,
+            bg_color=theme.BG_PRIMARY,
+        ).place(x=theme.SPACE["xl"], y=24)
         ctk.CTkLabel(
             header,
             text="Aquí tienes el resumen de tu trabajo",
             font=theme.FONT_BODY,
             text_color=theme.TEXT_SECONDARY,
-        ).pack(anchor="w", pady=(2, 0))
+            fg_color=theme.BG_PRIMARY,
+            bg_color=theme.BG_PRIMARY,
+        ).place(x=theme.SPACE["xl"], y=62)
 
         # ── Section: Resumen ───────────────────────────────────────
         self._section_row(scroll, "📊  Resumen")
@@ -76,43 +89,25 @@ class DashboardView(BaseView):
         )
         actions_frame.pack(fill="x", pady=(0, 16))
 
+        # U2: acento único — las 4 acciones primarias van en ámbar.
         actions = [
-            (
-                "📁", "Nuevo Proyecto",
-                "Crea o edita un proyecto de apuntes",
-                lambda: self.app.navigate("projects"),
-                theme.ACCENT_BLUE,
-                theme.BADGE_BG_BLUE,
-            ),
-            (
-                "📖", "Estudiar Texto",
-                "Convierte texto en flashcards",
-                lambda: self.app.navigate("study"),
-                theme.ACCENT_PURPLE,
-                "#2D1A50",
-            ),
-            (
-                "✍️", "Escribir con mi Letra",
-                "Usa InkCore para generar apuntes",
-                lambda: self.app.navigate("inkcore"),
-                theme.ACCENT_GREEN,
-                theme.BADGE_BG_GREEN,
-            ),
-            (
-                "💼", "Nuevo Trabajo",
-                "Registra un trabajo freelance",
-                lambda: self.app.navigate("business"),
-                theme.ACCENT_ORANGE,
-                theme.BADGE_BG_ORANGE,
-            ),
+            ("📁", "Nuevo Proyecto", "Crea o edita un proyecto de apuntes",
+             lambda: self.app.navigate("projects")),
+            ("📖", "Estudiar Texto", "Convierte texto en flashcards",
+             lambda: self.app.navigate("study")),
+            ("✍️", "Escribir con mi Letra", "Usa InkCore para generar apuntes",
+             lambda: self.app.navigate("inkcore")),
+            ("💼", "Nuevo Trabajo", "Registra un trabajo freelance",
+             lambda: self.app.navigate("business")),
         ]
 
-        for col_idx, (icon, title, subtitle, cmd, color, _) in enumerate(actions):
+        for col_idx, (icon, title, subtitle, cmd) in enumerate(actions):
             col_frame = ctk.CTkFrame(
                 actions_frame,
                 fg_color="transparent",
             )
-            col_frame.grid(row=0, column=col_idx, sticky="ew", padx=8, pady=12)
+            col_frame.grid(row=0, column=col_idx, sticky="ew",
+                           padx=theme.SPACE["s"], pady=theme.SPACE["m"])
             actions_frame.columnconfigure(col_idx, weight=1)
 
             btn = ctk.CTkButton(
@@ -120,11 +115,11 @@ class DashboardView(BaseView):
                 text=f"{icon}  {title}",
                 command=cmd,
                 height=52,
-                fg_color=color,
-                hover_color=self._darken(color),
-                font=("Segoe UI", 12, "bold"),
-                corner_radius=10,
-                text_color="#FFFFFF",
+                fg_color=theme.ACCENT_PRIMARY,
+                hover_color=theme.ACCENT_PRIMARY_HOVER,
+                font=theme.get_font("bold", 12),
+                corner_radius=theme.RADIUS["m"],
+                text_color=theme.ACCENT_TEXT_ON,
             )
             btn.pack(fill="x")
 
@@ -138,6 +133,63 @@ class DashboardView(BaseView):
             ).pack(pady=(4, 0))
 
     # ── Helpers ────────────────────────────────────────────────────
+
+    def _load_header_banner(self):
+        """Banner orbital del header: gradiente espacio profundo + estrellas
+        ámbar/cian tenues. Se genera 1 vez con PIL y se cachea en disco por
+        tema; la zona izquierda queda plana BG_PRIMARY para asentar el texto.
+        """
+        try:
+            from PIL import Image
+        except ImportError:
+            return None
+        import config
+        w, h = 1100, 110
+        mode = "light" if theme._LIGHT["BG_PRIMARY"] == theme.BG_PRIMARY else "dark"
+        cache_dir = config.DATA_DIR / "cache"
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            path = cache_dir / f"dash_header_{w}x{h}_{mode}_v1.png"
+            if not path.exists():
+                self._render_header_banner(w, h).save(path)
+            with Image.open(path) as f:
+                pil = f.convert("RGB")
+        except Exception:
+            return None
+        self._banner_image = ctk.CTkImage(light_image=pil, dark_image=pil, size=(w, h))
+        return self._banner_image
+
+    @staticmethod
+    def _render_header_banner(w: int, h: int):
+        """Dibuja el banner con PIL: izquierda plana → gradiente a la derecha
+        con ~80 estrellas de 1-2 px (determinista, seed fija)."""
+        import random
+
+        from PIL import Image, ImageDraw
+
+        from ui.motion import hex_to_rgb, lerp_color
+
+        base = theme.BG_PRIMARY
+        deep = theme.GRADIENT_START
+        img = Image.new("RGB", (w, h), hex_to_rgb(base))
+        draw = ImageDraw.Draw(img)
+        # Gradiente horizontal: plano hasta el 35%, luego funde a "espacio"
+        flat_end = int(w * 0.35)
+        for x in range(flat_end, w):
+            t = (x - flat_end) / max(1, w - flat_end)
+            draw.line([(x, 0), (x, h)], fill=hex_to_rgb(lerp_color(base, deep, t)))
+        # Estrellas en la zona del gradiente (ámbar/cian tenues + blancas)
+        rng = random.Random(42)
+        star_colors = [theme.ACCENT_PRIMARY_SOFT, theme.ACCENT_CYAN,
+                       theme.TEXT_SECONDARY]
+        for _ in range(80):
+            x = rng.randint(flat_end + 20, w - 4)
+            y = rng.randint(4, h - 4)
+            color = hex_to_rgb(lerp_color(
+                deep, rng.choice(star_colors), rng.uniform(0.35, 0.9)))
+            size = rng.choice((1, 1, 1, 2))
+            draw.rectangle([x, y, x + size - 1, y + size - 1], fill=color)
+        return img
 
     @staticmethod
     def _section_row(parent, text: str):
@@ -153,16 +205,6 @@ class DashboardView(BaseView):
 
         sep = ctk.CTkFrame(row, height=1, fg_color=theme.BORDER, corner_radius=0)
         sep.pack(side="left", fill="x", expand=True, padx=(12, 0), pady=(6, 0))
-
-    @staticmethod
-    def _darken(hex_color: str) -> str:
-        darken_map = {
-            theme.ACCENT_BLUE:   theme.ACCENT_BLUE_HOVER,
-            theme.ACCENT_GREEN:  theme.ACCENT_GREEN_HOVER,
-            theme.ACCENT_ORANGE: theme.ACCENT_ORANGE_HOVER,
-            theme.ACCENT_PURPLE: theme.ACCENT_PURPLE_HOVER,
-        }
-        return darken_map.get(hex_color, "#111111")
 
     def _build_stats(self):
         # Cancel any pending animate callback from a previous on_show() call

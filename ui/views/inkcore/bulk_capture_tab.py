@@ -142,7 +142,7 @@ class BulkCaptureTabMixin:
 
         ctk.CTkLabel(footer,
                      text="A=aprobar  R=rechazar  E=editar  Flechas=navegar",
-                     font=("Segoe UI", 9), text_color=theme.TEXT_MUTED,
+                     font=theme.get_font(size=9), text_color=theme.TEXT_MUTED,
         ).pack(side="right", padx=12)
 
         self._bulk_grid_scroll.bind("<Key>", self._bulk_on_key)

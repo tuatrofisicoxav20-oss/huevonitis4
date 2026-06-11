@@ -110,7 +110,7 @@ class BankTabEditMixin:
 
         entry = ctk.CTkEntry(
             win, width=200, height=40,
-            font=("Segoe UI", 22),
+            font=theme.get_font(size=22),
             fg_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_PRIMARY,
             border_color=theme.ACCENT_BLUE,
@@ -157,7 +157,7 @@ class BankTabEditMixin:
         ctk.CTkButton(
             btn_row, text="✓ Agregar", width=140, height=34,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"),
+            font=theme.get_font("bold", 11),
             command=_save,
         ).pack(side="left", padx=4)
         entry.bind("<Return>", lambda e: _save())

@@ -28,7 +28,7 @@ class SettingsCacheMixin:
                               self._refresh_cache_size, 120).pack(side="left", padx=(0, 8))
         ctk.CTkButton(
             row, text="🗑 Limpiar caché", width=140,
-            fg_color=theme.ACCENT_RED, hover_color="#b03030",
+            fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
             font=theme.FONT_BODY, command=self._clear_cache,
         ).pack(side="left")
 

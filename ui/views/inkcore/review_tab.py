@@ -153,7 +153,7 @@ class ReviewTabMixin:
                          ("Score/Tier", 100), ("Flags", 180), ("Acciones", 200)]:
             ctk.CTkLabel(
                 header, text=text, width=w,
-                font=("Segoe UI", 9, "bold"),
+                font=theme.get_font("bold", 9),
                 text_color=theme.TEXT_SECONDARY,
             ).pack(side="left", padx=4, pady=4)
 

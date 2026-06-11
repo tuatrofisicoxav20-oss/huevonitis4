@@ -1,59 +1,99 @@
+"""Design system "Caos Orbital" (U2).
+
+Identidad: espacio profundo (azules casi negros) + UN acento primario ámbar
+y cian como secundario informativo. Verde/rojo quedan SOLO semánticos
+(éxito/peligro). Cero arcoíris por sección: todas las vistas usan ámbar.
+
+Todos los nombres públicos pre-U2 se conservan como alias para no tocar 45
+archivos de golpe:
+
+  • ACCENT_BLUE   → alias del ámbar primario (acciones primarias)
+  • ACCENT_ORANGE → alias del ámbar primario
+  • ACCENT_CYAN   → secundario informativo (nuevo nombre canónico)
+  • ACCENT_GREEN / ACCENT_RED → semánticos (éxito / peligro)
+
+apply_theme() intercambia los globals del módulo entre _DARK y _LIGHT; los
+acentos también se intercambian (el ámbar claro #C77800 mantiene contraste AA
+sobre fondos crema). Tokens de espaciado/radios/duración: SPACE, RADIUS, DUR.
+"""
+
 # ── Palettes ─────────────────────────────────────────────────────────────────
 # Each palette is a dict of the mutable colour tokens.
 # apply_theme() swaps module-level globals to the chosen palette.
 
 _DARK: dict = {
-    # v4.2: paleta refinada — negros más profundos, mejor jerarquía
-    "BG_PRIMARY":   "#0B0F17",
-    "BG_SECONDARY": "#121826",
-    "BG_TERTIARY":  "#1B2333",
-    "CARD_BG":       "#162032",
-    "CARD_BG_HOVER": "#1D2D45",
-    "GRADIENT_START": "#1C2840",
-    "GRADIENT_END":   "#0D1117",
-    "SHADOW":          "#060A10",
-    "CARD_BORDER":        "#2A3A50",
-    "BADGE_BG_GREEN":  "#14532D",
-    "BADGE_BG_ORANGE": "#431407",
-    "BADGE_BG_BLUE":   "#1E3A5F",
+    # Orbital: espacio profundo, jerarquía por elevación
+    "BG_PRIMARY":   "#06070B",
+    "BG_SECONDARY": "#0D1117",
+    "BG_TERTIARY":  "#141A26",
+    "CARD_BG":       "#10151F",
+    "CARD_BG_HOVER": "#18202E",
+    "GRADIENT_START": "#101725",
+    "GRADIENT_END":   "#06070B",
+    "SHADOW":          "#030409",
+    "CARD_BORDER":        "#222B3A",
+    "BADGE_BG_GREEN":  "#0E3A20",
+    "BADGE_BG_ORANGE": "#3A2604",
+    "BADGE_BG_BLUE":   "#0E3340",
     "BADGE_BG_RED":    "#450A0A",
     "BADGE_BG_PURPLE": "#2E1065",
     "TEXT_PRIMARY":   "#F0F6FC",
     "TEXT_SECONDARY": "#94A3B8",
     "TEXT_MUTED":     "#4B5563",
-    "BORDER":        "#2A3A50",
-    "BORDER_LIGHT":  "#3D4F66",
+    "BORDER":        "#222B3A",
+    "BORDER_LIGHT":  "#2E3A4E",
+    # Acento primario ámbar + secundario cian (Orbital)
+    "ACCENT_PRIMARY":       "#FFAE42",
+    "ACCENT_PRIMARY_HOVER": "#FF9D1F",
+    "ACCENT_PRIMARY_SOFT":  "#FFC97A",
+    # Texto sobre ámbar (el ámbar es claro: texto oscuro para AA)
+    "ACCENT_TEXT_ON":       "#241500",
+    # Fondo tintado del acento (fila activa del sidebar, hovers suaves)
+    "ACCENT_BG":            "#2A1C04",
+    "ACCENT_CYAN":        "#4FE3FF",
+    "ACCENT_CYAN_HOVER":  "#22D3EE",
+    "ACCENT_CYAN_BG":     "#0A2A33",
     "TIER_BG": {
-        "Bronze": "#2A1A08",
-        "Silver": "#1E2530",
-        "Gold":   "#2D2000",
+        "Bronze": "#241606",
+        "Silver": "#1A212C",
+        "Gold":   "#241B02",
     },
 }
 
 _LIGHT: dict = {
-    "BG_PRIMARY":   "#F5F7FA",
-    "BG_SECONDARY": "#EAEEF4",
-    "BG_TERTIARY":  "#D9E1ED",
-    "CARD_BG":       "#EFF3FA",
-    "CARD_BG_HOVER": "#E1E9F5",
-    "GRADIENT_START": "#DDE6F2",
-    "GRADIENT_END":   "#F5F7FA",
-    "SHADOW":          "#B0BCC8",
-    "CARD_BORDER":        "#C1CDD9",
+    # Crema-fríos derivados de los mismos tokens (no paleta paralela)
+    "BG_PRIMARY":   "#F6F6F2",
+    "BG_SECONDARY": "#ECECE6",
+    "BG_TERTIARY":  "#DFE0D8",
+    "CARD_BG":       "#F1F1EB",
+    "CARD_BG_HOVER": "#E6E6DE",
+    "GRADIENT_START": "#E8E8E0",
+    "GRADIENT_END":   "#F6F6F2",
+    "SHADOW":          "#B9BCB3",
+    "CARD_BORDER":        "#CDCFC4",
     "BADGE_BG_GREEN":  "#DCFCE7",
-    "BADGE_BG_ORANGE": "#FEF3C7",
-    "BADGE_BG_BLUE":   "#DBEAFE",
+    "BADGE_BG_ORANGE": "#FBEFD4",
+    "BADGE_BG_BLUE":   "#D7F2FA",
     "BADGE_BG_RED":    "#FEE2E2",
     "BADGE_BG_PURPLE": "#EDE9FE",
-    "TEXT_PRIMARY":   "#0D1117",
-    "TEXT_SECONDARY": "#374151",
-    "TEXT_MUTED":     "#9CA3AF",
-    "BORDER":        "#C1CDD9",
-    "BORDER_LIGHT":  "#D3DCE6",
+    "TEXT_PRIMARY":   "#15130C",
+    "TEXT_SECONDARY": "#4A4A40",
+    "TEXT_MUTED":     "#8C8C80",
+    "BORDER":        "#CDCFC4",
+    "BORDER_LIGHT":  "#DBDCD2",
+    # Ámbar oscurecido para contraste AA sobre crema
+    "ACCENT_PRIMARY":       "#C77800",
+    "ACCENT_PRIMARY_HOVER": "#A86400",
+    "ACCENT_PRIMARY_SOFT":  "#E09A2E",
+    "ACCENT_TEXT_ON":       "#FFFFFF",
+    "ACCENT_BG":            "#F2E2C4",
+    "ACCENT_CYAN":        "#0E7490",
+    "ACCENT_CYAN_HOVER":  "#155E75",
+    "ACCENT_CYAN_BG":     "#D7F2FA",
     "TIER_BG": {
-        "Bronze": "#FDF4E7",
-        "Silver": "#F0F3F9",
-        "Gold":   "#FFFBEB",
+        "Bronze": "#F5EBDD",
+        "Silver": "#EDEFF2",
+        "Gold":   "#F8F0D8",
     },
 }
 
@@ -69,14 +109,28 @@ GRADIENT_START = _DARK["GRADIENT_START"]
 GRADIENT_END   = _DARK["GRADIENT_END"]
 
 # ── Accent colours ───────────────────────────────────────────────────────────
-ACCENT_BLUE        = "#2563EB"
-ACCENT_BLUE_HOVER  = "#1D4ED8"
-ACCENT_BLUE_LIGHT  = "#3B82F6"
+# Primario ámbar — ACCENT_BLUE/ACCENT_ORANGE son ALIAS históricos del primario
+# (45 archivos los usan como "acción primaria"); el nombre canónico nuevo es
+# ACCENT_PRIMARY. El cian es el secundario informativo (links/info/estados).
+ACCENT_PRIMARY       = _DARK["ACCENT_PRIMARY"]
+ACCENT_PRIMARY_HOVER = _DARK["ACCENT_PRIMARY_HOVER"]
+ACCENT_PRIMARY_SOFT  = _DARK["ACCENT_PRIMARY_SOFT"]
+ACCENT_TEXT_ON       = _DARK["ACCENT_TEXT_ON"]
+ACCENT_BG            = _DARK["ACCENT_BG"]
 
-ACCENT_ORANGE       = "#F97316"
-ACCENT_ORANGE_HOVER = "#EA6010"
-ACCENT_ORANGE_LIGHT = "#FB923C"
+ACCENT_CYAN       = _DARK["ACCENT_CYAN"]
+ACCENT_CYAN_HOVER = _DARK["ACCENT_CYAN_HOVER"]
+ACCENT_CYAN_BG    = _DARK["ACCENT_CYAN_BG"]
 
+ACCENT_BLUE        = ACCENT_PRIMARY
+ACCENT_BLUE_HOVER  = ACCENT_PRIMARY_HOVER
+ACCENT_BLUE_LIGHT  = ACCENT_PRIMARY_SOFT
+
+ACCENT_ORANGE       = ACCENT_PRIMARY
+ACCENT_ORANGE_HOVER = ACCENT_PRIMARY_HOVER
+ACCENT_ORANGE_LIGHT = ACCENT_PRIMARY_SOFT
+
+# Semánticos: SOLO éxito / peligro / advertencia
 ACCENT_GREEN        = "#22C55E"
 ACCENT_GREEN_HOVER  = "#16A34A"
 ACCENT_GREEN_LIGHT  = "#4ADE80"
@@ -96,7 +150,7 @@ SHADOW = _DARK["SHADOW"]
 
 # ── Card decoration ──────────────────────────────────────────────────────────
 CARD_BORDER        = _DARK["CARD_BORDER"]
-CARD_BORDER_ACTIVE = "#2563EB"
+CARD_BORDER_ACTIVE = _DARK["ACCENT_PRIMARY"]
 
 BADGE_BG_GREEN  = _DARK["BADGE_BG_GREEN"]
 BADGE_BG_ORANGE = _DARK["BADGE_BG_ORANGE"]
@@ -112,14 +166,20 @@ TEXT_MUTED     = _DARK["TEXT_MUTED"]
 # ── Borders ──────────────────────────────────────────────────────────────────
 BORDER        = _DARK["BORDER"]
 BORDER_LIGHT  = _DARK["BORDER_LIGHT"]
-BORDER_ACTIVE = "#2563EB"
+BORDER_ACTIVE = _DARK["ACCENT_PRIMARY"]
+
+# ── Layout tokens (U2) ───────────────────────────────────────────────────────
+# Espaciado, radios y duraciones canónicos — adiós números mágicos.
+SPACE  = {"xs": 4, "s": 8, "m": 12, "l": 16, "xl": 24, "xxl": 32}
+RADIUS = {"s": 4, "m": 8, "l": 12, "xl": 16}
+DUR    = {"fast": 120, "base": 180, "slow": 250}  # ms — techo 250 (regla dura)
 
 # ── Status / tier colours ─────────────────────────────────────────────────────
 STATUS_COLORS = {
     "Borrador":    "#6B7280",
-    "Cotizado":    "#3B82F6",
+    "Cotizado":    "#4FE3FF",
     "Aceptado":    "#8B5CF6",
-    "En Progreso": "#F97316",
+    "En Progreso": "#FFAE42",
     "Revisión":    "#EAB308",
     "Entregado":   "#22C55E",
     "Pagado":      "#15803D",
@@ -134,11 +194,49 @@ TIER_COLORS = {
 
 TIER_BG = dict(_DARK["TIER_BG"])
 
+# ── Content tokens ───────────────────────────────────────────────────────────
+# Colores que representan CONTENIDO (papel del canvas, marcas externas,
+# bloques de documento) — no cambian con el tema porque modelan el material,
+# no el chrome de la UI.
+CANVAS_PAPER_OUTLINE       = "#888888"
+CANVAS_MARGIN              = "#E8E8E8"
+CANVAS_ELEMENT_BG          = "#FFFFFF"
+CANVAS_ELEMENT_SELECTED_BG = "#EEF4FF"
+CANVAS_ELEMENT_OUTLINE     = "#AAAAAA"
+CANVAS_IMAGE_FILL          = "#CCCCCC"
+CANVAS_IMAGE_OUTLINE       = "#999999"
+# Fondo del thumb de glifo (tinta clara sobre negro, en ambos temas)
+GLYPH_PREVIEW_BG = "#000000"
+
+BRAND_WHATSAPP       = "#25D366"
+BRAND_WHATSAPP_HOVER = "#128C7E"
+
+# Bloques de documento en Estudio: (color_texto, color_fondo) por tipo
+DOC_BLOCK_COLORS = {
+    "heading":   ("#d4a017", "#7a5500"),  # dorado
+    "list_item": ("#2a7fbf", "#1a4a7a"),  # azul
+    "code":      ("#3a8a4a", "#1a4a2a"),  # verde
+    "caption":   ("#8a6a3a", "#5a3a10"),  # marrón
+    "paragraph": ("#555555", "#2a2a2a"),  # gris neutro
+    "unknown":   ("#444444", "#222222"),
+}
+
+# Badges por tipo de archivo en el import de Estudio
+FILE_BADGE_COLORS = {
+    "text_pdf": "#2d6a4f",
+    "scan_pdf": "#7b4f00",
+    "mixed_pdf": "#5a4a00",
+    "docx": "#1a4a7a",
+    "image": "#5a2a6a",
+    "folder": "#1a5a6a",
+}
+
 # ── Typography ────────────────────────────────────────────────────────────────
-_UI_FONT_CANDIDATES = ["Segoe UI", "Inter", "DejaVu Sans", "Liberation Sans",
-                       "Helvetica", "TkDefaultFont"]
-_MONO_CANDIDATES = ["Consolas", "Fira Mono", "DejaVu Sans Mono",
-                    "Liberation Mono", "Courier New", "TkFixedFont"]
+# Sin "Segoe UI" (no existe en Fedora): familias reales de Linux primero.
+_UI_FONT_CANDIDATES = ["Inter", "Cantarell", "DejaVu Sans", "Liberation Sans",
+                       "Noto Sans", "Helvetica", "TkDefaultFont"]
+_MONO_CANDIDATES = ["JetBrains Mono", "Maple Mono", "Fira Mono",
+                    "DejaVu Sans Mono", "Liberation Mono", "TkFixedFont"]
 
 UI_FONT = "TkDefaultFont"
 MONO_FONT = "TkFixedFont"
@@ -151,6 +249,11 @@ def get_font(weight: str = "normal", size: int = 11) -> tuple:
     de cualquier llamada (típicamente después de crear el Tk root).
     """
     return (UI_FONT, size, "bold" if weight == "bold" else "normal")
+
+
+def get_mono(size: int = 10) -> tuple:
+    """Tupla de fuente monoespaciada (atajos, métricas, código)."""
+    return (MONO_FONT, size)
 
 
 def init_fonts() -> None:
@@ -197,17 +300,28 @@ NAV_ITEMS = [
     ("settings",  "⚙️", "Config"),
 ]
 
-NAV_ACCENT = {
-    "dashboard": ACCENT_BLUE,
-    "projects":  ACCENT_GREEN,
-    "study":     ACCENT_PURPLE,
-    "inkcore":   ACCENT_ORANGE,
-    "business":  ACCENT_YELLOW,
-    "settings":  "#64748B",
-}
+# U2: fin del arcoíris por sección — TODAS las vistas usan el ámbar primario.
+# El dict se conserva (y se re-popula en apply_theme) porque sidebar/app lo
+# consultan por view_id.
+NAV_ACCENT = {vid: ACCENT_PRIMARY for vid, _i, _l in NAV_ITEMS}
 
 
 # ── Theme switching ───────────────────────────────────────────────────────────
+
+_SCALAR_KEYS = [
+    "BG_PRIMARY", "BG_SECONDARY", "BG_TERTIARY",
+    "CARD_BG", "CARD_BG_HOVER",
+    "GRADIENT_START", "GRADIENT_END",
+    "SHADOW", "CARD_BORDER",
+    "BADGE_BG_GREEN", "BADGE_BG_ORANGE", "BADGE_BG_BLUE",
+    "BADGE_BG_RED", "BADGE_BG_PURPLE",
+    "TEXT_PRIMARY", "TEXT_SECONDARY", "TEXT_MUTED",
+    "BORDER", "BORDER_LIGHT",
+    "ACCENT_PRIMARY", "ACCENT_PRIMARY_HOVER", "ACCENT_PRIMARY_SOFT",
+    "ACCENT_TEXT_ON", "ACCENT_BG",
+    "ACCENT_CYAN", "ACCENT_CYAN_HOVER", "ACCENT_CYAN_BG",
+]
+
 
 def apply_theme(mode: str) -> None:
     """Swap colour globals to the selected palette.
@@ -218,16 +332,16 @@ def apply_theme(mode: str) -> None:
     import sys
     _module = sys.modules[__name__]
     palette = _LIGHT if mode == "light" else _DARK
-    scalar_keys = [
-        "BG_PRIMARY", "BG_SECONDARY", "BG_TERTIARY",
-        "CARD_BG", "CARD_BG_HOVER",
-        "GRADIENT_START", "GRADIENT_END",
-        "SHADOW", "CARD_BORDER",
-        "BADGE_BG_GREEN", "BADGE_BG_ORANGE", "BADGE_BG_BLUE",
-        "BADGE_BG_RED", "BADGE_BG_PURPLE",
-        "TEXT_PRIMARY", "TEXT_SECONDARY", "TEXT_MUTED",
-        "BORDER", "BORDER_LIGHT",
-    ]
-    for key in scalar_keys:
+    for key in _SCALAR_KEYS:
         setattr(_module, key, palette[key])
     _module.TIER_BG = dict(palette["TIER_BG"])
+    # Alias históricos + derivados del acento (siguen al primario del tema)
+    _module.ACCENT_BLUE = palette["ACCENT_PRIMARY"]
+    _module.ACCENT_BLUE_HOVER = palette["ACCENT_PRIMARY_HOVER"]
+    _module.ACCENT_BLUE_LIGHT = palette["ACCENT_PRIMARY_SOFT"]
+    _module.ACCENT_ORANGE = palette["ACCENT_PRIMARY"]
+    _module.ACCENT_ORANGE_HOVER = palette["ACCENT_PRIMARY_HOVER"]
+    _module.ACCENT_ORANGE_LIGHT = palette["ACCENT_PRIMARY_SOFT"]
+    _module.CARD_BORDER_ACTIVE = palette["ACCENT_PRIMARY"]
+    _module.BORDER_ACTIVE = palette["ACCENT_PRIMARY"]
+    _module.NAV_ACCENT = {vid: palette["ACCENT_PRIMARY"] for vid, _i, _l in NAV_ITEMS}

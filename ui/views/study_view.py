@@ -103,7 +103,7 @@ class StudyView(
                                             text_color=theme.TEXT_MUTED, width=160, anchor="w")
         self._progress_label.pack(side="left", padx=(6, 0))
         self._cancel_btn = ctk.CTkButton(prog_row, text="✕ Cancelar", width=90,
-                                         fg_color=theme.ACCENT_RED, hover_color="#b03030",
+                                         fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
                                          font=theme.FONT_SMALL, command=self._cancel_import)
         self._cancel_btn.pack(side="left", padx=(6, 0))
         prog_row.pack_forget()

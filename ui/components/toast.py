@@ -44,18 +44,18 @@ class ToastManager:
         toast = ctk.CTkFrame(
             self.parent,
             fg_color=theme.BG_SECONDARY,
-            corner_radius=10,
+            corner_radius=theme.RADIUS["l"],
             border_width=1,
             border_color=color,
         )
 
         # Content row
         toast_row = ctk.CTkFrame(toast, fg_color="transparent")
-        toast_row.pack(padx=12, pady=(10, 6), fill="x")
+        toast_row.pack(padx=theme.SPACE["m"], pady=(theme.SPACE["s"], theme.SPACE["xs"]), fill="x")
 
         ctk.CTkLabel(
             toast_row, text=icon, text_color=color,
-            font=("Segoe UI", 14, "bold"),
+            font=theme.get_font("bold", 14),
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkLabel(
@@ -70,7 +70,7 @@ class ToastManager:
         btn_close = ctk.CTkButton(
             toast_row, text="\u00d7", width=24, height=24,
             fg_color="transparent", hover_color=theme.BG_TERTIARY,
-            text_color=theme.TEXT_SECONDARY, font=("Segoe UI", 14),
+            text_color=theme.TEXT_SECONDARY, font=theme.get_font(size=14),
             command=lambda t=toast: self._dismiss(t),
         )
         btn_close.pack(side="right")

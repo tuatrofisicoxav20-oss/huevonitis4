@@ -51,8 +51,8 @@ class CollapsibleSidebar(ctk.CTkFrame):
         self._logo_label = ctk.CTkLabel(
             logo_pill,
             text="H4",
-            font=("Segoe UI", 18, "bold"),
-            text_color="#FFFFFF",
+            font=theme.get_font("bold", 18),
+            text_color=theme.ACCENT_TEXT_ON,
         )
         self._logo_label.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -76,7 +76,7 @@ class CollapsibleSidebar(ctk.CTkFrame):
         self._toggle_btn = ctk.CTkButton(
             self,
             text="◀  Colapsar",
-            font=("Segoe UI", 10),
+            font=theme.get_font(size=10),
             fg_color="transparent",
             hover_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_MUTED,
@@ -108,7 +108,7 @@ class CollapsibleSidebar(ctk.CTkFrame):
             hover_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_SECONDARY,
             height=46,
-            corner_radius=8,
+            corner_radius=theme.RADIUS["m"],
             command=lambda v=view_id: self._on_click(v),
         )
         btn.pack(side="left", fill="both", expand=True, padx=(2, 6))
@@ -194,16 +194,8 @@ class CollapsibleSidebar(ctk.CTkFrame):
 
     @staticmethod
     def _active_bg(accent: str) -> str:
-        """Return a very dark, tinted version of accent for the active row bg."""
-        # Map known accents to their dark tint
-        tints = {
-            theme.ACCENT_BLUE:   "#0F2040",
-            theme.ACCENT_GREEN:  "#0A2A18",
-            theme.ACCENT_ORANGE: "#2A1200",
-            theme.ACCENT_PURPLE: "#1A0F30",
-            theme.ACCENT_YELLOW: "#221A00",
-        }
-        return tints.get(accent, "#1A2540")
+        """Fondo de la fila activa (U2: acento único — tinte ámbar del tema)."""
+        return theme.ACCENT_BG
 
     # ── Collapse / expand ──────────────────────────────────────────
 

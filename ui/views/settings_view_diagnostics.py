@@ -128,7 +128,7 @@ class SettingsDiagnosticsMixin:
             self.toast("Eventos de diagnóstico limpiados", "info")
 
         ctk.CTkButton(btn_row, text="🗑 Limpiar eventos", command=_clear,
-                      fg_color=theme.ACCENT_RED, hover_color="#b03030",
+                      fg_color=theme.ACCENT_RED, hover_color=theme.ACCENT_RED_HOVER,
                       font=theme.FONT_BODY, width=160).pack(side="left")
         ctk.CTkButton(btn_row, text="📋 Copiar", command=_copy,
                       fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,

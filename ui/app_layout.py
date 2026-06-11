@@ -57,7 +57,7 @@ class AppLayoutMixin:
         self._topbar_icon = ctk.CTkLabel(
             bar,
             text="🏠",
-            font=("Segoe UI", 18),
+            font=theme.get_font(size=18),
         )
         self._topbar_icon.pack(side="left", padx=(18, 4))
 

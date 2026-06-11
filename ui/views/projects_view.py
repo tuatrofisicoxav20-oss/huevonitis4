@@ -53,9 +53,9 @@ class ProjectsView(BaseView):
 
         ctk.CTkButton(
             header, text="+ Nuevo", width=80, height=30,
-            fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
+            fg_color=theme.ACCENT_PRIMARY, hover_color=theme.ACCENT_PRIMARY_HOVER,
             font=theme.FONT_SMALL, corner_radius=8,
-            text_color="#FFFFFF",
+            text_color=theme.ACCENT_TEXT_ON,
             command=self._new_project,
         ).pack(side="right", padx=10, pady=10)
 
@@ -125,7 +125,7 @@ class ProjectsView(BaseView):
             command=self._save_project,
             width=100, height=32,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"), corner_radius=8,
+            font=theme.get_font("bold", 11), corner_radius=8,
         ).pack(side="right", padx=8, pady=10)
 
         self._canvas_editor = CanvasEditor(parent, on_change=self._on_canvas_change)
@@ -260,7 +260,7 @@ class ProjectsView(BaseView):
 
             ctk.CTkButton(
                 name_row, text="\u00d7", width=22, height=22,
-                font=("Segoe UI", 13),
+                font=theme.get_font(size=13),
                 fg_color="transparent", hover_color=theme.ACCENT_RED,
                 text_color=theme.TEXT_MUTED,
                 command=lambda p=proj: self._delete_project(p),

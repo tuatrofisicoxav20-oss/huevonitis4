@@ -106,7 +106,7 @@ class BusinessView(
             card.pack(side="left", expand=True, fill="x", padx=6, ipady=10)
             ctk.CTkLabel(card, text=title, font=theme.FONT_SMALL,
                          text_color=theme.TEXT_SECONDARY).pack(padx=12, pady=(10, 2), anchor="w")
-            val_lbl = ctk.CTkLabel(card, text="$0", font=("Segoe UI", 20, "bold"),
+            val_lbl = ctk.CTkLabel(card, text="$0", font=theme.get_font("bold", 20),
                                    text_color=color)
             val_lbl.pack(padx=12, anchor="w", pady=(0, 10))
             self._dash_cards.append(val_lbl)

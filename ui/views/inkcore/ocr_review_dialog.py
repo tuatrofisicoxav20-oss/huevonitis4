@@ -96,14 +96,14 @@ class OCRReviewDialog(ctk.CTkToplevel):
         self._text.grid(row=1, column=0, sticky="nsew")
         # Tag para resaltar líneas dudosas (vía el Text de tkinter por debajo).
         with contextlib.suppress(Exception):
-            self._text._textbox.tag_config("low", foreground="#E0A030")
+            self._text._textbox.tag_config("low", foreground=theme.ACCENT_YELLOW)
 
         btns = ctk.CTkFrame(right, fg_color="transparent")
         btns.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ctk.CTkButton(
             btns, text="✓ Aceptar y pasar a render", command=self._accept,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"), height=34,
+            font=theme.get_font("bold", 11), height=34,
         ).pack(side="left", padx=(0, 6))
         ctk.CTkButton(
             btns, text="↻ Re-procesar con más contraste", command=self._reprocess,

@@ -28,8 +28,8 @@ class BulkCaptureGridMixin:
 
     DECISION_BG: ClassVar[dict] = {
         "pending":  theme.BG_TERTIARY,
-        "approved": "#1A3A1A",
-        "rejected": "#3A1A1A",
+        "approved": theme.BADGE_BG_GREEN,
+        "rejected": theme.BADGE_BG_RED,
     }
     DECISION_BORDER: ClassVar[dict] = {
         "pending":  theme.BORDER,
@@ -131,12 +131,12 @@ class BulkCaptureGridMixin:
         if thumb:
             ctk.CTkLabel(card, image=thumb, text="").pack(pady=(6, 2))
         else:
-            ctk.CTkLabel(card, text="?", font=("Segoe UI", 24),
+            ctk.CTkLabel(card, text="?", font=theme.get_font(size=24),
                          text_color=theme.TEXT_MUTED).pack(pady=(6, 2))
 
         char_lbl = ctk.CTkLabel(
             card, text=cand.display_char,
-            font=("Segoe UI", 18, "bold"),
+            font=theme.get_font("bold", 18),
             text_color=theme.TEXT_PRIMARY,
         )
         char_lbl.pack()
@@ -151,18 +151,18 @@ class BulkCaptureGridMixin:
             conf_text, conf_color = f"{lc:.0%}", theme.ACCENT_YELLOW
         else:
             conf_text, conf_color = f"{lc:.0%}", theme.ACCENT_RED
-        ctk.CTkLabel(card, text=conf_text, font=("Segoe UI", 9),
+        ctk.CTkLabel(card, text=conf_text, font=theme.get_font(size=9),
                      text_color=conf_color).pack()
 
         decision_lbl = ctk.CTkLabel(card, text=self.DECISION_ICON.get(cand.decision, ""),
-                                    font=("Segoe UI", 10))
+                                    font=theme.get_font(size=10))
         decision_lbl.pack()
         card._decision_lbl = decision_lbl  # para refrescar in-place al aprobar/rechazar
 
         if cand.source_label:
             ctk.CTkLabel(
                 card, text=cand.source_label,
-                font=("Segoe UI", 7), text_color=theme.TEXT_MUTED,
+                font=theme.get_font(size=7), text_color=theme.TEXT_MUTED,
             ).pack(pady=(0, 2))
 
         def on_click(e, i=idx):

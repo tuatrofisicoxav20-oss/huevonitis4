@@ -65,7 +65,7 @@ class InkCoreViewProfileMixin:
         ):
             ctk.CTkButton(
                 bar, text=emoji, width=34, height=28,
-                font=("Segoe UI", 12),
+                font=theme.get_font(size=12),
                 fg_color=theme.BG_TERTIARY, hover_color=color,
                 text_color=theme.TEXT_PRIMARY, corner_radius=6,
                 command=cmd,
@@ -184,7 +184,7 @@ class InkCoreViewProfileMixin:
         ctk.CTkButton(
             btn_row, text="✓ Crear", width=140, height=34,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"),
+            font=theme.get_font("bold", 11),
             command=_create,
         ).pack(side="left", padx=4)
         entry.bind("<Return>", lambda e: _create())
@@ -238,7 +238,7 @@ class InkCoreViewProfileMixin:
         ctk.CTkButton(
             btn_row, text="✓ Guardar", width=140, height=34,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"),
+            font=theme.get_font("bold", 11),
             command=_rename,
         ).pack(side="left", padx=4)
         entry.bind("<Return>", lambda e: _rename())

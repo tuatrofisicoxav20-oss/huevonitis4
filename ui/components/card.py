@@ -59,7 +59,7 @@ class StatCard(ctk.CTkFrame):
         ctk.CTkLabel(
             badge,
             text=icon,
-            font=("Segoe UI", 18),
+            font=theme.get_font(size=18),
             text_color=color,
         ).place(relx=0.5, rely=0.5, anchor="center")
 
@@ -74,7 +74,7 @@ class StatCard(ctk.CTkFrame):
         self._val_label = ctk.CTkLabel(
             content,
             text=self._format_value(value),
-            font=("Segoe UI", 26, "bold"),
+            font=theme.get_font("bold", 26),
             text_color=color,
         )
         self._val_label.pack(anchor="w")
@@ -87,10 +87,10 @@ class StatCard(ctk.CTkFrame):
             theme.ACCENT_GREEN:  theme.BADGE_BG_GREEN,
             theme.ACCENT_ORANGE: theme.BADGE_BG_ORANGE,
             theme.ACCENT_RED:    theme.BADGE_BG_RED,
-            theme.ACCENT_PURPLE: "#2D1A50",
-            theme.ACCENT_YELLOW: "#2D2000",
+            theme.ACCENT_PURPLE: theme.BADGE_BG_PURPLE,
+            theme.ACCENT_YELLOW: theme.BADGE_BG_ORANGE,
         }
-        return dim_map.get(hex_color, "#1A2030")
+        return dim_map.get(hex_color, theme.BG_TERTIARY)
 
     def _format_value(self, value) -> str:
         if self._is_currency:

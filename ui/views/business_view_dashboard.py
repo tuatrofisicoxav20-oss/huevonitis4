@@ -55,7 +55,7 @@ class BusinessDashboardMixin:
         start_angle = 90  # comienza arriba
         for status, count in counts.items():
             extent = 360 * count / total_count
-            color = theme.STATUS_COLORS.get(status, "#888")
+            color = theme.STATUS_COLORS.get(status, theme.TEXT_MUTED)
             arcs.append((status, count, start_angle, extent, color))
             start_angle += extent
 
@@ -66,7 +66,7 @@ class BusinessDashboardMixin:
             self._chart_canvas.create_text(
                 legend_x + 20, ly + 7,
                 text=f"{status}: {count}",
-                anchor="w", fill=theme.TEXT_PRIMARY, font=("Segoe UI", 10),
+                anchor="w", fill=theme.TEXT_PRIMARY, font=theme.get_font(size=10),
             )
 
         self._animate_pie_arcs(arcs, cx, cy, r, 0, 0.0)

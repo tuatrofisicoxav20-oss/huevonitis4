@@ -122,14 +122,14 @@ class TemplateTabMixin:
         ctk.CTkButton(
             parent, text="📄  Generar plantilla…", height=38,
             fg_color=theme.ACCENT_ORANGE, hover_color=theme.ACCENT_ORANGE_HOVER,
-            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            font=theme.get_font("bold", 12), corner_radius=8,
             command=self._tpl_generate,
         ).pack(padx=14, pady=(6, 4), fill="x")
 
         ctk.CTkButton(
             parent, text="📷  Cargar foto de plantilla", height=38,
             fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
-            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            font=theme.get_font("bold", 12), corner_radius=8,
             command=self._tpl_load_photo,
         ).pack(padx=14, pady=4, fill="x")
 
@@ -142,7 +142,7 @@ class TemplateTabMixin:
         ctk.CTkButton(
             parent, text="💾  Guardar en banco", height=38,
             fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 12, "bold"), corner_radius=8,
+            font=theme.get_font("bold", 12), corner_radius=8,
             command=self._tpl_save_to_bank,
         ).pack(padx=14, pady=(6, 4), fill="x")
 

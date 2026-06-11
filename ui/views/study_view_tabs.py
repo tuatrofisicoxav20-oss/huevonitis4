@@ -8,14 +8,8 @@ import customtkinter as ctk
 
 from ui import theme
 
-_BLOCK_TYPE_COLORS = {
-    "heading":   ("#d4a017", "#7a5500"),  # dorado
-    "list_item": ("#2a7fbf", "#1a4a7a"),  # azul
-    "code":      ("#3a8a4a", "#1a4a2a"),  # verde
-    "caption":   ("#8a6a3a", "#5a3a10"),  # marrón
-    "paragraph": ("#555555", "#2a2a2a"),  # gris neutro
-    "unknown":   ("#444444", "#222222"),
-}
+# U2: la paleta de bloques vive en theme.DOC_BLOCK_COLORS (tokens)
+_BLOCK_TYPE_COLORS = theme.DOC_BLOCK_COLORS
 
 
 class StudyTabsBuildMixin:
@@ -135,7 +129,7 @@ class StudyTabsBuildMixin:
         self._card_frame.pack(fill="both", expand=True, padx=20, pady=8)
 
         self._card_text = ctk.CTkLabel(self._card_frame, text="Genera las flashcards primero",
-                                       font=("Segoe UI", 14), text_color=theme.TEXT_PRIMARY,
+                                       font=theme.get_font(size=14), text_color=theme.TEXT_PRIMARY,
                                        wraplength=350, justify="center")
         self._card_text.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -161,7 +155,7 @@ class StudyTabsBuildMixin:
         self._exam_progress.pack()
 
         self._exam_q = ctk.CTkLabel(parent, text="Presiona 'Iniciar Examen' para comenzar",
-                                    font=("Segoe UI", 14), text_color=theme.TEXT_PRIMARY,
+                                    font=theme.get_font(size=14), text_color=theme.TEXT_PRIMARY,
                                     wraplength=380, justify="center")
         self._exam_q.pack(fill="x", padx=16, pady=12)
 

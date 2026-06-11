@@ -17,6 +17,7 @@ from typing import ClassVar
 
 import customtkinter as ctk
 
+from ui import theme
 from ui.modal_utils import safe_grab
 
 # ── Utilidades de análisis rápido (pre-ingesta) ───────────────────────────────
@@ -112,14 +113,8 @@ def _quick_analyze(path: str, backend_name: str) -> dict:
 class _ImportPreviewDialog(ctk.CTkToplevel):
     """Diálogo modal con info rápida del documento antes de procesar."""
 
-    _BLOCK_COLORS: ClassVar[dict] = {
-        "text_pdf": "#2d6a4f",
-        "scan_pdf": "#7b4f00",
-        "mixed_pdf": "#5a4a00",
-        "docx": "#1a4a7a",
-        "image": "#5a2a6a",
-        "folder": "#1a5a6a",
-    }
+    # U2: badges por tipo de archivo desde theme (tokens)
+    _BLOCK_COLORS: ClassVar[dict] = theme.FILE_BADGE_COLORS
 
     def __init__(self, parent, info: dict, on_confirm):
         super().__init__(parent)

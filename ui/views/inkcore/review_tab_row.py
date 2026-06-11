@@ -15,7 +15,7 @@ class ReviewTabRowMixin:
     """Construcción de filas de revisión + modal para renombrar."""
 
     def _build_review_row(self, glyph):
-        tier_color = theme.TIER_COLORS.get(glyph.tier, "#888")
+        tier_color = theme.TIER_COLORS.get(glyph.tier, theme.TEXT_MUTED)
 
         row = ctk.CTkFrame(
             self._review_scroll,
@@ -41,7 +41,7 @@ class ReviewTabRowMixin:
 
         img_frame = ctk.CTkFrame(
             row, width=64, height=64,
-            fg_color="#000000",
+            fg_color=theme.GLYPH_PREVIEW_BG,
             corner_radius=6,
             border_width=2,
             border_color=tier_color,
@@ -53,7 +53,7 @@ class ReviewTabRowMixin:
         if photo is not None:
             ctk.CTkLabel(img_frame, image=photo, text="").place(relx=0.5, rely=0.5, anchor="center")
         else:
-            ctk.CTkLabel(img_frame, text="?", font=("Segoe UI", 20),
+            ctk.CTkLabel(img_frame, text="?", font=theme.get_font(size=20),
                          text_color=theme.TEXT_MUTED).place(relx=0.5, rely=0.5, anchor="center")
 
         char_frame = ctk.CTkFrame(row, fg_color="transparent", width=80)
@@ -62,14 +62,14 @@ class ReviewTabRowMixin:
         ctk.CTkLabel(
             char_frame,
             text=glyph.char or "?",
-            font=("Segoe UI", 22, "bold"),
+            font=theme.get_font("bold", 22),
             text_color=theme.TEXT_PRIMARY,
         ).pack()
         ctk.CTkButton(
             char_frame, text="✏️", width=28, height=22,
             fg_color=theme.ACCENT_BLUE,
             hover_color=theme.ACCENT_BLUE_HOVER,
-            font=("Segoe UI", 10),
+            font=theme.get_font(size=10),
             command=lambda g=glyph: self._open_rename_modal(g),
         ).pack()
 
@@ -93,7 +93,7 @@ class ReviewTabRowMixin:
         bar.set(max(0.0, min(1.0, q)))
         bar.pack(pady=(6, 0))
         ctk.CTkLabel(q_frame, text=f"{q:.0%}",
-                     font=("Segoe UI", 9), text_color=bar_color).pack()
+                     font=theme.get_font(size=9), text_color=bar_color).pack()
 
         score_frame = ctk.CTkFrame(row, fg_color="transparent", width=100)
         score_frame.pack(side="left", padx=4, pady=8)
@@ -104,7 +104,7 @@ class ReviewTabRowMixin:
         tier_bg = theme.TIER_BG.get(glyph.tier, theme.CARD_BG)
         ctk.CTkLabel(
             score_frame, text=glyph.tier,
-            font=("Segoe UI", 9, "bold"),
+            font=theme.get_font("bold", 9),
             text_color=tier_color, fg_color=tier_bg,
             corner_radius=8, padx=6, pady=2,
         ).pack(pady=2)
@@ -122,7 +122,7 @@ class ReviewTabRowMixin:
         for flag in flags[:3]:
             ctk.CTkLabel(
                 flags_frame, text=flag.replace("_", " "),
-                font=("Segoe UI", 8),
+                font=theme.get_font(size=8),
                 text_color=theme.ACCENT_ORANGE,
                 fg_color=theme.BADGE_BG_ORANGE,
                 corner_radius=6, padx=5, pady=1,
@@ -142,7 +142,7 @@ class ReviewTabRowMixin:
             ctk.CTkButton(
                 btn_frame, text=txt, width=36, height=30,
                 fg_color=fg, hover_color=hover,
-                font=("Segoe UI", 14), corner_radius=8,
+                font=theme.get_font(size=14), corner_radius=8,
                 command=cmd,
             ).pack(side="left", padx=2)
 
@@ -164,13 +164,13 @@ class ReviewTabRowMixin:
 
         ctk.CTkLabel(
             preview_row, text=f"Actual: '{glyph.char}'",
-            font=("Segoe UI", 14, "bold"), text_color=theme.TEXT_SECONDARY,
+            font=theme.get_font("bold", 14), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left", padx=16)
         ctk.CTkLabel(preview_row, text="→",
-                     font=("Segoe UI", 16), text_color=theme.TEXT_MUTED).pack(side="left")
+                     font=theme.get_font(size=16), text_color=theme.TEXT_MUTED).pack(side="left")
         new_char_preview = ctk.CTkLabel(
             preview_row, text="?",
-            font=("Segoe UI", 18, "bold"), text_color=theme.ACCENT_ORANGE,
+            font=theme.get_font("bold", 18), text_color=theme.ACCENT_ORANGE,
         )
         new_char_preview.pack(side="left", padx=16)
 
@@ -181,7 +181,7 @@ class ReviewTabRowMixin:
 
         entry = ctk.CTkEntry(
             win, width=200, height=36,
-            font=("Segoe UI", 18),
+            font=theme.get_font(size=18),
             fg_color=theme.BG_TERTIARY,
             text_color=theme.TEXT_PRIMARY,
             border_color=theme.ACCENT_BLUE,
@@ -212,7 +212,7 @@ class ReviewTabRowMixin:
             btn_row, text="Guardar",
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"),
+            font=theme.get_font("bold", 11),
             height=34, width=110,
             command=_save,
         ).pack(side="left", padx=8)

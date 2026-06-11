@@ -237,9 +237,9 @@ class InkCoreViewHelpersMixin:
     def _tier_text_color(tier: str) -> str:
         return {
             "Gold":   theme.ACCENT_YELLOW,
-            "Silver": "#C0C0C0",
-            "Bronze": "#CD7F32",
-        }.get(tier, "#888")
+            "Silver": theme.TIER_COLORS["Silver"],
+            "Bronze": theme.TIER_COLORS["Bronze"],
+        }.get(tier, theme.TEXT_MUTED)
 
     @staticmethod
     def _tier_border(tier: str) -> str:

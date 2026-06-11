@@ -173,7 +173,7 @@ class WriterTabMixin:
             height=34,
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
-            font=("Segoe UI", 11, "bold"),
+            font=theme.get_font("bold", 11),
             corner_radius=8,
         ).pack(side="left", padx=(0, 6))
 
