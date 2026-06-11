@@ -16,7 +16,9 @@ y de métodos de otros mixins:
 """
 import contextlib
 import logging
+import time
 from pathlib import Path
+from typing import ClassVar
 
 from ui import theme
 
@@ -69,6 +71,98 @@ class InkCoreViewHelpersMixin:
         self._reload_and_refresh_all()
         self._maybe_load_pending_text()
 
+    # ── Render por lotes (anti-freeze) ──────────────────────────────
+    # Los grids de Banco/Revisión/Captura construyen cientos de widgets CTk
+    # (659 glifos en un banco real ≈ miles de canvases). Hacerlo síncrono
+    # congela el mainloop por 10-30s ("la app se queda plasmada"). Estos
+    # helpers ejecutan las operaciones de construcción en LOTES con after(),
+    # con presupuesto de tiempo por tick, para que la UI siga respondiendo.
+
+    def _cancel_chunked(self, key: str) -> None:
+        """Cancela un render por lotes pendiente (y su estado de reanudación).
+        LLAMAR ANTES de destruir los widgets del render anterior — un tick ya
+        encolado que corra después del destroy pintaría sobre parents muertos
+        (TclError)."""
+        state = getattr(self, "_chunk_state", None)
+        if state:
+            state.pop(key, None)
+        jobs = getattr(self, "_chunk_jobs", None)
+        if not jobs:
+            return
+        prev = jobs.pop(key, None)
+        if prev is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(prev)
+
+    def _render_chunked(self, key: str, ops: list, on_done=None,
+                        budget_ms: int = 25) -> None:
+        """Ejecuta `ops` (closures sin args que construyen widgets) por lotes.
+
+        Cada tick consume ops hasta agotar `budget_ms` y se re-agenda con
+        after(12), dejando respirar al event loop entre lotes. Un nuevo render
+        con la misma `key` cancela al anterior. Si una op truena, se loggea y
+        se sigue con la siguiente (una celda rota no congela el resto).
+
+        El estado vive en self._chunk_state[key] para poder PAUSAR el render de
+        una pestaña que dejó de ser visible y reanudarlo al volver (un solo
+        render compite por el mainloop a la vez — ver _on_tab_change).
+        """
+        if not hasattr(self, "_chunk_jobs"):
+            self._chunk_jobs = {}
+        if not hasattr(self, "_chunk_state"):
+            self._chunk_state = {}
+        self._cancel_chunked(key)
+        self._chunk_state[key] = {"ops": ops, "i": 0, "on_done": on_done,
+                                  "budget": max(5, budget_ms) / 1000.0}
+        self._chunk_tick(key)
+
+    def _chunk_tick(self, key: str) -> None:
+        self._chunk_jobs.pop(key, None)
+        st = self._chunk_state.get(key)
+        if st is None:
+            return
+        ops, budget = st["ops"], st["budget"]
+        t0 = time.perf_counter()
+        i, n = st["i"], len(ops)
+        while i < n and (time.perf_counter() - t0) < budget:
+            try:
+                ops[i]()
+            except Exception:
+                logger.exception("_render_chunked(%s): op %d falló", key, i)
+            i += 1
+        st["i"] = i
+        if i < n:
+            if self.winfo_exists():
+                self._chunk_jobs[key] = self.after(12, lambda: self._chunk_tick(key))
+        else:
+            on_done = st.get("on_done")
+            self._chunk_state.pop(key, None)
+            if on_done is not None:
+                with contextlib.suppress(Exception):
+                    on_done()
+
+    def _pause_chunked(self, key: str) -> None:
+        """Detiene los ticks de un render sin perder su posición (se reanuda
+        con _resume_chunked). Pausar lo no visible deja todo el presupuesto del
+        mainloop al render de la pestaña activa."""
+        jobs = getattr(self, "_chunk_jobs", None)
+        if not jobs:
+            return
+        prev = jobs.pop(key, None)
+        if prev is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(prev)
+
+    def _resume_chunked(self, key: str) -> None:
+        """Reanuda un render pausado (no-op si terminó o no existe)."""
+        state = getattr(self, "_chunk_state", None)
+        jobs = getattr(self, "_chunk_jobs", None)
+        if not state or key not in state:
+            return
+        if jobs and key in jobs:  # ya corriendo
+            return
+        self._chunk_tick(key)
+
     # ── Colores por tier (Gold/Silver/Bronze) ───────────────────────
     # Reubicados desde extractor_tab_grid (eliminado en la limpieza v4.2); los
     # usa el Banco (bank_tab_render) para colorear celdas según calidad.
@@ -89,17 +183,33 @@ class InkCoreViewHelpersMixin:
             "Bronze": theme.BORDER,
         }.get(tier, theme.BORDER)
 
+    # Render-job (clave de _render_chunked) que pertenece a cada pestaña.
+    _TAB_RENDER_KEYS: ClassVar[dict[str, str]] = {
+        "2 · 📦 Captura masiva": "bulk_grid",
+        "3 · ✅ Revisión": "review_rows",
+        "🗂 Banco": "bank_cells",
+    }
+
     def _on_tab_change(self) -> None:
         """Refresca de forma diferida un tab que quedó marcado como sucio.
 
         El refresco de banco/revisión es caro (reconstruye cientos de widgets);
         en vez de rehacer el tab no visible en cada acción, lo marcamos sucio y
         lo reconstruimos solo cuando el usuario lo abre.
+
+        También pausa los render por lotes de las pestañas NO visibles y
+        reanuda el de la visible: si los tres grids construyen a la vez se
+        reparten el mainloop y todo aparece a cuentagotas.
         """
         try:
             name = self._tabs.get()
         except Exception:
             return
+        for tab, key in self._TAB_RENDER_KEYS.items():
+            if tab == name:
+                self._resume_chunked(key)
+            else:
+                self._pause_chunked(key)
         if name not in self._tabs_dirty:
             return
         self._tabs_dirty.discard(name)

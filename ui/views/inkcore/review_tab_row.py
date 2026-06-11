@@ -23,7 +23,9 @@ class ReviewTabRowMixin:
             border_width=1,
             border_color=theme.BORDER,
         )
-        row.pack(fill="x", padx=2, pady=3)
+        # anchor (no fill): la fila estirada se redibuja con cada cambio
+        # de ancho del scrollable → O(N²) de redraws al construir.
+        row.pack(anchor="w", padx=2, pady=3)
 
         var = ctk.BooleanVar(value=False)
         self._review_check_vars.append(var)

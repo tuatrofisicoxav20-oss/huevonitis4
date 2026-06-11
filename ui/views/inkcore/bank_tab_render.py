@@ -12,6 +12,9 @@ class BankTabRenderMixin:
     """Refresco y render del grid del banco (resumen, agrupación por letra, celdas)."""
 
     def _do_refresh_bank_ui(self):
+        # Anti-freeze: cancelar un render por lotes en curso ANTES de destruir
+        # (un tick encolado pintaría sobre widgets muertos).
+        self._cancel_chunked("bank_cells")
         for w in self._bank_scroll.winfo_children():
             w.destroy()
         self._glyph_photos.clear()
@@ -43,8 +46,8 @@ class BankTabRenderMixin:
         if not glyphs:
             ctk.CTkLabel(
                 self._bank_scroll,
-                text="Banco vacío. Ve al Extractor para agregar glifos\n"
-                     "o usa ➕ Agregar desde imagen.",
+                text="Banco vacío. Genera una plantilla (paso 1) y cárgala en\n"
+                     "Captura masiva (paso 2), o usa ➕ Agregar desde imagen.",
                 font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
                 justify="center",
             ).pack(pady=30)
@@ -70,10 +73,14 @@ class BankTabRenderMixin:
         use_groups = len(by_char) > 1
 
         cols = 6
-        for char in sorted(by_char.keys(), key=_char_sort_key):
-            char_glyphs = by_char[char]
-            if use_groups:
-                # Cabecera de grupo con calidad promedio
+        # Anti-freeze: con un banco real (~650 glifos) construir todas las celdas
+        # de golpe congelaba el mainloop. Cabeceras y celdas se construyen por
+        # lotes; row_state lleva la fila actual entre ops.
+        row_state = {"frame": None}
+        ops: list = []
+
+        def _make_header(char, char_glyphs):
+            def _op():
                 avg_q = sum(g.quality_score for g in char_glyphs) / len(char_glyphs)
                 q_color = (theme.ACCENT_GREEN if avg_q >= 0.75
                            else theme.ACCENT_ORANGE if avg_q >= 0.50
@@ -98,13 +105,56 @@ class BankTabRenderMixin:
                     text=f"prom {avg_q:.0%}",
                     font=theme.FONT_SMALL, text_color=q_color,
                 ).pack(side="right", padx=10, pady=4)
+            return _op
 
-            current_row = None
-            for i, g in enumerate(char_glyphs):
+        def _make_cell(i, g):
+            def _op():
                 if i % cols == 0:
-                    current_row = ctk.CTkFrame(self._bank_scroll, fg_color="transparent")
-                    current_row.pack(fill="x", pady=2, padx=4)
-                self._build_bank_cell(current_row, g)
+                    row_state["frame"] = ctk.CTkFrame(
+                        self._bank_scroll, fg_color="transparent")
+                    # anchor (no fill) — ver bulk_capture_tab_grid: evita el
+                    # O(N²) de redraws CTk al construir el grid.
+                    row_state["frame"].pack(anchor="w", pady=2, padx=4)
+                self._build_bank_cell(row_state["frame"], g)
+            return _op
+
+        for char in sorted(by_char.keys(), key=_char_sort_key):
+            char_glyphs = by_char[char]
+            if use_groups:
+                ops.append(_make_header(char, char_glyphs))
+            for i, g in enumerate(char_glyphs):
+                ops.append(_make_cell(i, g))
+
+        self._bank_page_state = {"ops": ops, "next": 0, "more_btn": None}
+        self._bank_render_next_page()
+
+    _BANK_PAGE = 78  # ops por página, 13 filas × 6 (celdas CTk caras: página chica)
+
+    def _bank_render_next_page(self):
+        st = getattr(self, "_bank_page_state", None)
+        if not st:
+            return
+        if st["more_btn"] is not None:
+            st["more_btn"].destroy()
+            st["more_btn"] = None
+        ops = st["ops"]
+        start = st["next"]
+        end = min(start + self._BANK_PAGE, len(ops))
+        st["next"] = end
+
+        def _done():
+            remaining = len(ops) - st["next"]
+            if remaining > 0:
+                st["more_btn"] = ctk.CTkButton(
+                    self._bank_scroll,
+                    text=f"▼ Mostrar más ({remaining} restantes)",
+                    command=self._bank_render_next_page,
+                    fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
+                    font=theme.FONT_SMALL, height=30,
+                )
+                st["more_btn"].pack(pady=8)
+
+        self._render_chunked("bank_cells", ops[start:end], on_done=_done)
 
     def _build_bank_cell(self, parent, glyph) -> None:
         """Construye una celda con thumb, char/tier, calidad y botones de acción."""

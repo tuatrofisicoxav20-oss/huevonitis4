@@ -108,6 +108,9 @@ class ReviewTabMixin:
 
     def _do_refresh_review_ui(self):
         t0 = time.perf_counter()
+        # Anti-freeze: cancelar un render por lotes en curso ANTES de destruir
+        # (un tick encolado pintaría sobre widgets muertos).
+        self._cancel_chunked("review_rows")
         for w in self._review_scroll.winfo_children():
             w.destroy()
         self._review_photos.clear()
@@ -131,7 +134,8 @@ class ReviewTabMixin:
         if not all_entries:
             ctk.CTkLabel(
                 self._review_scroll,
-                text="Banco vacío.\nExtrae glifos en el tab 📷 Extractor y guárdalos.",
+                text="Banco vacío.\nGenera una plantilla (paso 1) y cárgala en"
+                     " Captura masiva (paso 2) para llenar el banco.",
                 font=theme.FONT_BODY,
                 text_color=theme.TEXT_MUTED,
             ).pack(pady=40)
@@ -153,11 +157,48 @@ class ReviewTabMixin:
                 text_color=theme.TEXT_SECONDARY,
             ).pack(side="left", padx=4, pady=4)
 
-        for glyph in ordered:
-            self._build_review_row(glyph)
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        diagnostics.log_timing("refresh_review_ui", elapsed_ms)
-        diagnostics.log_event("ui", "refresh_review", f"{len(ordered)} glifos")
+        # Anti-freeze: con un banco real (~650 glifos) construir todas las filas
+        # de golpe congelaba el mainloop 10-30s (layout O(n²) del scrollable).
+        # Se renderiza por páginas + lotes; "Mostrar más" agrega la siguiente
+        # tanda sin reconstruir lo visible.
+        self._review_page_state = {"ordered": ordered, "next": 0,
+                                   "more_btn": None, "t0": t0}
+        self._review_render_next_page()
+
+    _REVIEW_PAGE = 40  # ~240ms/fila en CTk: página chica = aparece rápido
+
+    def _review_render_next_page(self):
+        st = getattr(self, "_review_page_state", None)
+        if not st:
+            return
+        if st["more_btn"] is not None:
+            st["more_btn"].destroy()
+            st["more_btn"] = None
+        ordered = st["ordered"]
+        start = st["next"]
+        end = min(start + self._REVIEW_PAGE, len(ordered))
+        st["next"] = end
+        ops = [lambda g=ordered[i]: self._build_review_row(g)
+               for i in range(start, end)]
+
+        def _done():
+            remaining = len(ordered) - st["next"]
+            if remaining > 0:
+                st["more_btn"] = ctk.CTkButton(
+                    self._review_scroll,
+                    text=f"▼ Mostrar {min(self._REVIEW_PAGE, remaining)} más "
+                         f"({remaining} restantes)",
+                    command=self._review_render_next_page,
+                    fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
+                    font=theme.FONT_SMALL, height=30,
+                )
+                st["more_btn"].pack(pady=8)
+            elapsed_ms = (time.perf_counter() - st["t0"]) * 1000
+            diagnostics.log_timing("refresh_review_ui", elapsed_ms)
+            diagnostics.log_event("ui", "refresh_review",
+                                  f"{st['next']}/{len(ordered)} glifos")
+
+        self._render_chunked("review_rows", ops, on_done=_done)
 
     _PROMOTE_NEXT: ClassVar[dict] = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Gold"}
 

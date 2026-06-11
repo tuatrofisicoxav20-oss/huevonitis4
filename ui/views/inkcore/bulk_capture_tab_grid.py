@@ -38,7 +38,17 @@ class BulkCaptureGridMixin:
     DECISION_ICON: ClassVar[dict] = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
     GRID_COLS = 7
 
+    # Cards por página. Meter cientos de widgets a un CTkScrollableFrame tiene
+    # costo de layout O(n²) (cada pack re-mide a todos los anteriores): una
+    # sesión real de 400-700 candidatos congelaba la app por decenas de
+    # segundos. Se renderiza por páginas + lotes; "Mostrar más" AGREGA la
+    # siguiente tanda sin reconstruir lo ya visible.
+    GRID_PAGE = 70  # 10 filas × 7 (~57ms/card en CTk: página chica = aparece rápido)
+
     def _bulk_render_grid(self):
+        # Cancelar un render por lotes en curso ANTES de destruir (un tick
+        # encolado pintaría sobre widgets muertos).
+        self._cancel_chunked("bulk_grid")
         for w in self._bulk_grid_scroll.winfo_children():
             w.destroy()
         self._bulk_card_widgets = []
@@ -53,18 +63,55 @@ class BulkCaptureGridMixin:
             ).pack(pady=80)
             return
 
-        row_frame = None
-        for i, cand in enumerate(candidates):
-            if i % self.GRID_COLS == 0:
-                row_frame = ctk.CTkFrame(self._bulk_grid_scroll, fg_color="transparent")
-                row_frame.pack(fill="x", pady=2)
-            card = self._bulk_make_card(row_frame, cand, i)
-            card.pack(side="left", padx=3, pady=2)
-            self._bulk_card_widgets.append((cand, card))
+        self._bulk_grid_state = {"cands": candidates, "next": 0,
+                                 "row": None, "more_btn": None}
+        self._bulk_render_next_page()
 
-        self._bulk_approve_all_btn.configure(state="normal")
-        self._bulk_commit_btn.configure(state="normal")
-        self._bulk_grid_scroll.focus_set()
+    def _bulk_render_next_page(self):
+        st = getattr(self, "_bulk_grid_state", None)
+        if not st:
+            return
+        if st["more_btn"] is not None:
+            st["more_btn"].destroy()
+            st["more_btn"] = None
+        cands = st["cands"]
+        start = st["next"]
+        end = min(start + self.GRID_PAGE, len(cands))
+        st["next"] = end
+
+        def _make(i, cand):
+            def _op():
+                if i % self.GRID_COLS == 0:
+                    st["row"] = ctk.CTkFrame(
+                        self._bulk_grid_scroll, fg_color="transparent")
+                    # anchor (no fill): si la fila se estira al ancho del padre,
+                    # cada cambio de ancho del scrollable la redibuja (CTk canvas
+                    # caro) → construir N cards costaba O(N²) en redraws.
+                    st["row"].pack(anchor="w", pady=2)
+                card = self._bulk_make_card(st["row"], cand, i)
+                card.pack(side="left", padx=3, pady=2)
+                self._bulk_card_widgets.append((cand, card))
+            return _op
+
+        ops = [_make(i, cands[i]) for i in range(start, end)]
+
+        def _done():
+            remaining = len(cands) - st["next"]
+            if remaining > 0:
+                st["more_btn"] = ctk.CTkButton(
+                    self._bulk_grid_scroll,
+                    text=f"▼ Mostrar {min(self.GRID_PAGE, remaining)} más "
+                         f"({remaining} restantes)",
+                    command=self._bulk_render_next_page,
+                    fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
+                    font=theme.FONT_SMALL, height=30,
+                )
+                st["more_btn"].pack(pady=8)
+            self._bulk_approve_all_btn.configure(state="normal")
+            self._bulk_commit_btn.configure(state="normal")
+            self._bulk_grid_scroll.focus_set()
+
+        self._render_chunked("bulk_grid", ops, on_done=_done)
 
     def _bulk_make_card(self, parent, cand, idx: int) -> ctk.CTkFrame:
         bg = self.DECISION_BG.get(cand.decision, theme.BG_TERTIARY)
@@ -86,11 +133,13 @@ class BulkCaptureGridMixin:
             ctk.CTkLabel(card, text="?", font=("Segoe UI", 24),
                          text_color=theme.TEXT_MUTED).pack(pady=(6, 2))
 
-        ctk.CTkLabel(
+        char_lbl = ctk.CTkLabel(
             card, text=cand.display_char,
             font=("Segoe UI", 18, "bold"),
             text_color=theme.TEXT_PRIMARY,
-        ).pack()
+        )
+        char_lbl.pack()
+        card._char_lbl = char_lbl  # para refrescar in-place al editar
 
         lc = cand.glyph.label_confidence
         if lc is None:
@@ -104,8 +153,10 @@ class BulkCaptureGridMixin:
         ctk.CTkLabel(card, text=conf_text, font=("Segoe UI", 9),
                      text_color=conf_color).pack()
 
-        ctk.CTkLabel(card, text=self.DECISION_ICON.get(cand.decision, ""),
-                     font=("Segoe UI", 10)).pack()
+        decision_lbl = ctk.CTkLabel(card, text=self.DECISION_ICON.get(cand.decision, ""),
+                                    font=("Segoe UI", 10))
+        decision_lbl.pack()
+        card._decision_lbl = decision_lbl  # para refrescar in-place al aprobar/rechazar
 
         if cand.source_label:
             ctk.CTkLabel(
@@ -127,6 +178,34 @@ class BulkCaptureGridMixin:
 
         return card
 
+    def _bulk_refresh_card_visual(self, idx: int):
+        """Refresca SOLO la card `idx` (color/borde/ícono/char) tras cambiar su
+        decisión. Antes cada tecla A/R re-renderizaba el grid COMPLETO (cientos
+        de cards) — eso congelaba la app en sesiones grandes."""
+        if idx is None or idx >= len(self._bulk_card_widgets):
+            return
+        cand, card = self._bulk_card_widgets[idx]
+        selected = (idx == self._bulk_selected_idx)
+        card.configure(
+            fg_color=self.DECISION_BG.get(cand.decision, theme.BG_TERTIARY),
+            border_color=(theme.ACCENT_ORANGE if selected
+                          else self.DECISION_BORDER.get(cand.decision, theme.BORDER)),
+        )
+        lbl = getattr(card, "_decision_lbl", None)
+        if lbl is not None:
+            lbl.configure(text=self.DECISION_ICON.get(cand.decision, ""))
+        char_lbl = getattr(card, "_char_lbl", None)
+        if char_lbl is not None:
+            char_lbl.configure(text=cand.display_char)
+
+    def _bulk_select_next(self, idx: int):
+        """Selecciona la card siguiente, paginando si idx era la última visible."""
+        st = getattr(self, "_bulk_grid_state", None)
+        if (idx >= len(self._bulk_card_widgets) - 1 and st
+                and st["next"] < len(st["cands"])):
+            self._bulk_render_next_page()
+        self._bulk_select(min(len(self._bulk_card_widgets) - 1, idx + 1))
+
     def _bulk_select(self, idx: int):
         if self._bulk_selected_idx is not None and self._bulk_selected_idx < len(self._bulk_card_widgets):
             prev_cand, prev_card = self._bulk_card_widgets[self._bulk_selected_idx]
@@ -146,10 +225,9 @@ class BulkCaptureGridMixin:
             "approved": "rejected",
             "rejected": "pending",
         }.get(cand.decision, "pending")
-        self._bulk_render_grid()
+        self._bulk_refresh_card_visual(idx)
         self._bulk_update_stats()
-        if idx < len(self._bulk_card_widgets):
-            self._bulk_select(idx)
+        self._bulk_select(idx)
 
     def _bulk_edit_char_popup(self, idx: int):
         if not self._bulk_session or idx >= len(self._bulk_card_widgets):
@@ -176,7 +254,7 @@ class BulkCaptureGridMixin:
                 cand.user_label = new_char[:1]
                 cand.decision = "approved"
             win.destroy()
-            self._bulk_render_grid()
+            self._bulk_refresh_card_visual(idx)
             self._bulk_update_stats()
 
         entry.bind("<Return>", lambda e: save())
@@ -192,21 +270,27 @@ class BulkCaptureGridMixin:
         n = len(self._bulk_card_widgets)
 
         if key in ("right", "down"):
-            self._bulk_select(min(n - 1, (idx or 0) + 1))
+            # Al llegar al final de la página, cargar la siguiente tanda para
+            # que la revisión por teclado fluya sin tocar el mouse.
+            st = getattr(self, "_bulk_grid_state", None)
+            if (idx is not None and idx >= n - 1 and st
+                    and st["next"] < len(st["cands"])):
+                self._bulk_render_next_page()
+            self._bulk_select(min(len(self._bulk_card_widgets) - 1, (idx or 0) + 1))
         elif key in ("left", "up"):
             self._bulk_select(max(0, (idx or 0) - 1))
         elif key == "a" and idx is not None:
             cand, _ = self._bulk_card_widgets[idx]
             cand.decision = "approved"
-            self._bulk_render_grid()
+            self._bulk_refresh_card_visual(idx)
             self._bulk_update_stats()
-            self._bulk_select(min(n - 1, idx + 1))
+            self._bulk_select_next(idx)
         elif key == "r" and idx is not None:
             cand, _ = self._bulk_card_widgets[idx]
             cand.decision = "rejected"
-            self._bulk_render_grid()
+            self._bulk_refresh_card_visual(idx)
             self._bulk_update_stats()
-            self._bulk_select(min(n - 1, idx + 1))
+            self._bulk_select_next(idx)
         elif key == "e" and idx is not None:
             self._bulk_edit_char_popup(idx)
         elif key == "space" and idx is not None:
@@ -215,13 +299,14 @@ class BulkCaptureGridMixin:
             self._bulk_select(-1)
             self._bulk_selected_idx = None
         elif event.state & 0x4:  # Ctrl
-            if key == "a":
-                for c, _ in self._bulk_card_widgets:
-                    c.decision = "approved"
-                self._bulk_render_grid()
-                self._bulk_update_stats()
-            elif key == "d":
-                for c, _ in self._bulk_card_widgets:
-                    c.decision = "rejected"
-                self._bulk_render_grid()
+            if key in ("a", "d"):
+                decision = "approved" if key == "a" else "rejected"
+                # Aplica a TODOS los candidatos filtrados (también los aún no
+                # paginados); refresca el visual solo de los visibles.
+                st = getattr(self, "_bulk_grid_state", None)
+                targets = st["cands"] if st else [c for c, _ in self._bulk_card_widgets]
+                for c in targets:
+                    c.decision = decision
+                for i in range(len(self._bulk_card_widgets)):
+                    self._bulk_refresh_card_visual(i)
                 self._bulk_update_stats()

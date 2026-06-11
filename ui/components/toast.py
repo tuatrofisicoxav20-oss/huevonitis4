@@ -80,7 +80,10 @@ class ToastManager:
         toast._duration = duration
 
         self._toasts.append(toast)
-        self.parent.update_idletasks()
+        # NO update_idletasks aquí: el flush global procesa el backlog de
+        # layout de TODA la app (grids de cientos de widgets incluidos) y
+        # congelaba el mainloop al mostrar un toast tras una operación gorda.
+        # _restack/_slide_in ya tienen fallbacks para medidas no listas.
         self._restack()
         self._slide_in(toast)
         self._animate_progress(toast, duration)
@@ -108,7 +111,6 @@ class ToastManager:
         toast.after(50, lambda: step(0))
 
     def _restack(self):
-        self.parent.update_idletasks()
         pw = self.parent.winfo_width()
         ph = self.parent.winfo_height()
         # HiDPI guard: customtkinter a veces reporta winfo_width antes de
@@ -131,7 +133,6 @@ class ToastManager:
 
         for i, t in enumerate(reversed(self._toasts)):
             try:
-                t.update_idletasks()
                 th = t.winfo_reqheight() or 72
                 y = base_y - th - i * (th + self.TOAST_SPACING)
                 t.place(x=base_x, y=y, width=self.TOAST_WIDTH)
@@ -140,7 +141,6 @@ class ToastManager:
                 pass
 
     def _slide_in(self, toast):
-        self.parent.update_idletasks()
         pw = self.parent.winfo_width()
         if pw < 10:
             pw = 800

@@ -65,6 +65,74 @@ def _patch_customtkinter_py314(logger: logging.Logger) -> None:
     CTkScrollableFrame._h4_py314_patched = True
     logger.info("Aplicado workaround de scroll de customtkinter para Python 3.14")
 
+    # Workaround 2: CTkScrollbar.set → _draw → update_idletasks → set → … entra
+    # en recursión cuando un update_idletasks externo (p. ej. el toast al
+    # terminar la Captura masiva) procesa la geometría de un scrollable frame
+    # con cientos de items: la app se congela ("se queda plasmada"). Guard de
+    # reentrada: la llamada anidada solo registra los valores y NO redibuja —
+    # el redraw llega igual con el set de nivel superior.
+    try:
+        from customtkinter.windows.widgets.ctk_scrollbar import CTkScrollbar
+    except Exception as exc:
+        logger.debug("patch ctk scrollbar omitido (import falló): %s", exc)
+        return
+    if getattr(CTkScrollbar, "_h4_set_guard", False):
+        return
+    _orig_sb_set = CTkScrollbar.set
+
+    def _safe_sb_set(self, *args, **kwargs):
+        # Debounce: registrar los valores y agendar UN redraw con after(8).
+        # Los N sets encolados (uno por <Configure> de cada widget empacado)
+        # colapsan en un solo _draw; after() de timer además escapa del
+        # update_idletasks en curso (after_idle NO lo haría).
+        self._h4_pending_set = (args, kwargs)
+        if getattr(self, "_h4_set_after", None) is not None:
+            return
+
+        def _flush():
+            self._h4_set_after = None
+            pend = getattr(self, "_h4_pending_set", None)
+            if pend is None:
+                return
+            a, kw = pend
+            try:
+                if self.winfo_exists():
+                    _orig_sb_set(self, *a, **kw)
+            except Exception:  # widget destruido a mitad del after
+                pass
+
+        try:
+            self._h4_set_after = self.after(8, _flush)
+        except Exception:
+            # fallback si after no está disponible (teardown): comportamiento orig
+            _orig_sb_set(self, *args, **kwargs)
+
+    CTkScrollbar.set = _safe_sb_set
+
+    # Workaround 2b: CTkScrollbar._draw llama update_idletasks (vía su canvas
+    # interno) para medirse — eso re-procesa la cola de geometría COMPLETA de
+    # la app DENTRO del redraw, y los <Configure> resultantes redibujan otros
+    # scrollbars que vuelven a procesar la cola (cascada que congela la app
+    # con grids grandes). Durante _draw neutralizamos update_idletasks a nivel
+    # tkinter.Misc (todos los widgets) y lo restauramos al salir (LIFO-safe):
+    # como mucho el slider usa la medida del frame anterior y se corrige en el
+    # siguiente redraw.
+    import tkinter as _tk
+
+    _orig_sb_draw = CTkScrollbar._draw
+
+    def _safe_sb_draw(self, *args, **kwargs):
+        prev_upd = _tk.Misc.update_idletasks
+        _tk.Misc.update_idletasks = lambda s: None
+        try:
+            return _orig_sb_draw(self, *args, **kwargs)
+        finally:
+            _tk.Misc.update_idletasks = prev_upd
+
+    CTkScrollbar._draw = _safe_sb_draw
+    CTkScrollbar._h4_set_guard = True
+    logger.info("Aplicado guard anti-recursión de CTkScrollbar (set + _draw)")
+
 
 def main():
     logger = _bootstrap()
