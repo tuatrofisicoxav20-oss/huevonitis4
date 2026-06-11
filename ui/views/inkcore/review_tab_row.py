@@ -8,6 +8,7 @@ Separado de review_tab.py. Depende de:
 import customtkinter as ctk
 
 from ui import theme
+from ui.modal_utils import safe_grab
 
 
 class ReviewTabRowMixin:
@@ -150,7 +151,7 @@ class ReviewTabRowMixin:
         win.title("Cambiar carácter")
         win.configure(fg_color=theme.BG_PRIMARY)
         win.geometry("360x280")
-        win.grab_set()
+        safe_grab(win, self)
         win.resizable(False, False)
 
         ctk.CTkLabel(

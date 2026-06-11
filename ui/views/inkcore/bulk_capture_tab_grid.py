@@ -14,6 +14,7 @@ from typing import ClassVar
 import customtkinter as ctk
 
 from ui import theme
+from ui.modal_utils import safe_grab
 
 try:
     from PIL import ImageTk  # noqa: F401 (chequeo)
@@ -237,7 +238,7 @@ class BulkCaptureGridMixin:
         win = ctk.CTkToplevel(self)
         win.title("Editar carácter")
         win.geometry("280x140")
-        win.grab_set()
+        safe_grab(win, self)
 
         ctk.CTkLabel(win, text=f"Carácter actual: {cand.display_char!r}",
                      font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(pady=(16, 4))

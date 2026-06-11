@@ -22,6 +22,7 @@ from core.businesscore.models import (
     ClientJob,
 )
 from ui import theme
+from ui.modal_utils import safe_grab
 
 
 class BusinessJobsMixin:
@@ -169,7 +170,7 @@ class BusinessJobsMixin:
         dlg = ctk.CTkToplevel(self)
         dlg.title("Nuevo Trabajo")
         dlg.geometry("440x540")
-        dlg.grab_set()
+        safe_grab(dlg, self)
 
         scroll = ctk.CTkScrollableFrame(dlg, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=20, pady=16)
@@ -246,7 +247,7 @@ class BusinessJobsMixin:
         dlg = ctk.CTkToplevel(self)
         dlg.title("Cambiar Estado")
         dlg.geometry("320x300")
-        dlg.grab_set()
+        safe_grab(dlg, self)
 
         ctk.CTkLabel(dlg, text=f"Estado de: {job.client_name}",
                      font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY).pack(pady=16, padx=20)

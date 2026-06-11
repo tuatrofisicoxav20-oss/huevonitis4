@@ -15,6 +15,7 @@ import customtkinter as ctk
 
 from core.session_diagnostic import CheckResult
 from ui import theme
+from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     win.configure(fg_color=theme.BG_PRIMARY)
     win.geometry("640x520")
     win.transient(root)
-    win.grab_set()
+    safe_grab(win, root)
 
     user_continued = {"ok": False}
 

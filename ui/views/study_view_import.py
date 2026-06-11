@@ -17,6 +17,8 @@ from typing import ClassVar
 
 import customtkinter as ctk
 
+from ui.modal_utils import safe_grab
+
 # ── Utilidades de análisis rápido (pre-ingesta) ───────────────────────────────
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
@@ -245,7 +247,7 @@ class StudyImportMixin:
     def _on_preview_ready(self, path: str, info: dict) -> None:
         self._show_progress(False)
         dlg = _ImportPreviewDialog(self, info=info, on_confirm=lambda: self._ingest_path(path))
-        dlg.grab_set()
+        safe_grab(dlg, self)
         dlg.focus()
 
     # ── Acciones post-ingesta ──────────────────────────────────────────────────

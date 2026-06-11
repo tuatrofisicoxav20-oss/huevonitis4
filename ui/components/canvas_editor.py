@@ -5,6 +5,7 @@ import customtkinter as ctk
 
 from core.models import LineElement, Page, RectElement, TextElement
 from ui import theme
+from ui.modal_utils import safe_grab
 
 _IMG_CACHE_MAX = 50
 
@@ -317,7 +318,7 @@ class CanvasEditor(ctk.CTkFrame):
         dlg = ctk.CTkToplevel(self)
         dlg.title("Editar texto")
         dlg.geometry("380x200")
-        dlg.grab_set()
+        safe_grab(dlg, self)
 
         ctk.CTkLabel(dlg, text="Texto:", font=theme.FONT_BODY).pack(padx=16, pady=(16, 4), anchor="w")
         entry = ctk.CTkTextbox(dlg, height=80, font=theme.FONT_BODY)

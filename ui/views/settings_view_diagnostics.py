@@ -9,6 +9,7 @@ import re
 import customtkinter as ctk
 
 from ui import theme
+from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class SettingsDiagnosticsMixin:
         win = ctk.CTkToplevel(self)
         win.title("🩺 Doctor — Huevonitis 4")
         win.geometry("760x600")
-        win.grab_set()
+        safe_grab(win, self)
 
         txt = ctk.CTkTextbox(win, font=theme.FONT_MONO, fg_color=theme.BG_TERTIARY,
                              text_color=theme.TEXT_PRIMARY)
@@ -102,7 +103,7 @@ class SettingsDiagnosticsMixin:
         win = ctk.CTkToplevel(self)
         win.title("Diagnóstico — Huevonitis 4")
         win.geometry("720x560")
-        win.grab_set()
+        safe_grab(win, self)
 
         txt = ctk.CTkTextbox(win, font=theme.FONT_MONO, fg_color=theme.BG_TERTIARY,
                              text_color=theme.TEXT_PRIMARY)

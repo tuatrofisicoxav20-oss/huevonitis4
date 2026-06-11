@@ -17,6 +17,7 @@ import customtkinter as ctk
 
 import config
 from ui import theme
+from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class InkCoreViewProfileMixin:
         win.title("Crear perfil de letra")
         win.configure(fg_color=theme.BG_PRIMARY)
         win.geometry("400x220")
-        win.grab_set()
+        safe_grab(win, self)
         win.resizable(False, False)
 
         ctk.CTkLabel(
@@ -196,7 +197,7 @@ class InkCoreViewProfileMixin:
         win.title("Renombrar perfil")
         win.configure(fg_color=theme.BG_PRIMARY)
         win.geometry("400x200")
-        win.grab_set()
+        safe_grab(win, self)
         win.resizable(False, False)
 
         ctk.CTkLabel(

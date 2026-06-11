@@ -6,6 +6,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from ui import theme
+from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,7 @@ class BulkCaptureTabMixin:
         win.title("Confirmar PDF")
         win.geometry("520x640")
         win.transient(self.winfo_toplevel())
-        win.grab_set()
+        safe_grab(win, self)
 
         ctk.CTkLabel(
             win,

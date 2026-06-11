@@ -15,6 +15,7 @@ import customtkinter as ctk
 
 import config
 from ui import theme
+from ui.modal_utils import safe_grab
 
 # Spinner frames for background work indicator
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -112,7 +113,7 @@ class AppChromeMixin:
         dlg.title("Atajos de teclado")
         dlg.geometry("400x340")
         dlg.configure(fg_color=theme.BG_PRIMARY)
-        dlg.grab_set()
+        safe_grab(dlg, self)
 
         header = ctk.CTkFrame(dlg, fg_color=theme.BG_SECONDARY, height=52, corner_radius=0)
         header.pack(fill="x")

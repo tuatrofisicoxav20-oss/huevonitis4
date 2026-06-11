@@ -12,6 +12,7 @@ import customtkinter as ctk
 
 from core.diagnostics import diagnostics
 from ui import theme
+from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class BankTabEditMixin:
         win.title("Agregar glifo")
         win.configure(fg_color=theme.BG_PRIMARY)
         win.geometry("420x340")
-        win.grab_set()
+        safe_grab(win, self)
         win.resizable(False, False)
 
         ctk.CTkLabel(

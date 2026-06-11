@@ -5,6 +5,7 @@ import customtkinter as ctk
 
 from core.businesscore.models import Payment
 from ui import theme
+from ui.modal_utils import safe_grab
 
 
 class BusinessPaymentsMixin:
@@ -40,7 +41,7 @@ class BusinessPaymentsMixin:
         dlg = ctk.CTkToplevel(self)
         dlg.title("Registrar Pago")
         dlg.geometry("380x360")
-        dlg.grab_set()
+        safe_grab(dlg, self)
 
         scroll = ctk.CTkScrollableFrame(dlg, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=16, pady=12)
