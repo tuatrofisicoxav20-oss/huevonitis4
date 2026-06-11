@@ -64,14 +64,50 @@ def export_rendered_pages_pdf(
     images: "list",
     output_path: str,
     title: str | None = None,
+    resolution: float = 150.0,
 ) -> bool:
-    """Pega lista de imágenes RGB (de renderer.render_pages) como páginas CARTA de un PDF.
+    """Pega lista de imágenes RGB (de renderer.render_pages) como páginas de un PDF.
 
-    Cada imagen ocupa la página COMPLETA, sin margen del PDF: el render ya trae
-    sus márgenes físicos en mm y un margen extra correría el texto, desfasando
-    el interlineado de los renglones de la hoja impresa. Una página de render
-    carta a 150 DPI (1275×1650 px) mapea 1:1 a los 612×792 pt del PDF carta.
-    Cierra el flujo: texto → reescribir con mi letra → PDF imprimible.
+    R8 (I3/R-BUG-10): ruta primaria con PIL PURO — Pillow escribe PDFs
+    multipágina nativamente, así el botón de exportar funciona sin reportlab
+    instalado. ``resolution`` mapea px→tamaño físico: una página carta a
+    150 DPI (1275×1650 px) con resolution=150 da exactamente 8.5×11 in.
+    Cada imagen ocupa la página COMPLETA, sin margen del PDF: el render ya
+    trae sus márgenes físicos en mm. Si reportlab está instalado, la variante
+    vieja queda disponible como export_rendered_pages_pdf_reportlab.
+    """
+    if not PIL_OK or not images:
+        return False
+    try:
+        pages = []
+        for img in images:
+            if getattr(img, "mode", None) == "RGBA":
+                bg = PILImage.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.getchannel("A"))
+                pages.append(bg)
+            elif getattr(img, "mode", None) != "RGB":
+                pages.append(img.convert("RGB"))
+            else:
+                pages.append(img)
+        pages[0].save(
+            output_path, "PDF", save_all=True, append_images=pages[1:],
+            resolution=float(resolution),
+        )
+        return True
+    except Exception as exc:
+        logger.error("export_rendered_pages_pdf (PIL) error: %s", exc)
+        return False
+
+
+def export_rendered_pages_pdf_reportlab(
+    images: "list",
+    output_path: str,
+    title: str | None = None,
+) -> bool:
+    """Variante reportlab del export multipágina (opcional, pre-R8).
+
+    Se conserva para quien tenga reportlab y quiera su pipeline de canvas;
+    la ruta primaria es export_rendered_pages_pdf (PIL puro).
     """
     if not PIL_OK or not RL_OK:
         return False
@@ -143,10 +179,19 @@ def export_pages_streaming(
     caiga en su posición física exacta).
     progress_cb(actual, total): callback opcional para la barra de progreso.
     Devuelve False si no se escribió ninguna página.
+
+    R8: sin reportlab cae a la ruta PIL (_streaming_pdf_pil): el PDF del
+    Writer funciona igual; la diferencia es que Pillow retiene las páginas
+    hasta el save final (RAM proporcional al documento), aceptable hasta
+    decenas de páginas. Con reportlab instalado se mantiene el streaming de
+    RAM constante para documentos muy largos.
     """
-    if not PIL_OK or not RL_OK:
-        logger.error("export_pages_streaming: faltan PIL/reportlab")
+    if not PIL_OK:
+        logger.error("export_pages_streaming: falta PIL")
         return False
+    if not RL_OK:
+        return _streaming_pdf_pil(pages, output_path, page_size=page_size,
+                                  progress_cb=progress_cb, total=total)
     import io
 
     from reportlab.lib.pagesizes import A4 as RL_A4
@@ -191,4 +236,49 @@ def export_pages_streaming(
         return True
     except Exception as exc:
         logger.error("export_pages_streaming error: %s", exc)
+        return False
+
+
+def _streaming_pdf_pil(
+    pages,
+    output_path: str,
+    *,
+    page_size: str = "letter",
+    progress_cb=None,
+    total: "int | None" = None,
+) -> bool:
+    """Consume el iterador de páginas y escribe el PDF con PIL puro (R8).
+
+    Pillow no escribe página a página: se acumulan las imágenes RGB y el save
+    final arma el multipágina. El callback de progreso se dispara al CONSUMIR
+    cada página (el render es lo lento; el save final es rápido). resolution
+    se deriva del ancho de la primera página asumiendo el papel pedido, así
+    el PDF imprime a tamaño físico exacto igual que la ruta reportlab.
+    """
+    width_in = 8.27 if str(page_size).lower() == "a4" else 8.5
+    collected: list = []
+    n = 0
+    try:
+        for img in pages:
+            if getattr(img, "mode", None) == "RGBA":
+                bg = PILImage.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.getchannel("A"))
+                img = bg
+            elif getattr(img, "mode", None) != "RGB":
+                img = img.convert("RGB")
+            collected.append(img)
+            n += 1
+            if progress_cb is not None:
+                with contextlib.suppress(Exception):
+                    progress_cb(n, total)
+        if not collected:
+            return False
+        resolution = collected[0].width / width_in
+        collected[0].save(
+            output_path, "PDF", save_all=True, append_images=collected[1:],
+            resolution=resolution,
+        )
+        return True
+    except Exception as exc:
+        logger.error("_streaming_pdf_pil error: %s", exc)
         return False

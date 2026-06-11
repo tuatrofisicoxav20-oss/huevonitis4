@@ -437,7 +437,7 @@ class WriterTabMixin:
 
                 ok = export_pages_streaming(pages, path, page_size="letter", progress_cb=_progress)
                 self.after(0, lambda: self._page_count_label.configure(text=""))
-                msg = "PDF exportado" if ok else "Error al exportar PDF (¿reportlab instalado?)"
+                msg = "PDF exportado" if ok else "Error al exportar PDF (revisá el log)"
                 kind = "success" if ok else "error"
                 self.after(0, lambda: self.toast(msg, kind))
             except Exception as exc:

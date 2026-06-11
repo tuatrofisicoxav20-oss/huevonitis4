@@ -59,6 +59,16 @@
 # scikit-image>=0.24
 
 # -----------------------------------------------------------------------------
+# Export PDF
+# -----------------------------------------------------------------------------
+
+# reportlab — YA NO es necesario para el PDF del Writer (R8): la ruta primaria
+# usa Pillow (PDF multipágina nativo). Si está instalado, el export streaming
+# de documentos MUY largos usa reportlab (RAM constante página a página) y
+# export_text_pdf (PDF de texto plano de StudyCore) lo sigue requiriendo.
+# reportlab~=4.4
+
+# -----------------------------------------------------------------------------
 # Utilidades de sistema
 # -----------------------------------------------------------------------------
 
