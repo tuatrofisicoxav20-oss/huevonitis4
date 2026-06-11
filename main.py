@@ -136,6 +136,8 @@ def _patch_customtkinter_py314(logger: logging.Logger) -> None:
 
 def main():
     logger = _bootstrap()
+    from ui import perf
+    perf.mark("startup")  # U0: el primer navigate("dashboard") cierra el timer
     _patch_customtkinter_py314(logger)
 
     from app_state import STATE

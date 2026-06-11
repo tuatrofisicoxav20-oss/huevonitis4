@@ -14,7 +14,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 import config
-from ui import theme
+from ui import perf, theme
 from ui.app_chrome import AppChromeMixin
 from ui.app_layout import AppLayoutMixin
 from ui.components.toast import ToastManager
@@ -146,10 +146,14 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
         self._current_view = view
         view.on_show()
         self.set_status(f"{name}")
+        perf.note_navigate(self, view_id)
 
     # ── Entrance animation ───────────────────────────────────────────────────
 
     def _entrance_animation(self):
+        from ui import motion
+        if not motion.should_animate("motion"):
+            return
         w = config.WINDOW_DEFAULT_WIDTH
         h = config.WINDOW_DEFAULT_HEIGHT
         steps = 18

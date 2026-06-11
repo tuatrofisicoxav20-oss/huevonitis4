@@ -78,6 +78,7 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
 
         self._section(scroll, "🎨 Apariencia", [
             ("Tema", "theme", "menu", ["Oscuro", "Claro", "Sistema"]),
+            ("Animaciones", "animations", "menu", ["Completas", "Reducidas", "Off"]),
         ])
         # Backends disponibles (solo los que tienen las dependencias instaladas)
         try:
@@ -215,6 +216,12 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
         for key, (ftype, w) in self._field_widgets.items():
             if ftype == "entry":
                 val = w.get().strip()
+                if not val:
+                    # Campo vacío = conservar el default de config; sin esto,
+                    # una instalación sin settings.json no podía guardar NADA
+                    # (base_price vacío reventaba la validación completa).
+                    self._settings.pop(key, None)
+                    continue
                 if key in ("base_price",):
                     try:
                         float(val)
@@ -262,6 +269,9 @@ class SettingsView(SettingsDiagnosticsMixin, SettingsCacheMixin, BaseView):
         self._save_settings()
         _apply_settings_to_config(self._settings)
         self._notify_backends(prev_ocr)
+        # U0: el nivel de animaciones aplica EN CALIENTE (sin reiniciar).
+        from ui import motion
+        motion.set_motion_level(self._settings.get("animations", "Completas"))
         self.toast("Configuración guardada — reinicia la app para aplicar el tema", "success")
 
 

@@ -1,212 +1,108 @@
+"""Animaciones de la UI — TODAS pasan por ui/motion.py (U0).
+
+Este módulo conserva las firmas públicas históricas (count_up, animate_width,
+ease_out, …) pero delega en motion.animate(), que respeta el nivel global
+"Animaciones" del usuario (Completas / Reducidas / Off) y cancela jobs de
+widgets muertos. Las easings y helpers de color se re-exportan desde motion.
+"""
 import contextlib
 
-# ── Easing functions ────────────────────────────────────────────────────────
-
-def ease_in_out(t: float) -> float:
-    return t * t * (3 - 2 * t)
-
-
-def ease_out(t: float) -> float:
-    return 1 - (1 - t) ** 3
-
-
-def ease_in(t: float) -> float:
-    return t * t * t
-
-
-def _hex_to_rgb(h: str) -> tuple:
-    h = h.lstrip('#')
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def _rgb_to_hex(r: int, g: int, b: int) -> str:
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def _lerp_color(from_hex: str, to_hex: str, t: float) -> str:
-    fc = _hex_to_rgb(from_hex)
-    tc = _hex_to_rgb(to_hex)
-    r = int(fc[0] + (tc[0] - fc[0]) * t)
-    g = int(fc[1] + (tc[1] - fc[1]) * t)
-    b = int(fc[2] + (tc[2] - fc[2]) * t)
-    return _rgb_to_hex(r, g, b)
-
+from ui import motion
+from ui.motion import (  # noqa: F401 — re-export para firmas históricas
+    ease_in,
+    ease_in_out,
+    ease_out,
+)
+from ui.motion import (
+    lerp_color as _lerp_color,
+)
 
 # ── Width animation ─────────────────────────────────────────────────────────
 
 def animate_width(widget, start_w: int, end_w: int, steps: int = 15, step_ms: int = 11, callback=None):
-    if steps <= 0:
-        widget.configure(width=end_w)
-        if callback:
-            callback()
-        return
+    def _step(t):
+        widget.configure(width=int(start_w + (end_w - start_w) * t))
 
-    def step(i):
-        t = ease_in_out(i / steps)
-        new_w = int(start_w + (end_w - start_w) * t)
-        try:
-            widget.configure(width=new_w)
-        except Exception:
-            return
-        if i < steps:
-            widget.after(step_ms, lambda: step(i + 1))
-        else:
-            widget.configure(width=end_w)
-            if callback:
-                callback()
-
-    step(1)
+    motion.animate(widget, _step, steps=steps, step_ms=step_ms, on_done=callback,
+                   kind="motion", easing="ease_in_out", key="width")
 
 
 # ── Color / label animation ─────────────────────────────────────────────────
 
 def animate_alpha_label(label, from_color: str, to_color: str, steps: int = 12, step_ms: int = 16):
-    fc = _hex_to_rgb(from_color)
-    tc = _hex_to_rgb(to_color)
+    def _step(t):
+        label.configure(text_color=_lerp_color(from_color, to_color, t))
 
-    def step(i):
-        t = ease_in_out(i / steps)
-        r = int(fc[0] + (tc[0] - fc[0]) * t)
-        g = int(fc[1] + (tc[1] - fc[1]) * t)
-        b = int(fc[2] + (tc[2] - fc[2]) * t)
-        try:
-            label.configure(text_color=_rgb_to_hex(r, g, b))
-        except Exception:
-            return
-        if i < steps:
-            label.after(step_ms, lambda: step(i + 1))
-
-    step(1)
+    motion.animate(label, _step, steps=steps, step_ms=step_ms,
+                   kind="color", easing="ease_in_out", key="text_color")
 
 
 # ── Fade frame in (bg color transition) ────────────────────────────────────
 
 def fade_frame_in(frame, steps: int = 8, step_ms: int = 20, callback=None):
-    """Lightweight fade-in using bg color shift from near-black to card bg."""
+    """Fade-in barato vía lerp de fg_color desde el fondo del tema (UI-21:
+    el color inicial sale de theme.BG_PRIMARY — ya no rompe el tema claro)."""
     from ui import theme
-    start_col = "#0a0e14"
+    start_col = theme.BG_PRIMARY
     end_col = theme.CARD_BG
 
-    def step(i):
-        t = ease_in_out(i / steps)
-        color = _lerp_color(start_col, end_col, t)
-        with contextlib.suppress(Exception):
-            frame.configure(fg_color=color)
-        if i < steps:
-            frame.after(step_ms, lambda: step(i + 1))
-        else:
-            with contextlib.suppress(Exception):
-                frame.configure(fg_color=end_col)
-            if callback:
-                callback()
+    def _step(t):
+        frame.configure(fg_color=_lerp_color(start_col, end_col, t))
 
-    step(1)
+    motion.animate(frame, _step, steps=steps, step_ms=step_ms, on_done=callback,
+                   kind="color", easing="ease_in_out", key="fg_color")
 
 
 # ── Count-up animation ──────────────────────────────────────────────────────
 
-# Per-widget job registry so a new count_up() cancels any in-flight animation
-# on the same label, preventing double-animation value corruption.
-_count_up_jobs: dict = {}
-
-
 def count_up(label, end_value: int | float, prefix: str = "", suffix: str = "",
              steps: int = 20, step_ms: int = 30, is_float: bool = False):
-    # Cancel any existing animation running on this label
-    existing = _count_up_jobs.pop(id(label), None)
-    if existing is not None:
-        with contextlib.suppress(Exception):
-            label.after_cancel(existing)
-
-    def step(i):
-        t = ease_in_out(i / steps)
-        current = end_value * t
+    def _fmt(value) -> str:
         if is_float:
-            text = f"{prefix}{current:,.2f}{suffix}"
-        else:
-            text = f"{prefix}{int(current):,}{suffix}"
-        try:
-            label.configure(text=text)
-        except Exception:
-            _count_up_jobs.pop(id(label), None)
-            return
-        if i < steps:
-            job = label.after(step_ms, lambda: step(i + 1))
-            _count_up_jobs[id(label)] = job
-        else:
-            _count_up_jobs.pop(id(label), None)
-            if is_float:
-                label.configure(text=f"{prefix}{end_value:,.2f}{suffix}")
-            else:
-                label.configure(text=f"{prefix}{int(end_value):,}{suffix}")
+            return f"{prefix}{value:,.2f}{suffix}"
+        return f"{prefix}{int(value):,}{suffix}"
 
-    job = label.after(step_ms, lambda: step(1))
-    _count_up_jobs[id(label)] = job
+    def _step(t):
+        label.configure(text=_fmt(end_value if t >= 1.0 else end_value * t))
+
+    motion.animate(label, _step, steps=steps, step_ms=step_ms,
+                   kind="motion", easing="ease_in_out", key="count_up")
 
 
 # ── Generic value animator ──────────────────────────────────────────────────
-
-# Per-widget job registry so a new animate_value() cancels any in-flight
-# animation on the same widget, preventing simultaneous double-animations.
-_animate_value_jobs: dict = {}
-
 
 def animate_value(start: float, end: float, duration_ms: int, callback,
                   easing="ease_in_out", widget=None, steps: int = 30):
     """
     Generic value animator. Calls callback(current_value) each step.
     easing: 'ease_in_out' | 'ease_out' | 'ease_in' | 'linear'
-    widget: any tkinter widget used for .after() scheduling; if None, tries callback
+    widget: any tkinter widget used for .after() scheduling; if None, applies
+    the final value synchronously.
     """
-    easing_fns = {
-        "ease_in_out": ease_in_out,
-        "ease_out": ease_out,
-        "ease_in": ease_in,
-        "linear": lambda t: t,
-    }
-    ease_fn = easing_fns.get(easing, ease_in_out)
+    if widget is None:
+        with contextlib.suppress(Exception):
+            callback(end)
+        return
     step_ms = max(1, duration_ms // steps)
 
-    # We need a widget for .after(); if none provided, attempt to use the callback
-    # return value or just fire immediately
-    if widget is None:
-        for i in range(1, steps + 1):
-            t = ease_fn(i / steps)
-            callback(start + (end - start) * t)
-        return
+    def _step(t):
+        callback(start + (end - start) * t)
 
-    # Cancel any in-flight animation on this widget
-    existing = _animate_value_jobs.pop(id(widget), None)
-    if existing is not None:
-        with contextlib.suppress(Exception):
-            widget.after_cancel(existing)
-
-    def step(i):
-        t = ease_fn(i / steps)
-        val = start + (end - start) * t
-        try:
-            callback(val)
-        except Exception:
-            _animate_value_jobs.pop(id(widget), None)
-            return
-        if i < steps:
-            job = widget.after(step_ms, lambda: step(i + 1))
-            _animate_value_jobs[id(widget)] = job
-        else:
-            _animate_value_jobs.pop(id(widget), None)
-
-    job = widget.after(step_ms, lambda: step(1))
-    _animate_value_jobs[id(widget)] = job
+    motion.animate(widget, _step, steps=steps, step_ms=step_ms,
+                   kind="motion", easing=easing, key="value")
 
 
 # ── Fade-in widget (fg_color interpolation) ─────────────────────────────────
 
 def fade_in(widget, duration_ms: int = 250, steps: int = 15,
-            from_color: str = "#0a0e14", to_color: str | None = None):
+            from_color: str | None = None, to_color: str | None = None):
     """
-    Animates widget fg_color from from_color to to_color (or its current fg_color).
-    Works on CTkFrame / CTkLabel etc.
+    Animates widget fg_color from from_color (default: theme.BG_PRIMARY) to
+    to_color (or its current fg_color).
     """
+    from ui import theme
+    if from_color is None:
+        from_color = theme.BG_PRIMARY
     if to_color is None:
         try:
             to_color = widget.cget("fg_color")
@@ -216,20 +112,11 @@ def fade_in(widget, duration_ms: int = 250, steps: int = 15,
             return
     step_ms = max(1, duration_ms // steps)
 
-    def step(i):
-        t = ease_out(i / steps)
-        color = _lerp_color(from_color, to_color, t)
-        try:
-            widget.configure(fg_color=color)
-        except Exception:
-            return
-        if i < steps:
-            widget.after(step_ms, lambda: step(i + 1))
-        else:
-            with contextlib.suppress(Exception):
-                widget.configure(fg_color=to_color)
+    def _step(t):
+        widget.configure(fg_color=_lerp_color(from_color, to_color, t))
 
-    step(1)
+    motion.animate(widget, _step, steps=steps, step_ms=step_ms,
+                   kind="color", easing="ease_out", key="fg_color")
 
 
 # ── Slide-in animation ──────────────────────────────────────────────────────
@@ -242,6 +129,8 @@ def slide_in(widget, direction: str = "right", distance_px: int = 40,
     Assumes the widget is already placed at its final position via pack/grid/place.
     Uses place override temporarily.
     """
+    if not motion.should_animate("motion"):
+        return  # ya está en su posición final
     widget.update_idletasks()
     x0 = widget.winfo_x()
     y0 = widget.winfo_y()
@@ -259,21 +148,12 @@ def slide_in(widget, direction: str = "right", distance_px: int = 40,
 
     step_ms = max(1, duration_ms // steps)
 
-    def step(i):
-        t = ease_out(i / steps)
-        x = int(sx + (x0 - sx) * t)
-        y = int(sy + (y0 - sy) * t)
-        try:
-            widget.place(x=x, y=y, width=w, height=h)
-        except Exception:
-            return
-        if i < steps:
-            widget.after(step_ms, lambda: step(i + 1))
-        else:
-            with contextlib.suppress(Exception):
-                widget.place(x=x0, y=y0, width=w, height=h)
+    def _step(t):
+        widget.place(x=int(sx + (x0 - sx) * t), y=int(sy + (y0 - sy) * t),
+                     width=w, height=h)
 
-    step(1)
+    motion.animate(widget, _step, steps=steps, step_ms=step_ms,
+                   kind="motion", easing="ease_out", key="slide")
 
 
 # ── Pulse animation ─────────────────────────────────────────────────────────
@@ -283,8 +163,11 @@ def pulse(widget, color_a: str, color_b: str, cycles: int = 3,
     """
     Pulses widget fg_color between color_a and color_b for `cycles` full cycles.
     """
+    if not motion.should_animate("color"):
+        with contextlib.suppress(Exception):
+            widget.configure(fg_color=color_a)
+        return
     total_halves = cycles * 2
-    current_half = [0]
 
     def do_half(half_idx):
         if half_idx >= total_halves:
@@ -294,20 +177,12 @@ def pulse(widget, color_a: str, color_b: str, cycles: int = 3,
         from_c = color_a if half_idx % 2 == 0 else color_b
         to_c = color_b if half_idx % 2 == 0 else color_a
 
-        def step(i):
-            t = ease_in_out(i / steps_per_half)
-            color = _lerp_color(from_c, to_c, t)
-            try:
-                widget.configure(fg_color=color)
-            except Exception:
-                return
-            if i < steps_per_half:
-                widget.after(step_ms, lambda: step(i + 1))
-            else:
-                current_half[0] += 1
-                widget.after(step_ms, lambda: do_half(current_half[0]))
+        def _step(t):
+            widget.configure(fg_color=_lerp_color(from_c, to_c, t))
 
-        step(1)
+        motion.animate(widget, _step, steps=steps_per_half, step_ms=step_ms,
+                       kind="color", easing="ease_in_out", key="pulse",
+                       on_done=lambda: do_half(half_idx + 1))
 
     do_half(0)
 
@@ -319,34 +194,19 @@ def bind_hover_color(widget, normal_color: str, hover_color: str,
     """
     Binds smooth Enter/Leave color transitions to a CTkFrame or similar widget.
     """
-    _animating = [False]
-    _target = [normal_color]
-
     def _animate_to(target: str):
-        _target[0] = target
         try:
-            current_hex = widget.cget("fg_color")
-            if isinstance(current_hex, (list, tuple)):
-                current_hex = current_hex[0]
+            current = widget.cget("fg_color")
+            if isinstance(current, (list, tuple)):
+                current = current[0]
         except Exception:
             return
 
-        def step(i, from_c=current_hex):
-            if _target[0] != target:
-                return  # direction changed mid-animation
-            t = ease_out(i / steps)
-            color = _lerp_color(from_c, target, t)
-            try:
-                widget.configure(fg_color=color)
-            except Exception:
-                return
-            if i < steps:
-                widget.after(step_ms, lambda: step(i + 1))
-            else:
-                with contextlib.suppress(Exception):
-                    widget.configure(fg_color=target)
+        def _step(t):
+            widget.configure(fg_color=_lerp_color(current, target, t))
 
-        step(1)
+        motion.animate(widget, _step, steps=steps, step_ms=step_ms,
+                       kind="color", easing="ease_out", key="hover")
 
     widget.bind("<Enter>", lambda e: _animate_to(hover_color), add="+")
     widget.bind("<Leave>", lambda e: _animate_to(normal_color), add="+")

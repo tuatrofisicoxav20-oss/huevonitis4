@@ -48,6 +48,11 @@ class AppChromeMixin:
     def _start_spinner(self):
         if self._spinner_job is not None:
             return
+        from ui import motion
+        if not motion.should_animate("motion"):
+            # Indicador estático: hay feedback de trabajo sin animar nada.
+            self._spinner_label.configure(text="●")
+            return
 
         def spin():
             self._spinner_index = (self._spinner_index + 1) % len(_SPINNER_FRAMES)

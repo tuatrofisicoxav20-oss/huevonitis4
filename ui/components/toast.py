@@ -2,7 +2,7 @@ import contextlib
 
 import customtkinter as ctk
 
-from ui import theme
+from ui import motion, theme
 from ui.animations import ease_out
 
 
@@ -90,6 +90,8 @@ class ToastManager:
         self.parent.after(duration, lambda: self._dismiss(toast))
 
     def _animate_progress(self, toast, duration: int):
+        if not motion.should_animate("motion"):
+            return  # barra estática; el toast igual se auto-descarta
         steps = max(10, duration // 30)
         step_ms = max(10, duration // steps)
 
@@ -145,6 +147,11 @@ class ToastManager:
         if pw < 10:
             pw = 800
         target_x = pw - self.TOAST_WIDTH - self.MARGIN_RIGHT
+        if not motion.should_animate("motion"):
+            with contextlib.suppress(Exception):
+                toast.place(x=target_x, y=toast.winfo_y(), width=self.TOAST_WIDTH)
+                toast.lift()
+            return
         start_x = pw + 20
         steps = 16
         step_ms = 14
