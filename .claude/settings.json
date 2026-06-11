@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; if [ -n \"$f\" ] && [ \"${f%.py}\" != \"$f\" ]; then ruff check \"$f\" 1>&2 || exit 2; fi; }",
+            "timeout": 30,
+            "statusMessage": "ruff check sobre el archivo editado"
+          }
+        ]
+      }
+    ]
+  }
+}
