@@ -12,19 +12,22 @@ Criterios (conservador; NUNCA vacía un carácter):
 Protecciones: mínimo 2 muestras por char (o todas si solo hay 1-2);
 ñ/dígitos/signos se juzgan solo por calidad (el CNN EMNIST no aplica).
 """
-import sys, tarfile, time
+import sys
+import tarfile
+import time
 from collections import defaultdict
-from pathlib import Path
 
 sys.path.insert(0, ".")
 DRY = "--apply" not in sys.argv
 import config
+
 config.ensure_dirs(); config.load_settings()
 import logging
+
 logging.basicConfig(level=logging.ERROR)
 
-from core.inkcore.bank import GlyphBank, _CURATE_MISCLASS_FLOOR
 from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
+from core.inkcore.bank import _CURATE_MISCLASS_FLOOR, GlyphBank
 
 bank = GlyphBank(); bank.load()
 entries = bank.get_all()
