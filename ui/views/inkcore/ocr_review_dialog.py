@@ -45,7 +45,19 @@ class OCRReviewDialog(ctk.CTkToplevel):
             # suelen ir a stderr; los mandamos al log para poder diagnosticarlos.
             logger.exception("OCRReviewDialog._build falló")
             raise
-        self.after(100, self._run_ocr)
+        # Realización de la ventana como los modales que funcionan en el proyecto:
+        # transient + lift, y grab_set DIFERIDO (si se llama antes de que la ventana
+        # sea visible, Tk tira "grab failed: window not viewable").
+        with contextlib.suppress(Exception):
+            self.transient(parent)
+        with contextlib.suppress(Exception):
+            self.lift()
+        self.after(200, self._safe_grab)
+        self.after(120, self._run_ocr)
+
+    def _safe_grab(self):
+        with contextlib.suppress(Exception):
+            self.grab_set()
 
     def report_callback_exception(self, exc, val, tb):
         """Tkinter manda acá las excepciones de callbacks/after/eventos — por
