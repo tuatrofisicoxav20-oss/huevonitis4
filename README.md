@@ -108,13 +108,39 @@ python tools/doctor.py
 Muestra qué dependencias faltan, si tesseract/poppler están en el PATH, y el
 estado de los directorios de datos.
 
+## Realismo del render
+
+El Escritor pasó por un overhaul completo (fases R0–R9) para que el texto no
+parezca "nota de secuestrador": escala proporcional por glifo con baseline
+real medido, espaciado/margen/interlineado con procesos correlacionados (no
+ruido blanco), anti-repetición + warp elástico por instancia (cero "sellos"),
+pase de tinta (supersampling 2×, multiply, micro-color, densidad intra-trazo,
+sangrado), papel con textura y skew de escaneo, y export "📷 Foto de tarea".
+Métricas y evolución completa en `tools/eval_render/RESULTADOS.md`.
+
+**Calibrar con tu letra** (recomendado): escribe la página patrón (protocolo
+en `tools/eval_render/README.md` — pangrama español con ñ/acentos/mayúsculas/
+números en texto corrido), escanéala y corre:
+
+```bash
+python tools/calibrate_profile.py pagina_real.png        # → calibration.json
+python -m tools.eval_render.compare pagina_real.png render.png   # ✅/❌ por métrica
+python -m tools.eval_render.ab_sheet pagina_real.png "texto"     # mini test de Turing
+```
+
+Checklist de "tells" que el render evita: alturas uniformes, espacio de
+palabra constante, margen láser, interlineado exacto, glifos-sello repetidos,
+tinta plana sin textura, papel hex sin grano, renglones que no sostienen el
+texto, rotación de ruido blanco, y caída silenciosa a fuente de sistema (los
+caracteres sin glifo se OMITEN con aviso previo en el Writer).
+
 ## Tests
 
 ```bash
 pytest -q
 ```
 
-279 tests, ~40 segundos. Solo tests de lógica core — UI no incluida.
+~310 tests, ~70 segundos. Solo tests de lógica core — UI no incluida.
 
 ## Datos de usuario
 
