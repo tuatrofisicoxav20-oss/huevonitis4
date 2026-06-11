@@ -69,7 +69,7 @@ huevonitis 4/
 │   ├── CHANGELOG.md
 │   ├── KNOWN_ISSUES.md
 │   └── ai-integration-notes.md  # Guía para integrar clasificador ONNX real
-├── tests/                    # pytest — 279 tests
+├── tests/                    # pytest — 327 tests
 ├── requirements.txt
 ├── requirements-optional.txt # Extras opcionales (TrOCR para etiquetado, scikit-image)
 ├── pyproject.toml            # ruff + pytest config
@@ -123,7 +123,7 @@ en `tools/eval_render/README.md` — pangrama español con ñ/acentos/mayúscula
 números en texto corrido), escanéala y corre:
 
 ```bash
-python tools/calibrate_profile.py pagina_real.png        # → calibration.json
+python -m tools.calibrate_profile pagina_real.png --profile default   # → calibration.json
 python -m tools.eval_render.compare pagina_real.png render.png   # ✅/❌ por métrica
 python -m tools.eval_render.ab_sheet pagina_real.png "texto"     # mini test de Turing
 ```
@@ -140,7 +140,7 @@ caracteres sin glifo se OMITEN con aviso previo en el Writer).
 pytest -q
 ```
 
-~310 tests, ~70 segundos. Solo tests de lógica core — UI no incluida.
+327 tests, ~70 segundos. Solo tests de lógica core — UI no incluida.
 
 ## Datos de usuario
 

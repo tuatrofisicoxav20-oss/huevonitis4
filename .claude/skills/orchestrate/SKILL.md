@@ -65,7 +65,7 @@ Antes de dar por terminado, verifica todas:
 - **Riesgos e impacto**: módulos tocados vs. los previstos en Fase 1; gotchas del CLAUDE.md respetados (mask crudo al CNN, parche de scroll en `main.py`, datos del usuario intactos).
 - **Seguridad**: sin secretos ni rutas absolutas personales en el código.
 
-Si alguna validación falla: **detener la implementación y reportar** — no entregar a medias.
+Si alguna validación falla **por causa del cambio**: detener la implementación y reportar — no entregar a medias. Si la falla es preexistente y ajena a los archivos tocados (verificar con git status/diff), no bloquea la entrega: reportarla como riesgo detectado en la Fase 5.
 
 ## Fase 5 — Entrega
 
