@@ -348,3 +348,21 @@ def test_compare_cli_corre_sobre_dos_pngs(stub_renderer, tmp_path):
     rc = main([str(a), str(b), "--json", str(out_json)])
     assert rc == 0
     assert out_json.exists()
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_ab_sheet_baraja_y_mapea(stub_renderer, tmp_path):
+    """R9 (H1/H6): la hoja A/B trae 2N tiras barajadas y el mapa las nombra."""
+    import random as _random
+
+    from core.inkcore.renderer import RenderOptions
+    from tools.eval_render.ab_sheet import build_ab_sheet
+
+    opts = RenderOptions(style="", background_style="hoja_blanca", seed=4)
+    synth = stub_renderer.render_pages(FRASE_PATRON, opts)[0]
+    real = stub_renderer.render_pages(FRASE_PATRON.upper().lower(), opts)[0]
+    sheet, mapping = build_ab_sheet(real, synth, _random.Random(7), n_strips=4)
+    assert len(mapping) == 8
+    assert sorted(set(mapping.values())) == ["real", "synth"]
+    assert list(mapping.values()).count("real") == 4
+    assert sheet.height > 8 * 100  # 8 tiras apiladas
