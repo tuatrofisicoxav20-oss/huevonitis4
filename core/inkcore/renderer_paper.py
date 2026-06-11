@@ -67,7 +67,7 @@ def generate_paper_texture(w: int, h: int, rng: random.Random,
     # Centrar en 128 con un rango de luminancia MUY sutil (±6 niveles).
     tex = 128.0 + (acc - 0.5) * 12.0
 
-    img = Image.fromarray(np.clip(tex, 0, 255).astype(np.uint8), mode="L")
+    img = Image.fromarray(np.clip(tex, 0, 255).astype(np.uint8))
 
     # Fibras de celulosa: segmentos cortos casi invisibles en ángulos al azar.
     from PIL import ImageDraw
@@ -96,7 +96,8 @@ def _load_texture(name: str, profile_dir: Path | None) -> Image.Image | None:
             return _TEXTURE_CACHE[key]
         if path.exists():
             try:
-                tex = Image.open(path).convert("L")
+                with Image.open(path) as f:
+                    tex = f.convert("L")
                 if len(_TEXTURE_CACHE) >= _TEXTURE_CACHE_MAX:
                     _TEXTURE_CACHE.pop(next(iter(_TEXTURE_CACHE)))
                 _TEXTURE_CACHE[key] = tex

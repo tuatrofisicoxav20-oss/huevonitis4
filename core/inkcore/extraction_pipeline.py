@@ -268,7 +268,7 @@ class GlyphExtractionPipeline:
             # alpha alto = tinta densa → píxel oscuro
             intensity = ((1.0 - alpha) * 255.0).astype(np.uint8)
             rgb_arr = np.stack([intensity, intensity, intensity], axis=-1)
-            pil = _PIL.fromarray(rgb_arr, mode="RGB")
+            pil = _PIL.fromarray(rgb_arr)
             # Margen blanco — clave para que Tesseract no descarte el char.
             new_w = pil.width + border * 2
             new_h = pil.height + border * 2

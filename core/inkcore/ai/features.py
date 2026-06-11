@@ -26,7 +26,7 @@ def extract_image_features(img: "Image.Image") -> GlyphImageFeatures:
         ink_density = ink / max(1, total)
         h, w = alpha.shape[:2]
         aspect_ratio = w / max(1, h)
-        bbox = Image.fromarray(alpha, mode="L").getbbox()
+        bbox = Image.fromarray(alpha).getbbox()
         if bbox:
             tight_w = bbox[2] - bbox[0]
             tight_h = bbox[3] - bbox[1]

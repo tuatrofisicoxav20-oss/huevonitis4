@@ -34,8 +34,8 @@ def test_texturas_assets_existen_y_generador_determinista():
     for name in TEXTURAS:
         path = ASSETS / name
         assert path.exists(), f"falta {name} (corre tools/gen_paper_textures.py)"
-        tex = Image.open(path)
-        assert tex.size == (512, 512)
+        with Image.open(path) as tex:
+            assert tex.size == (512, 512)
     # Determinismo del generador: regla del proyecto (misma seed → ídem).
     a = generate_paper_texture(64, 64, random.Random(7))
     b = generate_paper_texture(64, 64, random.Random(7))
