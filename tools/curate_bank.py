@@ -19,17 +19,19 @@ from collections import defaultdict
 
 sys.path.insert(0, ".")
 DRY = "--apply" not in sys.argv
-import config
+import config  # noqa: E402 — sys.path primero (script standalone)
 
-config.ensure_dirs(); config.load_settings()
-import logging
+config.ensure_dirs()
+config.load_settings()
+import logging  # noqa: E402
 
 logging.basicConfig(level=logging.ERROR)
 
-from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
-from core.inkcore.bank import _CURATE_MISCLASS_FLOOR, GlyphBank
+from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label  # noqa: E402
+from core.inkcore.bank import _CURATE_MISCLASS_FLOOR, GlyphBank  # noqa: E402
 
-bank = GlyphBank(); bank.load()
+bank = GlyphBank()
+bank.load()
 entries = bank.get_all()
 print(f"banco: {len(entries)} glifos, dir={bank.bank_dir}", flush=True)
 
