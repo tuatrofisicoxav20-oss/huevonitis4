@@ -113,7 +113,14 @@ class GlyphLoadMixin:
             # Recolorear la tinta al color del bolígrafo. Los glifos del extractor
             # son RGB blanco con la forma en el alpha; sobre papel claro serían
             # invisibles. Repinta la forma con ink_color preservando el alpha.
-            img = self._recolor_ink(img, options.ink_color)
+            # R6 (D1): micro-variación HSV por glifo — la carga del bolígrafo
+            # nunca deposita el mismo color exacto dos veces.
+            ink_hex = options.ink_color
+            sj, vj = getattr(options, "ink_hsv_jitter", (0.0, 0.0)) or (0.0, 0.0)
+            if sj > 0 or vj > 0:
+                from core.inkcore.renderer_ink import jitter_ink_color
+                ink_hex = jitter_ink_color(ink_hex, rnd, sj, vj)
+            img = self._recolor_ink(img, ink_hex)
             # Recortar al bounding box REAL de la tinta: el padding transparente
             # del banco es irregular y mediría aire. ink_top queda en COORDS DEL
             # PNG = las mismas del baseline_off del manifest.

@@ -97,6 +97,18 @@ class RenderOptions:
     #     a lo largo del renglón (C1), encima del slant global y de línea.
     warp_strength: float = 0.08
     glyph_slant_drift_deg: float = 1.0
+    # R6 — pase de tinta:
+    #   supersample: el render compone a N× y reduce LANCZOS al final (I1):
+    #     bordes de rotación/shear limpios. Se aplica POR PÁGINA (memoria).
+    #   ink_texture_strength: profundidad del value-noise que modula el alpha
+    #     DENTRO del trazo (D2): alpha ∈ [1-strength, 1]. 0 = apagado.
+    #   ink_bleed: σ (px finales) del blur del alpha antes de componer (D8) —
+    #     sangrado sutil de tinta en papel.
+    #   ink_hsv_jitter: (ΔS, ΔV) máximos del micro-color por glifo (D1).
+    supersample: int = 2
+    ink_texture_strength: float = 0.12
+    ink_bleed: float = 0.4
+    ink_hsv_jitter: tuple = (0.04, 0.03)
     # Color de tinta. Los glifos del extractor son blancos (forma en alpha) para
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.

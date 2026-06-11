@@ -264,7 +264,12 @@ def test_anti_sello_bilateral(stub_renderer):
                           rotation_range=0.0, size_variation=0.0,
                           warp_strength=0.0, glyph_slant_drift_deg=0.0,
                           line_slant_deg=0.0, kerning_jitter=0.0,
-                          jitter_px=0, baseline_drift=0.0)
+                          jitter_px=0, baseline_drift=0.0,
+                          # R6: también la tinta debe ser de sello — el value
+                          # noise/bleed/micro-color ya rompen el hash por sí
+                          # solos y este es el control NEGATIVO del detector.
+                          ink_texture_strength=0.0, ink_bleed=0.0,
+                          ink_hsv_jitter=(0.0, 0.0), supersample=1)
     m_sello = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, sello)[0])
     assert m_sello["phash_dup_rate"] > 0.85, (
         f"el detector dejó de ver sellos: {m_sello['phash_dup_rate']}")

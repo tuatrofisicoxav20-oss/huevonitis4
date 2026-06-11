@@ -39,7 +39,7 @@ class _BlockLine:
     consume _flow_blocklines_to_pages, que sólo necesita saber dónde pegarlo
     en X, cuánto avanzar en Y y cuánto hueco extra dejar antes del renglón.
     """
-    img: "Image.Image | None"
+    img: Image.Image | None
     x: int            # posición X absoluta de pegado (margen + sangría + jitter)
     line_height: int  # avance vertical de este renglón (mayor en encabezados)
     gap_before: int   # hueco extra antes del renglón (separación de bloque)
@@ -85,7 +85,7 @@ class LayoutMixin:
         except Exception as exc:
             logger.warning("estimación de geometría en vivo falló: %s", exc)
 
-    def _geo(self, entry) -> "dict | None":
+    def _geo(self, entry) -> dict | None:
         """Geometría efectiva de un entry: medida (manifest) o estimada (overlay)."""
         if entry is None:
             return None
@@ -195,7 +195,7 @@ class LayoutMixin:
 
     # ── Render de un renglón ─────────────────────────────────────────────────
 
-    def _render_line(self, text: str, options, max_width: int) -> "Image.Image | None":
+    def _render_line(self, text: str, options, max_width: int) -> Image.Image | None:
         if not PIL_OK:
             return None
         if not text.strip():
@@ -369,9 +369,9 @@ class LayoutMixin:
             return margin + round(k * sf)
 
         def _new_canvas():
-            c = Image.new("RGBA", (options.page_width, page_height), options.background_color)
-            self._draw_background_decorations(c, options, sf, page_height)
-            return c
+            # R6 (I2): capa de TINTA transparente; papel/decoraciones se
+            # aplican al cerrar la página (_compose_page, multiply).
+            return Image.new("RGBA", (options.page_width, page_height), (0, 0, 0, 0))
 
         def _snap_k(y_top: int, it, floor_k: int) -> int:
             """Índice del renglón de grilla (1=primero) que recibe la línea base."""
@@ -394,7 +394,7 @@ class LayoutMixin:
                 paste_y = y
             # ¿Cabe este renglón? Si no, cierra la página y re-snapea arriba.
             if it.line_height > 0 and paste_y + it.line_height > bottom and y > margin:
-                pages.append(canvas.convert("RGB"))
+                pages.append(self._compose_page(canvas, options, sf, page_height))
                 canvas = _new_canvas()
                 y = margin
                 next_min_k = 1
@@ -409,11 +409,15 @@ class LayoutMixin:
                 canvas.paste(it.img, (x, py), it.img)
             if k is not None:
                 # Reservar los renglones de grilla que ocupa esta línea (ceil).
-                span = max(1, int(-(-it.line_height // sf)))
+                # ceil con epsilon: line_height_px se REDONDEA desde mm (89 a
+                # 300 DPI) y puede quedar un pelo arriba del paso flotante
+                # (88.58) — sin tolerancia, ceil(89/88.58)=2 reservaría un
+                # renglón de más y el cuerpo saltaría renglones alternados.
+                span = max(1, int(-(-(it.line_height - 0.5) // sf)))
                 next_min_k = k + span
             # El cursor continuo sigue desde la base de este renglón para que el
             # siguiente caiga un renglón más abajo (snap transparente en el cuerpo).
             y = paste_y + it.line_height
 
-        pages.append(canvas.convert("RGB"))
+        pages.append(self._compose_page(canvas, options, sf, page_height))
         return pages

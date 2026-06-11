@@ -159,6 +159,36 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         drift_in = min(10.0, per_line * self._line_index)
         return round(walk + drift_in)
 
+    def _scaled_options(self, options: RenderOptions, ss: int) -> RenderOptions:
+        """Opciones ×ss para el supersampling (R6/I1): lo anclado a mm escala
+        vía render_dpi; los px ABSOLUTOS se multiplican explícitamente."""
+        return replace(
+            options,
+            render_dpi=options.render_dpi * ss,
+            font_size=options.font_size * ss,
+            page_width=options.page_width * ss,
+            page_margin=options.page_margin * ss,
+            jitter_px=options.jitter_px * ss,
+            baseline_drift=options.baseline_drift * ss,
+            margin_walk_px=options.margin_walk_px * ss,
+            margin_drift_per_line=options.margin_drift_per_line * ss,
+            ink_bleed=options.ink_bleed * ss,
+            supersample=1,
+        )
+
+    @staticmethod
+    def _downscale(img, ss: int):
+        return img.resize((max(1, img.width // ss), max(1, img.height // ss)),
+                          Image.LANCZOS)
+
+    def _compose_page(self, ink, options, spacing, page_height):
+        """Pase de papel (R6/I2): papel + decoraciones, y la tinta encima con
+        composición multiply (la textura del papel atraviesa el trazo)."""
+        from core.inkcore.renderer_ink import apply_paper
+        paper = Image.new("RGB", ink.size, options.background_color)
+        self._draw_background_decorations(paper, options, spacing, page_height)
+        return apply_paper(ink, paper, options, self._rng)
+
     def apply_style(self, options: RenderOptions) -> RenderOptions:
         preset = STYLE_PRESETS.get(options.style, {})
         for k, v in preset.items():
@@ -175,6 +205,11 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         if not PIL_OK:
             return None
         options = self.apply_style(options)
+        ss = max(1, int(getattr(options, "supersample", 1)))
+        if ss > 1:
+            big = self._scaled_options(options, ss)
+            out = self.render_transparent(text, big)
+            return self._downscale(out, ss) if out is not None else None
         self._begin_render(options)
         usable_width = max(1, options.page_width - 2 * options.page_margin)
         line_height_px = int(options.font_size * options.line_height)
@@ -197,6 +232,10 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         if not PIL_OK:
             return None
         options = self.apply_style(options)
+        ss = max(1, int(getattr(options, "supersample", 1)))
+        if ss > 1:
+            out = self.render_text(text, self._scaled_options(options, ss))
+            return self._downscale(out, ss) if out is not None else None
         self._begin_render(options)
         options = self._apply_background_style(options)
         lines = text.split("\n")
@@ -225,10 +264,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         rendered_lines = [self._render_line(line, options, usable_width) for line in wrapped_lines]
 
         total_h = options.margin_top_px + options.margin_bottom_px + round(len(rendered_lines) * spacing)
-        total_h = max(total_h, 400)
-        canvas = Image.new("RGBA", (options.page_width, total_h), options.background_color)
-
-        self._draw_background_decorations(canvas, options, spacing, total_h)
+        # Mínimo de cortesía ESCALADO por DPI: con supersampling (R6) el render
+        # corre a render_dpi×ss; un mínimo fijo de 400 dejaba la página final
+        # en 400/ss px tras el downscale.
+        total_h = max(total_h, round(400 * options.render_dpi / RENDER_DPI))
+        # R6 (I2): la tinta se compone en su propia capa transparente y el
+        # papel se aplica al final (multiply) — ver _compose_page.
+        ink = Image.new("RGBA", (options.page_width, total_h), (0, 0, 0, 0))
 
         # Cursor flotante con redondeo por renglón: el paso físico (mm) no es
         # entero en px y truncarlo desfasaría las líneas hacia el final.
@@ -239,11 +281,11 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                 paste_y = max(0, y_cursor + self._next_line_y_jitter())
                 x = options.margin_left_px + self._next_margin_offset(options)
                 if paste_y + line_img.height <= total_h:
-                    canvas.paste(line_img, (x, paste_y), line_img)
+                    ink.paste(line_img, (x, paste_y), line_img)
                 else:
-                    canvas.paste(line_img, (x, max(0, total_h - line_img.height)), line_img)
+                    ink.paste(line_img, (x, max(0, total_h - line_img.height)), line_img)
 
-        return canvas.convert("RGB")
+        return self._compose_page(ink, options, spacing, total_h)
 
     def render_pages(
         self, text: str, options: RenderOptions, page_height: "int | None" = None
@@ -259,6 +301,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         if not PIL_OK:
             return []
         options = self.apply_style(options)
+        ss = max(1, int(getattr(options, "supersample", 1)))
+        if ss > 1:
+            big = self._scaled_options(options, ss)
+            big_h = None if page_height is None else page_height * ss
+            return [self._downscale(p, ss)
+                    for p in self.render_pages(text, big, big_h)]
         self._begin_render(options)
         options = self._apply_background_style(options)
         if page_height is None:
@@ -305,9 +353,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         pages = []
         for page_start in range(0, len(rendered_lines), lines_per_page):
             page_lines = rendered_lines[page_start:page_start + lines_per_page]
-            canvas = Image.new("RGBA", (options.page_width, page_height), options.background_color)
-
-            self._draw_background_decorations(canvas, options, spacing, page_height)
+            # R6 (I2): capa de tinta transparente; el papel se aplica al final.
+            ink = Image.new("RGBA", (options.page_width, page_height), (0, 0, 0, 0))
 
             for k, line_img in enumerate(page_lines, start=1):
                 if line_img:
@@ -318,9 +365,9 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                                          y_cursor + self._next_line_y_jitter()))
                     x = options.margin_left_px + self._next_margin_offset(options)
                     if paste_y + line_img.height <= page_height:
-                        canvas.paste(line_img, (x, paste_y), line_img)
+                        ink.paste(line_img, (x, paste_y), line_img)
 
-            pages.append(canvas.convert("RGB"))
+            pages.append(self._compose_page(ink, options, spacing, page_height))
 
         return pages if pages else [Image.new("RGB", (options.page_width, page_height), "#FFFFFF")]
 
@@ -379,6 +426,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         if not PIL_OK:
             return []
         options = self.apply_style(options)
+        ss = max(1, int(getattr(options, "supersample", 1)))
+        if ss > 1:
+            big = self._scaled_options(options, ss)
+            big_h = None if page_height is None else page_height * ss
+            return [self._downscale(p, ss)
+                    for p in self.render_document(doc, big, big_h)]
         self._begin_render(options)
         options = self._apply_background_style(options)
         if page_height is None:
