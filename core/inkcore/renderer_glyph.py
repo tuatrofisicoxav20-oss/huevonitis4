@@ -216,7 +216,7 @@ class GlyphLoadMixin:
                 if alpha_factor < 1.0:
                     a = a.point(lambda v: int(v * alpha_factor))
                 img = Image.merge("RGBA", (r, g, b, a))
-            return img, int(round(baseline_in)) if baseline_in >= 0 else -1
+            return img, round(baseline_in) if baseline_in >= 0 else -1
         except Exception as e:
             logger.debug(f"Could not load glyph {path}: {e}")
             return None

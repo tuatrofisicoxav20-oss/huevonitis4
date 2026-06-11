@@ -23,8 +23,8 @@ except ImportError:
 from core.inkcore.renderer_noise import tnorm
 
 
-def elastic_warp(img: "Image.Image", rng: random.Random,
-                 strength: float = 0.04, grid: int = 4) -> "Image.Image":
+def elastic_warp(img: Image.Image, rng: random.Random,
+                 strength: float = 0.04, grid: int = 4) -> Image.Image:
     """Deforma `img` con una malla grid×grid de nodos perturbados.
 
     ``strength`` es la amplitud máxima del desplazamiento como fracción del

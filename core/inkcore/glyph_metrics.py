@@ -47,7 +47,7 @@ _DESC_BODY_FRAC = 0.62
 _XHEIGHT_TO_EM = 0.45
 
 
-def measure_ink_bbox(mask: np.ndarray) -> "tuple[int, int, int, int] | None":
+def measure_ink_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     """bbox (x0, y0, x1, y1) EXCLUSIVO de la tinta (mask > 0), o None si vacía."""
     ys, xs = np.where(mask > 0)
     if len(xs) == 0:
@@ -55,7 +55,7 @@ def measure_ink_bbox(mask: np.ndarray) -> "tuple[int, int, int, int] | None":
     return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
 
 
-def _alpha_bbox(img: "Image.Image") -> "tuple[int, int, int, int] | None":
+def _alpha_bbox(img: Image.Image) -> tuple[int, int, int, int] | None:
     """bbox de la tinta de un glifo RGBA del banco (forma en el alpha)."""
     if not _PIL_OK:
         return None
@@ -123,8 +123,8 @@ def finalize_sheet_geometry(results: list) -> None:
         geo.pop("_ink_h", None)
 
 
-def estimate_geometry_for_image(img: "Image.Image", ch: str,
-                                x_height_px: float, em_px: int) -> "dict | None":
+def estimate_geometry_for_image(img: Image.Image, ch: str,
+                                x_height_px: float, em_px: int) -> dict | None:
     """Geometría heurística de un glifo del banco SIN datos de template.
 
     Clase tipográfica por identidad del char; baseline por fondo de tinta

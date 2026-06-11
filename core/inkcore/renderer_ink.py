@@ -44,7 +44,7 @@ def value_noise_field(w: int, h: int, rng: random.Random,
     gh = max(2, h // max(8, cell_px))
     grid = np.array([[rng.random() for _ in range(gw)] for _ in range(gh)],
                     dtype=np.float32)
-    img = Image.fromarray(grid, mode="F").resize((w, h), Image.BICUBIC)
+    img = Image.fromarray(grid).resize((w, h), Image.BICUBIC)
     field = np.asarray(img, dtype=np.float32)
     field = np.clip(field, 0.0, 1.0)
     return lo + field * (hi - lo)
