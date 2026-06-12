@@ -200,14 +200,29 @@ class CollapsibleSidebar(ctk.CTkFrame):
             self._expand()
 
     def _collapse(self):
-        from ui import icons
+        from ui import icons, motion
         self._expanded = False
         self._toggle_btn.configure(
             text="", image=icons.get_icon("chevron-r", 14, theme.TEXT_MUTED))
         self._logo_label.configure(image=icons.get_logo(30, mini=True))
-        for btn in self._buttons.values():
-            btn.configure(text="")
-        animate_width(self, config.SIDEBAR_EXPANDED_WIDTH, config.SIDEBAR_COLLAPSED_WIDTH)
+
+        # U8/M11: fade-out de los labels ANTES de animar el ancho
+        def _fade_then_shrink():
+            for btn in self._buttons.values():
+                btn.configure(text="", text_color=theme.TEXT_SECONDARY)
+            animate_width(self, config.SIDEBAR_EXPANDED_WIDTH,
+                          config.SIDEBAR_COLLAPSED_WIDTH)
+
+        if motion.should_animate("color"):
+            for btn in self._buttons.values():
+                motion.animate(
+                    btn,
+                    lambda t, b=btn: b.configure(text_color=motion.lerp_color(
+                        theme.TEXT_SECONDARY, theme.BG_SECONDARY, t)),
+                    steps=6, step_ms=16, kind="color", key="label_fade")
+            self.after(110, _fade_then_shrink)
+        else:
+            _fade_then_shrink()
 
     def _expand(self):
         from ui import icons

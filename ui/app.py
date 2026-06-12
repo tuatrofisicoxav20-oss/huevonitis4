@@ -84,7 +84,6 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
         self._title_update_job = None
         self._autosave_job = None
         self._status_clear_job = None
-        self._spinner_index = 0
         self._spinner_job = None
         self._bg_work_count = 0
 

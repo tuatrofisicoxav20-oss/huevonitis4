@@ -133,6 +133,35 @@ def cancel(widget, key: str = "default") -> None:
             widget.after_cancel(job)
 
 
+def hoverable(widget, base: str, hover: str, accent_border: str | None = None,
+              steps: int = 7, step_ms: int = 17) -> None:
+    """Hover unificado (U8/M5): lerp de fg_color base↔hover en ~120 ms
+    (y borde de acento opcional), respetando el nivel global."""
+    def _to(target: str, border_target: str | None):
+        current = _current_fg(widget, base)
+
+        def _step(t):
+            widget.configure(fg_color=lerp_color(current, target, t))
+        animate(widget, _step, steps=steps, step_ms=step_ms,
+                kind="color", key="hover")
+        if accent_border is not None and border_target is not None:
+            with contextlib.suppress(Exception):
+                widget.configure(border_color=border_target)
+
+    widget.bind("<Enter>", lambda _e: _to(hover, accent_border), add="+")
+    widget.bind("<Leave>", lambda _e: _to(base, None), add="+")
+
+
+def _current_fg(widget, fallback: str) -> str:
+    try:
+        val = widget.cget("fg_color")
+        if isinstance(val, (list, tuple)):
+            val = val[0]
+        return val if isinstance(val, str) and val.startswith("#") else fallback
+    except Exception:
+        return fallback
+
+
 def animate(widget, fn_step, steps: int = 10, step_ms: int = 16,
             on_done=None, kind: str = "motion", easing: str = "ease_out",
             key: str = "default") -> None:

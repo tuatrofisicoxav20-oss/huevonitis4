@@ -59,13 +59,10 @@ class BaseView(ctk.CTkFrame):
             **kwargs,
         )
         if hover:
-            # Smooth hover: bg shifts slightly lighter, border highlights
-            def on_enter(e):
-                frame.configure(fg_color=theme.CARD_BG_HOVER, border_color=theme.BORDER_LIGHT)
-            def on_leave(e):
-                frame.configure(fg_color=theme.CARD_BG, border_color=theme.BORDER)
-            frame.bind("<Enter>", on_enter, add="+")
-            frame.bind("<Leave>", on_leave, add="+")
+            # U8/M5: hover unificado con lerp (~120 ms) vía ui/motion
+            from ui import motion
+            motion.hoverable(frame, theme.CARD_BG, theme.CARD_BG_HOVER,
+                             accent_border=theme.BORDER_LIGHT)
         return frame
 
     def primary_button(self, parent, text: str, command, width: int = 140) -> ctk.CTkButton:

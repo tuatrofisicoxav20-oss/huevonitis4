@@ -6,7 +6,7 @@ statusbar. Depende de:
   • self.navigate — callback de navegación para el sidebar
   • crea: self._sidebar, self._topbar, self._content, self._statusbar y los
     widgets internos (_topbar_icon, _view_title, _unsaved_label,
-    _spinner_label, _status_label, _status_project)
+    _spinner, _status_label, _status_project)
 """
 import customtkinter as ctk
 
@@ -108,11 +108,10 @@ class AppLayoutMixin:
         )
         bar.pack_propagate(False)
 
-        self._spinner_label = ctk.CTkLabel(
-            bar, text="",
-            font=theme.FONT_MONO, text_color=theme.ACCENT_ORANGE, width=20,
-        )
-        self._spinner_label.pack(side="left", padx=(10, 0))
+        # U8/M3: spinner orbital (canvas) — begin/end_background_work lo controla
+        from ui.components.orbital_spinner import OrbitalSpinner
+        self._spinner = OrbitalSpinner(bar, size=16)
+        self._spinner.pack(side="left", padx=(10, 0))
 
         self._status_label = ctk.CTkLabel(
             bar, text="Listo",

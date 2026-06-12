@@ -248,12 +248,13 @@ class DashboardView(BaseView):
         def _animate_stats():
             if not self.winfo_exists():
                 return
-            for c in self._stat_cards:
-                try:
-                    if c.winfo_exists():
-                        c.animate_value()
-                except Exception:
-                    pass
+            # U8/M8: stagger de 60ms entre tarjetas
+            for i, c in enumerate(self._stat_cards):
+                def _go(card=c):
+                    with contextlib.suppress(Exception):
+                        if card.winfo_exists():
+                            card.animate_value()
+                self.after(i * 60, _go)
             self._stats_animate_job = None
 
         self._stats_animate_job = self.after(120, _animate_stats)

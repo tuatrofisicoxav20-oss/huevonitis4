@@ -4,10 +4,10 @@ segundo plano, actualización de título y atajos de teclado.
 Separado de app.py. Depende de:
   • self.app_state, self.project_manager, self.toast_manager
   • self.navigate — para los atajos de navegación
-  • widgets creados en AppLayoutMixin: self._status_label, self._spinner_label,
+  • widgets creados en AppLayoutMixin: self._status_label, self._spinner,
     self._status_project, self._unsaved_label
   • jobs guardados como atributos: self._status_clear_job, self._spinner_job,
-    self._title_update_job y el contador self._bg_work_count / self._spinner_index
+    self._title_update_job y el contador self._bg_work_count
 """
 import contextlib
 
@@ -16,9 +16,6 @@ import customtkinter as ctk
 import config
 from ui import theme
 from ui.modal_utils import safe_grab
-
-# Spinner frames for background work indicator
-_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 class AppChromeMixin:
@@ -46,31 +43,13 @@ class AppChromeMixin:
             self._stop_spinner()
 
     def _start_spinner(self):
-        if self._spinner_job is not None:
-            return
-        from ui import motion
-        if not motion.should_animate("motion"):
-            # Indicador estático: hay feedback de trabajo sin animar nada.
-            self._spinner_label.configure(text="●")
-            return
-
-        def spin():
-            self._spinner_index = (self._spinner_index + 1) % len(_SPINNER_FRAMES)
-            try:
-                self._spinner_label.configure(text=_SPINNER_FRAMES[self._spinner_index])
-            except Exception:
-                return
-            self._spinner_job = self.after(80, spin)
-
-        self._spinner_job = self.after(80, spin)
+        # U8/M3: spinner orbital de canvas (respeta el nivel de motion adentro)
+        with contextlib.suppress(Exception):
+            self._spinner.start()
 
     def _stop_spinner(self):
-        if self._spinner_job is not None:
-            with contextlib.suppress(Exception):
-                self.after_cancel(self._spinner_job)
-            self._spinner_job = None
         with contextlib.suppress(Exception):
-            self._spinner_label.configure(text="")
+            self._spinner.stop()
 
     def _schedule_title_update(self):
         def update():
