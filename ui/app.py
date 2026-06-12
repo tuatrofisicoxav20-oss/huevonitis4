@@ -90,7 +90,11 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
 
         self._build()
         self.toast_manager = ToastManager(self)
+        self._commands: list = []
+        self._palette = None
+        self._register_default_commands()
         self._bind_shortcuts()
+        self.bind("<Control-k>", lambda e: self.open_palette())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.navigate("dashboard")
         self._schedule_autosave()
@@ -175,6 +179,127 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
             lambda t: line.configure(fg_color=motion.lerp_color(current, accent, t)),
             steps=8, step_ms=16, kind="color", key="accent",
         )
+
+    # ── Command palette (U7) ─────────────────────────────────────────────────
+
+    def register_command(self, cmd_id: str, label: str, icon: str = "",
+                         shortcut: str = "", fn=None, keywords: str = ""):
+        from ui.components.palette import Command
+        self._commands.append(Command(id=cmd_id, label=label, icon=icon,
+                                      shortcut=shortcut, fn=fn, keywords=keywords))
+
+    def open_palette(self):
+        from ui.components.palette import CommandPalette
+        if self._palette is None:
+            self._palette = CommandPalette(self)
+        self._palette.set_commands(self._commands + self._dynamic_commands())
+        self._palette.open()
+
+    def _register_default_commands(self):
+        for vid, icon, label in theme.NAV_ITEMS:
+            short = {"dashboard": "Ctrl+D", "projects": "Ctrl+N", "study": "Ctrl+E",
+                     "inkcore": "Ctrl+L", "business": "Ctrl+B",
+                     "settings": "Ctrl+,"}.get(vid, "")
+            self.register_command(f"nav:{vid}", f"Ir a {label}", icon, short,
+                                  fn=lambda v=vid: self.navigate(v),
+                                  keywords="vista navegar")
+        for tab, label, icon in (("1 · 🧩 Plantilla", "Mi Letra: Plantilla", "puzzle"),
+                                 ("2 · 📦 Captura masiva", "Mi Letra: Captura", "camera"),
+                                 ("3 · ✅ Revisión", "Mi Letra: Revisión", "check"),
+                                 ("🗂 Banco", "Mi Letra: Banco", "grid"),
+                                 ("✍️ Escritor", "Mi Letra: Escritor", "pen")):
+            self.register_command(f"tab:{tab}", label, icon, "",
+                                  fn=lambda t=tab: self._goto_inkcore_tab(t),
+                                  keywords="inkcore tab letra")
+        self.register_command("save", "Guardar proyecto", "save", "Ctrl+S",
+                              fn=self._save_current, keywords="save")
+        self.register_command("export-pdf", "Exportar PDF del Escritor", "export", "",
+                              fn=self._cmd_export_pdf, keywords="pdf escribir")
+        self.register_command("refresh-bank", "Refrescar banco", "refresh", "",
+                              fn=self._cmd_refresh_bank, keywords="recargar glifos")
+        self.register_command("open-bank-dir", "Abrir carpeta del banco", "folder", "",
+                              fn=self._cmd_open_bank_dir, keywords="archivos tipografia")
+        self.register_command("theme", "Alternar tema claro/oscuro", "palette", "",
+                              fn=self._cmd_toggle_theme, keywords="dark light apariencia")
+        self.register_command("motion", "Animaciones: cambiar nivel", "play", "",
+                              fn=self._cmd_cycle_motion, keywords="reducidas off motion")
+
+    def _dynamic_commands(self) -> list:
+        """Comandos que dependen del estado actual (perfiles)."""
+        from ui.components.palette import Command
+        cmds = []
+        with contextlib.suppress(Exception):
+            active = self.inkcore.active_profile_id
+            for p in self.inkcore.list_profiles():
+                if p.id == active:
+                    continue
+                cmds.append(Command(
+                    id=f"profile:{p.id}", label=f"Cambiar a perfil: {p.name}",
+                    icon="pen", shortcut="",
+                    fn=lambda name=p.name: self._cmd_switch_profile(name),
+                    keywords="perfil letra"))
+        return cmds
+
+    def _goto_inkcore_tab(self, tab: str):
+        self.navigate("inkcore")
+        with contextlib.suppress(Exception):
+            self._views["inkcore"]._show_tab(tab)
+
+    def _cmd_export_pdf(self):
+        self._goto_inkcore_tab("✍️ Escritor")
+        with contextlib.suppress(Exception):
+            self._views["inkcore"]._export_writer_pdf()
+
+    def _cmd_refresh_bank(self):
+        self._goto_inkcore_tab("🗂 Banco")
+        with contextlib.suppress(Exception):
+            self._views["inkcore"]._refresh_bank()
+
+    def _cmd_open_bank_dir(self):
+        import subprocess
+        with contextlib.suppress(Exception):
+            subprocess.Popen(["xdg-open", str(self.inkcore.bank.bank_dir)])
+
+    def _cmd_switch_profile(self, name: str):
+        with contextlib.suppress(Exception):
+            view = self._views.get("inkcore")
+            if view is None:
+                self.navigate("inkcore")
+                view = self._views["inkcore"]
+            view._on_profile_select(name)
+            view._refresh_profile_dropdown()
+
+    def _cmd_toggle_theme(self):
+        import json
+        current = _load_saved_theme()
+        new_label = "Claro" if current == "dark" else "Oscuro"
+        with contextlib.suppress(Exception):
+            data = {}
+            if config.SETTINGS_FILE.exists():
+                data = json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8"))
+            data["theme"] = new_label
+            config.SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                            encoding="utf-8")
+        self.toast(f"Tema {new_label} guardado — reinicia para aplicarlo", "info")
+
+    def _cmd_cycle_motion(self):
+        import json
+        order = ["Completas", "Reducidas", "Off"]
+        current = motion.LABEL_BY_LEVEL.get(motion.get_motion_level(), "Completas")
+        new_label = order[(order.index(current) + 1) % 3]
+        motion.set_motion_level(new_label)
+        with contextlib.suppress(Exception):
+            data = {}
+            if config.SETTINGS_FILE.exists():
+                data = json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8"))
+            data["animations"] = new_label
+            config.SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                            encoding="utf-8")
+        self.toast(f"Animaciones: {new_label}", "info")
+
+    def toast(self, message: str, kind: str = "info"):
+        with contextlib.suppress(Exception):
+            self.toast_manager.show(message, kind)
 
     # ── Entrance ─────────────────────────────────────────────────────────────
 

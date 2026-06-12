@@ -5,7 +5,7 @@ statusbar. Depende de:
   • self (ctk.CTk) — para grid/columnconfigure
   • self.navigate — callback de navegación para el sidebar
   • crea: self._sidebar, self._topbar, self._content, self._statusbar y los
-    widgets internos (_topbar_icon, _view_title, _search_bar, _unsaved_label,
+    widgets internos (_topbar_icon, _view_title, _unsaved_label,
     _spinner_label, _status_label, _status_project)
 """
 import customtkinter as ctk
@@ -40,6 +40,7 @@ class AppLayoutMixin:
         self._statusbar.grid(row=2, column=1, sticky="ew")
 
     def _make_topbar(self) -> ctk.CTkFrame:
+        from ui import icons
         bar = ctk.CTkFrame(
             self,
             fg_color=theme.BG_SECONDARY,
@@ -53,8 +54,6 @@ class AppLayoutMixin:
         self._topbar_accent = ctk.CTkFrame(bar, fg_color=theme.ACCENT_ORANGE, height=2, corner_radius=0)
         self._topbar_accent.pack(side="bottom", fill="x")
 
-        # View icon + title (U3: icono vectorial)
-        from ui import icons
         self._topbar_icon = ctk.CTkLabel(
             bar,
             text="",
@@ -73,14 +72,17 @@ class AppLayoutMixin:
             side="left", fill="y", pady=12,
         )
 
-        self._search_bar = ctk.CTkEntry(
-            bar, placeholder_text="🔍  Buscar...",
-            width=240, height=32,
-            fg_color=theme.BG_TERTIARY,
-            text_color=theme.TEXT_PRIMARY,
-            border_color=theme.BORDER,
-        )
-        self._search_bar.pack(side="left", padx=14)
+        # U7/UI-10: la search falsa murió — botón discreto que abre la
+        # command palette (Ctrl+K)
+        ctk.CTkButton(
+            bar, text="Ctrl+K · Buscar acciones",
+            image=icons.get_icon("search", 14), compound="left",
+            width=200, height=30,
+            fg_color=theme.BG_TERTIARY, hover_color=theme.BORDER,
+            text_color=theme.TEXT_MUTED, font=theme.FONT_SMALL,
+            corner_radius=theme.RADIUS["m"],
+            command=lambda: self.open_palette(),
+        ).pack(side="left", padx=14)
 
         self._unsaved_label = ctk.CTkLabel(
             bar, text="",

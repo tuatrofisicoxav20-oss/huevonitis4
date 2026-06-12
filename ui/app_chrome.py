@@ -129,6 +129,7 @@ class AppChromeMixin:
         ).pack(side="left", padx=20, pady=12)
 
         shortcuts = [
+            ("Ctrl + K", "Buscar acciones (palette)"),
             ("Ctrl + S", "Guardar proyecto"),
             ("Ctrl + N", "Ir a Proyectos"),
             ("Ctrl + D", "Dashboard"),
