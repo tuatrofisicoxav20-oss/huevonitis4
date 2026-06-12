@@ -32,3 +32,6 @@ Thumbs.db
 ~$*
 *.tmp
 *.bak
+
+# Reportes de purga del banco (contact sheets con datos del usuario)
+reports/

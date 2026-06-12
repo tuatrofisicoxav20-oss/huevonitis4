@@ -549,13 +549,13 @@ def _extract_grid(gray, lay, clf, char_to_label):
             # grilla detectada incluye el rótulo impreso dentro de la celda).
             cw_full = float(xs[c + 1] - xs[c])
             ch_full = float(ys[r + 1] - ys[r])
-            em = int(round(ch_full * (1.0 - lay.label_strip / lay.cell_h)))
+            em = round(ch_full * (1.0 - lay.label_strip / lay.cell_h))
             bb = measure_ink_bbox(keep)
             ins_x = inset_used * cw_full
             glyph.info["geometry"] = template_geometry(
                 mask, ch, em_px=em,
-                lsb=int(round(ins_x + bb[0])) if bb else 0,
-                rsb=int(round(cw_full - (ins_x + bb[2]))) if bb else 0,
+                lsb=round(ins_x + bb[0]) if bb else 0,
+                rsb=round(cw_full - (ins_x + bb[2])) if bb else 0,
             )
             try:
                 q = assess_quality(glyph)
@@ -683,10 +683,8 @@ def _has_fiducials(image_path: str, lay: TemplateLayout) -> bool:
     if bgr is None:
         return False
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    for angle in (0, 90, 180, 270):
-        if _detect_fiducials(_rotate_cw(gray, angle), lay) is not None:
-            return True
-    return False
+    return any(_detect_fiducials(_rotate_cw(gray, angle), lay) is not None
+               for angle in (0, 90, 180, 270))
 
 
 def _grid_cnn_agreement(results, clf, char_to_label) -> float:
@@ -808,14 +806,36 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     import tempfile
     from pathlib import Path
 
+    from core.inkcore.glyph_filters import capture_gate, measure_glyph
     from core.inkcore.quality import classify_tier
     if temp_dir is None:
         temp_dir = Path(tempfile.mkdtemp(prefix="tpl_glyphs_"))
     else:
         temp_dir = Path(temp_dir)
         temp_dir.mkdir(parents=True, exist_ok=True)
-    saved = dupes = 0
+    saved = dupes = rejected = 0
+    rejects: list[tuple[str, int, str]] = []
+    # Gate de captura: los umbrales relativos se calibran con la mediana de lo
+    # YA existente en el banco para ese char (medido una vez por char y tanda);
+    # con un char nuevo solo aplican los umbrales absolutos de fallback.
+    bank_metrics_cache: dict[str, list] = {}
     for i, (ch, glyph, q) in enumerate(results):
+        cached = bank_metrics_cache.get(ch)
+        if cached is None:
+            cached = []
+            for e in bank.get_all(char_filter=ch):
+                try:
+                    with Image.open(e.image_path) as im:
+                        cached.append(measure_glyph(im.convert("RGBA")))
+                except Exception:
+                    continue
+            bank_metrics_cache[ch] = cached
+        ok, reason = capture_gate(glyph, ch, cached)
+        if not ok:
+            rejected += 1
+            rejects.append((ch, i, reason))
+            logger.info("gate de captura: '%s' celda #%d rechazado — %s", ch, i, reason)
+            continue
         safe = ch if ch.isalnum() else f"u{ord(ch)}"
         p = temp_dir / f"{safe}_{i:03d}.png"
         try:
@@ -841,6 +861,33 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     for f in temp_dir.glob("*.png"):
         with contextlib.suppress(OSError):
             f.unlink()
-    logger.info("save_template_glyphs_to_bank: saved=%d dupes=%d total=%d",
-                saved, dupes, len(results))
-    return {"saved": saved, "dupes": dupes, "total": len(results)}
+    if rejects:
+        _append_reject_log(rejects)
+    logger.info("save_template_glyphs_to_bank: saved=%d dupes=%d rejected=%d total=%d",
+                saved, dupes, rejected, len(results))
+    return {"saved": saved, "dupes": dupes, "rejected": rejected,
+            "total": len(results)}
+
+
+def _append_reject_log(rejects: list[tuple[str, int, str]]) -> None:
+    """extract_rechazados.csv: qué celdas de la tanda rebotó el gate y por qué.
+
+    Vive junto al banco (TIPOGRAFIA_DIR) y es acumulativo por tanda, para que
+    el usuario sepa qué casillas de la plantilla debe re-escribir.
+    """
+    import csv
+    import time as _time
+
+    import config as _config
+    path = _config.TIPOGRAFIA_DIR / "extract_rechazados.csv"
+    new = not path.exists()
+    try:
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["timestamp", "char", "celda", "reason"])
+            ts = _time.strftime("%Y-%m-%d %H:%M:%S")
+            for ch, idx, reason in rejects:
+                w.writerow([ts, ch, idx, reason])
+    except OSError as exc:
+        logger.warning("no se pudo escribir extract_rechazados.csv: %s", exc)

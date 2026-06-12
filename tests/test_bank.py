@@ -148,7 +148,10 @@ def test_save_template_conserva_score_y_tier(bank):
     from core.inkcore.template_extract import save_template_glyphs_to_bank
     arr = np.zeros((40, 40, 4), np.uint8)
     arr[..., :3] = 255
-    arr[10:30, 10:30, 3] = 255  # bloque de tinta en el alpha
+    # Anillo de tinta en el alpha (un bloque sólido tiene densidad 1.0 y el
+    # gate de captura lo rebotaría como BLOB — tinta real es trazo, no mancha).
+    arr[10:30, 10:30, 3] = 255
+    arr[12:28, 12:28, 3] = 0
     glyph = Image.fromarray(arr)  # 4 canales → RGBA
     # Misma letra en dos hojas: una dudosa (CNN la fijó en 0.45) y una buena.
     results = [("a", glyph.copy(), 0.45), ("a", glyph.copy(), 0.90)]
