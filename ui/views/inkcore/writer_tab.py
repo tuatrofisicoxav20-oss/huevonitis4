@@ -8,6 +8,7 @@ import customtkinter as ctk
 
 from core.inkcore.renderer import RenderOptions
 from ui import icons, theme
+from ui.views.inkcore.writer_preview import WriterPreviewMixin
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +18,9 @@ logger = logging.getLogger(__name__)
 # este valor — anclado al papel físico, ya no hay slider de "Tamaño" suelto.
 _WRITER_DEFAULTS = {"line_mm": 7.5, "jitter": 3, "style": "Limpio", "bg": "", "dpi": "150"}
 
-try:
-    from PIL import Image, ImageTk
-    _PIL_OK = True
-except ImportError:
-    _PIL_OK = False
 
 
-class WriterTabMixin:
+class WriterTabMixin(WriterPreviewMixin):
     """Tab del escritor de letra manuscrita; mezclado en InkCoreView."""
 
     # ── Build ──────────────────────────────────────────────────────
@@ -193,31 +189,8 @@ class WriterTabMixin:
 
         right = self.card_frame(main)
         right.grid(row=0, column=1, sticky="nsew")
-
-        preview_header = ctk.CTkFrame(right, fg_color="transparent")
-        preview_header.pack(fill="x", padx=14, pady=(14, 6))
-        ctk.CTkLabel(
-            preview_header, text="Preview",
-            font=theme.FONT_SUBHEADING, text_color=theme.TEXT_PRIMARY,
-        ).pack(side="left")
-        self._page_count_label = ctk.CTkLabel(
-            preview_header, text="",
-            font=theme.FONT_SMALL, text_color=theme.TEXT_MUTED,
-        )
-        self._page_count_label.pack(side="right")
-
-        self._writer_preview_scroll = ctk.CTkScrollableFrame(
-            right, fg_color=theme.BG_TERTIARY, corner_radius=8,
-        )
-        self._writer_preview_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
-        self._writer_preview_label = ctk.CTkLabel(
-            self._writer_preview_scroll,
-            text="El resultado aparecerá aquí",
-            text_color=theme.TEXT_MUTED,
-            font=theme.FONT_BODY,
-        )
-        self._writer_preview_label.pack(expand=True, pady=40)
+        # U5: panel de preview paginado con zoom/en vivo (WriterPreviewMixin)
+        self._build_writer_preview(right)
 
         # Fase 7 — restaurar los RENDER_PARAMS persistidos de la sesión anterior.
         self._load_writer_params()
@@ -488,46 +461,6 @@ class WriterTabMixin:
 
         threading.Thread(target=worker, daemon=True).start()
         self.toast("Renderizando...", "info")
-
-    def _show_preview_pages(self, pages: list):
-        if not self.winfo_exists():
-            return
-        for w in self._writer_preview_scroll.winfo_children():
-            w.destroy()
-        if not pages:
-            ctk.CTkLabel(
-                self._writer_preview_scroll,
-                text="Error al renderizar. ¿El banco tiene glifos?",
-                text_color=theme.ACCENT_RED, font=theme.FONT_BODY,
-            ).pack(pady=20)
-            self._page_count_label.configure(text="")
-            return
-
-        n_pages = len(pages)
-        self._page_count_label.configure(
-            text=f"{n_pages} {'página' if n_pages == 1 else 'páginas'}"
-        )
-
-        if _PIL_OK:
-            max_w = 500
-            self._preview_photo = None
-            self._writer_page_photos = []
-            for i, img in enumerate(pages):
-                if img.width > max_w:
-                    img = img.resize((max_w, int(img.height * max_w / img.width)), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                self._writer_page_photos.append(photo)
-                lbl = ctk.CTkLabel(self._writer_preview_scroll, image=photo, text="")
-                lbl.pack(pady=(8 if i == 0 else 4))
-                lbl._photo_ref = photo
-                if i < n_pages - 1:
-                    sep = ctk.CTkFrame(
-                        self._writer_preview_scroll,
-                        height=3, fg_color=theme.BORDER, corner_radius=0,
-                    )
-                    sep.pack(fill="x", padx=8, pady=4)
-
-        self.toast(f"Preview listo ({n_pages} páginas)", "success")
 
     def _export_png(self):
         text = self._writer_text.get("0.0", "end").strip()
