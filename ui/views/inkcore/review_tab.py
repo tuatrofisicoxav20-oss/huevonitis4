@@ -127,7 +127,11 @@ class ReviewTabMixin:
             1 for e in all_entries if e.tier == "Bronze" or e.quality_score < 0.50
         )
 
-        self._review_pending_lbl.configure(text=f"🔴  {attention}  por revisar")
+        if attention == 0 and all_entries:
+            # U6: estado "todo revisado" — check ámbar en vez de contador rojo
+            self._review_pending_lbl.configure(text="✓  Todo revisado")
+        else:
+            self._review_pending_lbl.configure(text=f"🔴  {attention}  por revisar")
         self._review_silver_lbl.configure(text=f"🟡  {silver_count}  Silver")
         self._review_gold_lbl.configure(text=f"🟢  {gold_count}  Gold")
 

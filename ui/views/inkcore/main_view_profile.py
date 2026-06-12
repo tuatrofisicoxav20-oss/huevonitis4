@@ -80,14 +80,52 @@ class InkCoreViewProfileMixin:
             padx=10, pady=2,
         )
         self._profile_count_label.pack(side="right", padx=12)
+
+        # U6: stepper del pipeline (un solo canvas) — click navega al tab
+        from ui.components.stepper import PipelineStepper
+        self._stepper_tab_by_step = {
+            "template": "1 · 🧩 Plantilla",
+            "capture": "2 · 📦 Captura masiva",
+            "bank": "🗂 Banco",
+            "write": "✍️ Escritor",
+        }
+        self._pipeline_stepper = PipelineStepper(
+            bar, on_step_click=lambda sid: self._show_tab(
+                self._stepper_tab_by_step.get(sid, "🗂 Banco")))
+        self._pipeline_stepper.pack(side="right", padx=theme.SPACE["s"])
         self._update_profile_count()
 
     def _update_profile_count(self) -> None:
         try:
             n = len(self._pipeline.bank._entries)
-            self._profile_count_label.configure(text=f"📁 {n} glifo{'s' if n != 1 else ''}")
+            self._profile_count_label.configure(text=f"{n} glifo{'s' if n != 1 else ''}")
         except Exception:
             pass
+        self._update_stepper()
+
+    def _update_stepper(self) -> None:
+        """U6: estado REAL del pipeline → stepper (se refresca con el contador,
+        que ya se actualiza tras cada extracción/borrado/cambio de perfil)."""
+        stepper = getattr(self, "_pipeline_stepper", None)
+        if stepper is None:
+            return
+        try:
+            from ui.components.stepper import compute_step_states
+            cov = self._pipeline.bank_coverage()
+            has_glyphs = cov.get("total_glyphs", 0) > 0
+            flags = {
+                # Plantilla: generada en esta sesión o ya hay glifos capturados
+                "has_template": getattr(self, "_template_generated", False) or has_glyphs,
+                "has_glyphs": has_glyphs,
+                # ≥80% del alfabeto a-z+ñ cubierto
+                "coverage_ok": cov.get("alpha_covered", 0) >= 22,
+                # Hubo un render antes (params persistidos) o en esta sesión
+                "has_render": bool(getattr(self, "_wp_pages", None))
+                or self._writer_params_path().exists(),
+            }
+            stepper.set_states(compute_step_states(flags))
+        except Exception as exc:
+            logger.debug("stepper sin actualizar: %s", exc)
 
     def _refresh_profile_dropdown(self) -> None:
         profiles = self._pipeline.list_profiles()

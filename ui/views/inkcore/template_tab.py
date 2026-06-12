@@ -230,6 +230,9 @@ class TemplateTabMixin:
                 text_color=theme.ACCENT_GREEN,
             )
             self.toast(f"Plantilla guardada: {Path(out).name}", "success")
+            # U6: avanza el paso 1 del stepper
+            self._template_generated = True
+            self._update_profile_count()
         except Exception as exc:
             logger.error("tpl_generate: %s", exc, exc_info=True)
             self.toast(f"No se pudo generar: {exc}", "error")
