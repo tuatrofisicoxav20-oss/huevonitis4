@@ -21,7 +21,7 @@ class BaseView(ctk.CTkFrame):
         """Called each time this view is hidden (before another view is shown)."""
         pass
 
-    def toast(self, message: str, kind: str = "info"):
+    def toast(self, message: str, kind: str = "info", action: "tuple | None" = None):
         """Mostrar toast. Si el manager falla o no existe, fallback a stderr.
 
         Sin el fallback, fallos de toast (HiDPI mal calculado, manager
@@ -32,7 +32,7 @@ class BaseView(ctk.CTkFrame):
         tm = getattr(self.app, "toast_manager", None)
         if tm is not None:
             try:
-                tm.show(message, kind)
+                tm.show(message, kind, action=action)
                 return
             except Exception as exc:
                 logger.warning("toast.show falló: %s", exc, exc_info=True)

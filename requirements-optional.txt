@@ -75,3 +75,7 @@
 # psutil — muestra uso de RAM al "Liberar modelos de memoria" en InkCore.
 # Mejora la UX pero NO es crítico — el botón funciona sin él.
 # psutil>=5.9
+
+# tkinterdnd2 — drag & drop de archivos sobre la Captura masiva (U9/F7).
+# Totalmente opcional: sin él, la carga sigue por botón.
+# tkinterdnd2>=0.4

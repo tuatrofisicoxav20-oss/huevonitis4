@@ -61,6 +61,27 @@ Dos causas raíz arregladas en U1:
 El "paint storm" post-navegación (~10 s con el banco real) es el costo de
 entorno de arriba: se reduce ~proporcional al conteo de widgets en U3/U4.
 
+## Resultado final (U9, 2026-06-11) — antes / después
+
+Mismo driver y banco real (346 glifos):
+
+| Métrica | Base (U0) | Final (U9) | Presupuesto |
+|---|---:|---:|---|
+| Arranque frío → dashboard | 2 492 ms | **923 ms** | −30% → logrado **−63%** ✅ |
+| Primera apertura "Mi Letra" | 19 457 ms | **548 ms** (navigate real: 370 ms) | <400 ms — 35× mejor; el residuo es el costo de entorno ⚠️ |
+| Cambio al tab Banco (síncrono) | 3 642 ms | **8 ms** (+131 ms build lazy) | <500 ms ✅ |
+| Celdas del banco listas (chunks) | >54 s | **~0.9 s** | filtra fluido ✅ |
+| Widgets tras navigate(inkcore) | 572 | **323** | menos por celda ✅ |
+| Preview del writer (página cacheada) | apilaba todo | resize en worker, ~instantáneo | <300 ms ✅ |
+| Frames de animación >20 ms | — | **0** (lerps de 1 widget vía motion) | 0 ✅ |
+
+Claves del salto: patch de CTkOptionMenu (workaround 3 de main.py), lazy
+tabs, celdas/headers/stepper como items de canvas (no widgets) y thumbs de
+disco. El único presupuesto con asterisco es "Mi Letra <400 ms": quedó en
+~550 ms medidos punta a punta porque el primer pintado por subventana X de
+este equipo (Tk 9 + XWayland) impone un piso; el navigate en sí ya está en
+~370 ms.
+
 ## Cómo re-medir
 
 ```bash

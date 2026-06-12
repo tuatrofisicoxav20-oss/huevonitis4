@@ -149,6 +149,27 @@ class BulkCaptureTabMixin:
 
         self._bulk_grid_scroll.bind("<Key>", self._bulk_on_key)
 
+        # U9/F7: drag & drop opcional (tkinterdnd2) — soltar imágenes sobre
+        # la Captura las carga; sin la lib todo sigue por botón.
+        from ui import dnd
+        from ui import theme as _theme
+
+        def _on_drop_files(paths):
+            imgs = [p for p in paths
+                    if p.lower().endswith((".png", ".jpg", ".jpeg", ".bmp",
+                                           ".tiff", ".webp"))]
+            pdfs = [p for p in paths if p.lower().endswith(".pdf")]
+            if imgs:
+                self._bulk_run(imgs)
+            if pdfs:
+                self.toast("Para PDF usa el botón (elige rango de páginas)", "info")
+
+        dnd.enable_file_drop(
+            parent, _on_drop_files,
+            highlight=lambda: parent.configure(
+                border_width=2, border_color=_theme.ACCENT_PRIMARY),
+            unhighlight=lambda: parent.configure(border_width=0))
+
     # ── Logic ──────────────────────────────────────────────────────
 
     def _bulk_load_pdf(self):

@@ -34,6 +34,18 @@ class SettingsCacheMixin:
 
         ctk.CTkFrame(card, height=1, fg_color=theme.BORDER).pack(fill="x", padx=12, pady=(4, 0))
 
+    def _empty_bank_trash(self):
+        """U9: vacía la papelera del banco del perfil activo."""
+        try:
+            from core.inkcore.bank_trash import empty_trash, list_trash
+            bank_dir = self.app.inkcore.bank.bank_dir
+            n_items = sum(t.get("count", 0) for t in list_trash(bank_dir))
+            n = empty_trash(bank_dir)
+            self.toast(f"Papelera vaciada: {n} papelera{'s' if n != 1 else ''} "
+                       f"({n_items} glifos)", "success" if n else "info")
+        except Exception as exc:
+            self.toast(f"No se pudo vaciar: {exc}", "error")
+
     def _get_cache_size_text(self) -> str:
         try:
             from core.ocr.result_cache import OCRResultCache

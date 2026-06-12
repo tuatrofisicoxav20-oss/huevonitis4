@@ -22,7 +22,9 @@ class ToastManager:
         self._restack_debounced = perf.debounce(parent, 50, self._restack)
         self.parent.bind("<Configure>", self._on_parent_resize, add="+")
 
-    def show(self, message: str, kind: str = "info", duration: int = 3500):
+    def show(self, message: str, kind: str = "info", duration: int = 3500,
+             action: "tuple | None" = None):
+        """action=(etiqueta, fn): botón de acción en el toast (p.ej. Deshacer)."""
         # U3: iconos vectoriales en vez de glifos de texto; info usa el cian
         # secundario y warning el ámbar (semántica Orbital).
         from ui import icons as _icons
@@ -69,6 +71,17 @@ class ToastManager:
             wraplength=210,
             justify="left",
         ).pack(side="left", fill="x", expand=True)
+
+        if action is not None:
+            label_a, fn_a = action
+            ctk.CTkButton(
+                toast_row, text=label_a, width=70, height=22,
+                fg_color="transparent", hover_color=theme.BG_TERTIARY,
+                text_color=theme.ACCENT_CYAN, font=theme.FONT_SMALL,
+                border_width=1, border_color=theme.ACCENT_CYAN,
+                corner_radius=theme.RADIUS["s"],
+                command=lambda t=toast: (self._dismiss(t), fn_a()),
+            ).pack(side="right", padx=(4, 0))
 
         btn_close = ctk.CTkButton(
             toast_row, text="\u00d7", width=24, height=24,

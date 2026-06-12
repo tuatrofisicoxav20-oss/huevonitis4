@@ -134,6 +134,34 @@ tinta plana sin textura, papel hex sin grano, renglones que no sostienen el
 texto, rotación de ruido blanco, y caída silenciosa a fuente de sistema (los
 caracteres sin glifo se OMITEN con aviso previo en el Writer).
 
+## UI Orbital
+
+La interfaz usa el design system **"Caos Orbital"** (overhaul U0–U9):
+
+- **Tokens centralizados** en `ui/theme.py`: paleta espacio profundo con
+  acento primario ámbar + cian informativo (dark y light derivados de los
+  mismos tokens), `SPACE`/`RADIUS`/`DUR`, tipografía real de Linux
+  (Inter/Cantarell + JetBrains Mono). `tools/check_ui_tokens.py` (y un test
+  en suite) falla si reaparece un color hex o fuente hardcodeada en `ui/`.
+- **Iconos vectoriales propios** (`ui/icons.py`): ~30 iconos outline
+  dibujados con PIL a 4×, recoloreables; cero emojis en controles.
+- **Niveles de animación** en Configuración → Apariencia → Animaciones:
+  *Completas / Reducidas (solo lerps de color) / Off* (app 100% estática).
+  Toda animación pasa por `ui/motion.py`, dura ≤250 ms y es cancelable; la
+  ventana raíz jamás anima su geometry.
+- **Command palette**: `Ctrl+K` busca y ejecuta cualquier acción
+  (navegación, tabs de Mi Letra, exportar PDF, cambiar perfil/tema/animaciones).
+- **Banco escalable**: acordeón por letra, celdas dibujadas en canvas,
+  thumbnails persistentes en `{banco}/.thumbs/` y refresh diferencial;
+  borrar manda a la papelera (`.trash/`) con **Deshacer** en el toast.
+- **Atajos**: `Ctrl+K` palette, `Ctrl+D/N/E/L/B` vistas, `Ctrl+,` config,
+  `Ctrl+S` guardar, `F1` ayuda.
+- **Rendimiento**: medible con `HUEVONITIS_PERF=1 python main.py`; línea
+  base y resultados en `ui/PERF_BASELINE.md` (arranque −63%, "Mi Letra"
+  35× más rápido, tab Banco 3.6 s → 8 ms en el equipo de referencia).
+- Dependencia opcional: `tkinterdnd2` habilita soltar imágenes sobre la
+  Captura masiva (sin ella, todo sigue por botón).
+
 ## Tests
 
 ```bash

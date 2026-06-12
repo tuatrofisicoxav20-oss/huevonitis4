@@ -6,7 +6,7 @@ selección múltiple + batch, y recarga/refresco de los tabs afectados.
 import contextlib
 import logging
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -43,21 +43,30 @@ class BankTabEditMixin:
         self._reload_and_refresh_all()
 
     def _bank_delete_glyph(self, glyph) -> None:
-        """Elimina un glifo individual del banco con confirmación."""
-        if not messagebox.askyesno(
-            "Confirmar eliminación",
-            f"¿Eliminar el glifo '{glyph.char}' (tier {glyph.tier})?\n"
-            "Esta acción borra el PNG y la entrada del manifest.",
-        ):
-            return
+        """U9: borrar = mover a la papelera, con Deshacer en el toast (6s)."""
         logger.info("_bank_delete_glyph: %r path=%s", glyph.char, glyph.image_path)
         try:
-            self._pipeline.bank.remove_glyph(glyph)
+            from core.inkcore.bank_trash import trash_glyphs
+            trash_id = trash_glyphs(self._pipeline.bank, [glyph])
         except Exception as exc:
-            logger.error("_bank_delete_glyph: bank.remove_glyph lanzó: %s", exc, exc_info=True)
+            logger.error("_bank_delete_glyph: trash_glyphs lanzó: %s", exc, exc_info=True)
             self.toast(f"Error al eliminar: {exc}", "error")
             return
-        self.toast(f"'{glyph.char}' eliminado", "warning")
+        self.toast(f"'{glyph.char}' movido a la papelera", "warning",
+                   action=("Deshacer", lambda t=trash_id: self._bank_undo_trash(t)))
+        self._reload_and_refresh_all()
+
+    def _bank_undo_trash(self, trash_id: str | None) -> None:
+        if not trash_id:
+            return
+        try:
+            from core.inkcore.bank_trash import restore_trash
+            n = restore_trash(self._pipeline.bank, trash_id)
+        except Exception as exc:
+            logger.error("undo papelera falló: %s", exc, exc_info=True)
+            self.toast(f"No se pudo restaurar: {exc}", "error")
+            return
+        self.toast(f"{n} glifo{'s' if n != 1 else ''} restaurado{'s' if n != 1 else ''}", "success")
         self._reload_and_refresh_all()
 
     # ── Agregar manualmente desde imagen ──────────────────────────
@@ -192,32 +201,24 @@ class BankTabEditMixin:
         self._update_bank_selection_bar()
 
     def _bank_batch_delete(self) -> None:
-        """Elimina todos los glifos seleccionados con confirmación única."""
+        """U9: batch a la papelera con Deshacer (sin modal de confirmación —
+        el undo del toast es la red de seguridad)."""
         selected_paths = list(getattr(self, "_bank_selected_paths", ()) or ())
         if not selected_paths:
             self.toast("Sin selección", "warning")
             return
-        if not messagebox.askyesno(
-            "Confirmar eliminación batch",
-            f"¿Eliminar {len(selected_paths)} glifo(s) seleccionado(s)?\n"
-            "Esta acción borra los PNGs y las entradas del manifest.",
-        ):
+        path_to_entry = {e.image_path: e for e in self._pipeline.bank.get_all()}
+        entries = [path_to_entry[p] for p in selected_paths if p in path_to_entry]
+        try:
+            from core.inkcore.bank_trash import trash_glyphs
+            trash_id = trash_glyphs(self._pipeline.bank, entries)
+        except Exception as exc:
+            logger.error("_bank_batch_delete: trash_glyphs lanzó: %s", exc, exc_info=True)
+            self.toast(f"Error al eliminar: {exc}", "error")
             return
-        all_entries = self._pipeline.bank.get_all()
-        path_to_entry = {e.image_path: e for e in all_entries}
-        removed = 0
-        for p in selected_paths:
-            entry = path_to_entry.get(p)
-            if entry is None:
-                logger.warning("_bank_batch_delete: path %s no está en banco", p)
-                continue
-            try:
-                self._pipeline.bank.remove_glyph(entry)
-                removed += 1
-            except Exception as exc:
-                logger.error("_bank_batch_delete: error en %s: %s", p, exc, exc_info=True)
-        logger.info("_bank_batch_delete: %d/%d eliminados", removed, len(selected_paths))
-        self.toast(f"{removed} glifos eliminados", "success" if removed else "warning")
+        logger.info("_bank_batch_delete: %d a papelera %s", len(entries), trash_id)
+        self.toast(f"{len(entries)} glifos a la papelera", "warning",
+                   action=("Deshacer", lambda t=trash_id: self._bank_undo_trash(t)))
         self._bank_selected_paths.clear()
         self._reload_and_refresh_all()
 
