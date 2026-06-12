@@ -38,8 +38,9 @@ def _pdf_page_count(path) -> int:
 @pytest.mark.skipif(not _has_pil(), reason="PIL no instalado")
 def test_export_rendered_pages_pdf_sin_reportlab(tmp_path, monkeypatch):
     """R8: exporta 3 páginas carta SIN reportlab y el PDF reabre bien."""
-    import core.export.pdf_exporter as pe
     from PIL import Image
+
+    import core.export.pdf_exporter as pe
 
     monkeypatch.setattr(pe, "RL_OK", False)  # fuerza el mundo sin reportlab
     pages = [Image.new("RGB", (1275, 1650), c)
@@ -57,8 +58,9 @@ def test_export_rendered_pages_pdf_sin_reportlab(tmp_path, monkeypatch):
 @pytest.mark.skipif(not _has_pil(), reason="PIL no instalado")
 def test_export_streaming_cae_a_pil_sin_reportlab(tmp_path, monkeypatch):
     """El exportador del Writer (streaming) funciona sin reportlab (R8)."""
-    import core.export.pdf_exporter as pe
     from PIL import Image
+
+    import core.export.pdf_exporter as pe
 
     monkeypatch.setattr(pe, "RL_OK", False)
     progreso = []

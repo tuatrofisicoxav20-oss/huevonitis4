@@ -38,12 +38,11 @@ def test_roundtrip_extrae_pares(tmp_path):
     (proporcional al área) se traga los trazos finos — eso es geometría de
     grilla preexistente, no de ligaduras.
     """
-    from tests.test_template import _fill_sheet
-
     from core.inkcore.template_extract import extract_from_template
     from core.inkcore.template_sheet import MINUSCULAS, TemplateLayout
+    from tests.test_template import _fill_sheet
 
-    charset = list(MINUSCULAS) + ["qu", "ll", "de"]
+    charset = [*list(MINUSCULAS), "qu", "ll", "de"]
     lay = TemplateLayout(charset=charset)
     idx = {tok: i for i, tok in enumerate(charset)}
     img = _fill_sheet(lay, [idx["qu"], idx["ll"], idx["de"]])
@@ -69,8 +68,8 @@ def _bank_con_pares(tmp_path):
     for par in ("de", "en"):
         # Ligadura stub: los dos glifos pegados lado a lado en un PNG.
         from PIL import Image
-        a, geo_a = _stub_glyph(par[0])
-        b, geo_b = _stub_glyph(par[1])
+        a, _geo_a = _stub_glyph(par[0])
+        b, _geo_b = _stub_glyph(par[1])
         h = max(a.height, b.height)
         img = Image.new("RGBA", (a.width + b.width - 4, h), (255, 255, 255, 0))
         img.paste(a, (0, h - a.height), a)
@@ -111,9 +110,8 @@ def test_render_usa_ligadura_con_probabilidad(tmp_path):
 
 def test_par_inexistente_no_afecta(tmp_path):
     """Texto con pares que NO están en el banco renderiza char a char."""
-    from tests.test_render_realism import _make_stub_bank
-
     from core.inkcore.renderer import HandwritingRenderer, RenderOptions
+    from tests.test_render_realism import _make_stub_bank
 
     r = HandwritingRenderer(_make_stub_bank(tmp_path))
     opts = RenderOptions(style="", background_style="hoja_blanca", seed=5,

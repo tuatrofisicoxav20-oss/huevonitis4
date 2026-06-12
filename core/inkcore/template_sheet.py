@@ -55,7 +55,7 @@ class TemplateLayout:
     # Caracteres rotulados (uno por grupo de `repeats` casillas). Puede ser
     # str (un char por casilla) o LISTA de tokens donde un token de 2 letras
     # es una ligadura (R10): "qu" se escribe junta en una sola casilla.
-    charset: "str | list[str]" = SPANISH_ALPHABET
+    charset: str | list[str] = SPANISH_ALPHABET
     repeats: int = 1            # muestras por letra (casillas consecutivas con la misma letra)
     cols: int = 0              # 0 = auto en __post_init__ según charset/repeats
 

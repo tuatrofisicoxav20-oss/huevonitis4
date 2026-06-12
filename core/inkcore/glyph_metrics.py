@@ -112,7 +112,7 @@ def finalize_sheet_geometry(results: list) -> None:
         if ch in XHEIGHT_REF and (g := glyph.info.get("geometry"))
     ]
     x_ref = int(np.median(xheights)) if xheights else 0
-    for ch, glyph, _q in results:
+    for _ch, glyph, _q in results:
         geo = glyph.info.get("geometry")
         if not geo:
             continue
@@ -140,7 +140,7 @@ def estimate_geometry_for_image(img: Image.Image, ch: str,
     w, h = img.size
     if any(c in DESCENDERS for c in ch):  # R10: pares descendentes también
         body = x_height_px if x_height_px > 0 else (ink_bottom - ink_top) * _DESC_BODY_FRAC
-        baseline = min(h, ink_top + int(round(body)))
+        baseline = min(h, ink_top + round(body))
     else:
         baseline = ink_bottom
     return {
@@ -191,7 +191,7 @@ def estimate_bank_geometry(entries: list, *, force: bool = False) -> dict[str, d
             logger.debug("estimate_bank_geometry: no se pudo abrir %s: %s",
                          e.image_path, exc)
     x_ref = float(np.median(xheights)) if xheights else 0.0
-    em = int(round(x_ref / _XHEIGHT_TO_EM)) if x_ref > 0 else 0
+    em = round(x_ref / _XHEIGHT_TO_EM) if x_ref > 0 else 0
 
     # Pasada 2: geometría por glifo pendiente.
     out: dict[str, dict] = {}
@@ -209,7 +209,7 @@ def estimate_bank_geometry(entries: list, *, force: bool = False) -> dict[str, d
         # su clase, para que nat_h/em siga siendo una fracción razonable.
         if geo["em_px"] <= 1:
             frac = 0.85 if e.char not in XHEIGHT_REF else _XHEIGHT_TO_EM
-            geo["em_px"] = max(1, int(round(geo["nat_h_px"] / frac)))
+            geo["em_px"] = max(1, round(geo["nat_h_px"] / frac))
         out[e.image_path] = geo
     return out
 

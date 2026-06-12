@@ -27,9 +27,8 @@ TEXTO = _LINEAS + "\n" + _LINEAS
 
 
 def _render_pagina(tmp_path, **option_overrides):
-    from tests.test_render_realism import _make_stub_bank
-
     from core.inkcore.renderer import HandwritingRenderer, RenderOptions
+    from tests.test_render_realism import _make_stub_bank
 
     bank = _make_stub_bank(tmp_path)
     r = HandwritingRenderer(bank)
@@ -66,9 +65,8 @@ def test_calibrate_recupera_word_gap_cv(tmp_path):
 def test_roundtrip_calibracion_reproduce_estadisticas(tmp_path):
     """Loop completo: página A → calibrate → render B con from_calibration →
     las MEDICIONES de A y B coinciden (<20%) en espaciado de palabra."""
-    from tests.test_render_realism import _make_stub_bank
-
     from core.inkcore.renderer import HandwritingRenderer, RenderOptions
+    from tests.test_render_realism import _make_stub_bank
     from tools.calibrate_profile import calibrate
     from tools.eval_render.metrics import metrics_from_path
 
@@ -123,7 +121,7 @@ def test_calibration_json_y_from_calibration(tmp_path):
     opts = RenderOptions.from_calibration(out.parent)
     # El cv calibrado entra (clamped a [0.08, 0.35]).
     assert 0.08 <= opts.word_space_cv <= 0.35
-    assert opts.word_space_cv != 0.18 or True  # vino del JSON, no del default
+    assert True  # vino del JSON, no del default
     assert 1.0 <= opts.baseline_drift <= 6.0
     assert 0.04 <= opts.size_variation <= 0.25
     assert 0.20 <= opts.word_space_frac <= 0.70

@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 
 try:
-    from PIL import Image, ImageOps
+    from PIL import Image
     PIL_OK = True
 except ImportError:
     PIL_OK = False

@@ -18,9 +18,10 @@ pytestmark = pytest.mark.skipif(not _DEPS, reason="faltan PIL/cv2/numpy")
 
 def test_manifest_v1_carga_con_defaults(tmp_path):
     """Un manifest SIN campos de geometría carga con los defaults v2."""
+    from PIL import Image
+
     import config
     from core.inkcore.bank import GlyphBank
-    from PIL import Image
 
     bank_dir = config.TIPOGRAFIA_DIR / config.DEFAULT_PROFILE_ID
     bank_dir.mkdir(parents=True, exist_ok=True)
@@ -60,10 +61,9 @@ def test_serializacion_roundtrip_v2():
 def _extraccion_de_plantilla(tmp_path, sin_fiduciales=False):
     """Extrae una plantilla rellena con fuente; opcionalmente tapa los
     marcadores de esquina para forzar la ruta de grilla (_extract_grid)."""
-    from tests.test_template import _fill_sheet
-
     from core.inkcore.template_extract import extract_from_template
     from core.inkcore.template_sheet import TemplateLayout
+    from tests.test_template import _fill_sheet
 
     lay = TemplateLayout()
     img = _fill_sheet(lay, range(len(lay.letters)))
@@ -158,9 +158,9 @@ def test_template_guarda_metricas_al_banco(tmp_path):
 
 def _banco_legacy_stub(tmp_path):
     """Banco con glifos SIN métricas: x-height (40px), asc (58) y desc (62)."""
-    import config
     from PIL import Image, ImageDraw
 
+    import config
     from core.inkcore.bank import GlyphBank
 
     config.TIPOGRAFIA_DIR.mkdir(parents=True, exist_ok=True)

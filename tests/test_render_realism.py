@@ -111,7 +111,7 @@ def _make_stub_bank(tmp_path, chars="abcdefghijklmnopqrstuvwxyz",
     bank.begin_batch()
     for ch in chars:
         img, geo = _stub_glyph(ch)
-        p = glyph_dir / f"{'u%d' % ord(ch) if not ch.isalnum() else ch}.png"
+        p = glyph_dir / f"{f'u{ord(ch)}' if not ch.isalnum() else ch}.png"
         img.save(p)
         bank.add_glyph(ch, str(p), geometry=geo if with_geometry else None)
     bank.end_batch()
@@ -208,7 +208,7 @@ def test_mayusculas_usan_glifo_exacto(tmp_path):
     gd = tmp_path / "g"
     gd.mkdir()
     for ch, h in (("a", 40), ("A", 66)):
-        img = Image.new("RGBA", (40, h), (255, 255, 255, 0))
+        Image.new("RGBA", (40, h), (255, 255, 255, 0))
         arr = np.zeros((h, 40, 4), dtype=np.uint8)
         arr[:, :, :3] = 255
         arr[2:h - 2, 4:36, 3] = 255
