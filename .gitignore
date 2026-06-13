@@ -35,3 +35,6 @@ Thumbs.db
 
 # Reportes de purga del banco (contact sheets con datos del usuario)
 reports/
+
+# Fixtures pesados (PDFs reales del usuario, no van a git)
+tests/fixtures/template_pdfs/*.pdf
