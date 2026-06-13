@@ -405,6 +405,67 @@ def test_cell_ink_mask_conserva_trazo_delgado():
     assert int((mask > 0).sum()) > 80
 
 
+def test_estimate_grid_dims_distingue_acentos_de_digitos():
+    """Auto non-az: la autocorrelación separa 6 columnas (acentos) de 9 (dígitos).
+
+    Es la señal que score_layout_cheap NO da (premia grillas finas). Sobre hojas
+    sintéticas rellenas, el nº de columnas estimado debe coincidir con el preset.
+    """
+    import numpy as np
+
+    from core.inkcore.template_extract import (
+        _deskew,
+        _estimate_grid_dims,
+        _estimate_skew,
+        _grid_content_bbox,
+    )
+    from core.inkcore.template_sheet import TEMPLATE_PRESETS
+    for name, exp_cols in (("acentuadas_x12", 6), ("digitos_signos_x8", 9)):
+        lay = TEMPLATE_PRESETS[name]
+        img = _fill_sheet(lay, range(lay.cols * lay.rows))
+        gray = np.asarray(img.convert("L"))
+        dk = _deskew(gray, _estimate_skew(gray))
+        dims = _estimate_grid_dims(dk, _grid_content_bbox(dk))
+        assert dims is not None, f"{name}: sin periodicidad"
+        cols, _rows, conf = dims
+        assert abs(cols - exp_cols) <= 1, f"{name}: cols={cols} esperaba {exp_cols}"
+        assert conf > 0.3
+
+
+def test_estimate_grid_dims_hoja_vacia_devuelve_none():
+    """Auto non-az: sin tinta (hoja en blanco) no hay periodicidad → None."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _estimate_grid_dims
+    blank = np.full((1400, 1000), 255, np.uint8)
+    assert _estimate_grid_dims(blank, (50, 50, 950, 1350)) is None
+
+
+def test_extract_pdf_pages_auto_identifica_acentos(tmp_path):
+    """Auto non-az: una hoja de acentos se identifica como acentuadas_x12.
+
+    Antes quedaba siempre suspect (el CNN no cubre á/é/ñ). Ahora la rama non-az
+    la identifica por geometría (6 columnas) y la extrae sin marcarla suspect.
+
+    Se fuerza el camino non-az pasando clf=None: con una fuente sintética las
+    vocales acentuadas (á,é,í) son casi idénticas a sus bases (a,e,i) a 28×28 y
+    el CNN las colaría por la rama a-z — en la foto REAL del usuario eso no pasa
+    (la tilde manuscrita es más marcada), pero el test debe aislar la lógica
+    nueva, no la confusión del CNN con una fuente.
+    """
+    from core.inkcore.ai.char_cnn import char_to_label
+    from core.inkcore.template_extract import extract_pdf_pages
+    from core.inkcore.template_sheet import TEMPLATE_PRESETS
+    lay = TEMPLATE_PRESETS["acentuadas_x12"]
+    img = _fill_sheet(lay, range(lay.cols * lay.rows))
+    p = tmp_path / "acentos.png"
+    img.save(p)
+    meta = extract_pdf_pages([str(p)], clf=None, char_to_label=char_to_label)[0]
+    assert meta["preset"] == "acentuadas_x12", meta["preset"]
+    assert meta["suspect"] is False
+    assert len(meta["results"]) >= 50
+
+
 def test_presets_geometrias_conocidas():
     """E3: el registro reproduce las geometrías medidas contra los PDF reales."""
     from core.inkcore.template_sheet import TEMPLATE_PRESETS

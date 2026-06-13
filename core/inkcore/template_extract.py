@@ -477,6 +477,58 @@ def _grid_content_bbox(gray: np.ndarray) -> tuple[int, int, int, int] | None:
     return x0, y0, x1, y1
 
 
+def _autocorr_period(proj: np.ndarray, span: int) -> tuple[int | None, float]:
+    """Período dominante de una proyección 1D por autocorrelación, y su fuerza.
+
+    La grilla impone periodicidad en la proyección de tinta (las letras caen
+    centradas en columnas/filas regulares), aunque las LÍNEAS impresas sean
+    demasiado tenues para detectarse. Devuelve (período_px, pico_normalizado) o
+    (None, 0). Busca el primer máximo local fuerte tras el lag 0, en un rango de
+    lags plausible (≥ span/20: hasta ~20 divisiones; ≤ span/3: ≥3 divisiones).
+    """
+    proj = proj.astype(float) - float(proj.mean())
+    if proj.std() < 1e-6:
+        return None, 0.0
+    ac = np.correlate(proj, proj, "full")[len(proj) - 1:]
+    ac /= ac[0]
+    best_lag, best_val = None, 0.0
+    for lag in range(max(2, span // 20), max(3, span // 3)):
+        if ac[lag] > best_val and ac[lag] > ac[lag - 1] and ac[lag] >= ac[lag + 1]:
+            best_val, best_lag = float(ac[lag]), lag
+    return best_lag, best_val
+
+
+def _estimate_grid_dims(deskewed: np.ndarray, bbox: tuple | None) -> tuple | None:
+    """Estima (cols, rows, confianza) de la grilla por autocorrelación de tinta.
+
+    Para las hojas que el CNN no puede identificar (acentos, dígitos), el número
+    de COLUMNAS distingue su geometría: acentos=6, dígitos=9. No depende de ver
+    las líneas de grilla (Bug D) — usa la periodicidad de la tinta manuscrita,
+    que está centrada en cada celda por construcción. Confianza = el menor de los
+    dos picos de autocorrelación (col y fila). Devuelve None si no hay periodicidad
+    clara (hoja casi vacía o a medio llenar sin estructura).
+    """
+    if bbox is None:
+        return None
+    gx0, gy0, gx1, gy1 = bbox
+    crop = deskewed[gy0:gy1, gx0:gx1]
+    if crop.size == 0 or crop.shape[0] < 20 or crop.shape[1] < 20:
+        return None
+    binv = cv2.adaptiveThreshold(
+        cv2.GaussianBlur(crop, (3, 3), 0), 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 41, 10,
+    )
+    col_proj = (binv > 0).sum(axis=0)
+    row_proj = (binv > 0).sum(axis=1)
+    col_lag, col_ac = _autocorr_period(col_proj, crop.shape[1])
+    row_lag, row_ac = _autocorr_period(row_proj, crop.shape[0])
+    if col_lag is None or row_lag is None:
+        return None
+    cols = round(crop.shape[1] / col_lag)
+    rows = round(crop.shape[0] / row_lag)
+    return cols, rows, min(col_ac, row_ac)
+
+
 def _strip_edge_lines(thr: np.ndarray, band: float = 0.20, frac: float = 0.45) -> np.ndarray:
     """Borra bandas de línea (separadores de grilla) en el margen de la celda.
 
@@ -1026,6 +1078,12 @@ def extract_from_template_auto(
 # suspect, no se guarda. Calibrado con el harness contra el lote real.
 TEMPLATE_LAYOUT_MIN_SCORE = 0.45
 
+# Pico de autocorrelación mínimo para CONFIAR en la estimación de columnas de
+# una hoja non-az (acentos/dígitos). Medido en el lote: las hojas reales dan
+# 0.5-0.7; por debajo la periodicidad es ruidosa (hoja a medio llenar) y se cae
+# al fallback suspect + reasignación manual.
+TEMPLATE_LAYOUT_MIN_AUTOCORR = 0.45
+
 
 def _unique_geometries(presets: dict) -> dict:
     """(cols, rows) → [nombres de presets con esa geometría].
@@ -1189,9 +1247,10 @@ def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label
                 "layout_score": round(win_agr, 3), "page_agreement": agreement,
                 "suspect": suspect, "reason": reason}
 
-    # No es página de letras (acentos/dígitos): NO extraer completo (caro e
-    # inútil — queda suspect igual). Preset tentativo por estructura; el usuario
-    # reasigna en E5 y ahí se extrae.
+    # No es página de letras: puede ser acentos (6 columnas) o dígitos (9). El
+    # CNN no valida esos caracteres, pero la GEOMETRÍA sí los distingue: se estima
+    # el nº de columnas por autocorrelación de la tinta (no depende de ver las
+    # líneas) y se elige el preset non-az cuyas columnas coincidan.
     win_rot = _rotation_candidates(small_base)[0]
     g = _rotate_cw(small_base, win_rot)
     dk, bb = cache.get(win_rot, (None, None))
@@ -1200,6 +1259,29 @@ def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label
         bb = _grid_content_bbox(dk)
     non_az = {n: lay for n, lay in presets.items()
               if not any(char_to_label(c) for c in lay.charset)}
+
+    dims = _estimate_grid_dims(dk, bb)
+    if dims is not None and non_az:
+        cols, _rows, conf = dims
+        # Match por nº de columnas (la señal robusta; las filas son menos
+        # precisas con casillas vacías). Acentos=6, dígitos=9: bien separados.
+        matches = [(n, lay) for n, lay in non_az.items() if abs(lay.cols - cols) <= 1]
+        if len(matches) == 1 and conf >= TEMPLATE_LAYOUT_MIN_AUTOCORR:
+            win_name = matches[0][0]
+            results = extract_from_template(image_path, presets[win_name], pre_rotate=win_rot)
+            if results:
+                logger.info("multilayout: non-az auto-identificada preset=%s "
+                            "(cols=%d, autocorr=%.2f) n=%d",
+                            win_name, cols, conf, len(results))
+                return {"results": results, "preset": win_name, "rotation": win_rot,
+                        "layout_score": round(conf, 3), "page_agreement": None,
+                        "suspect": False,
+                        "reason": ("identificada por geometría (acentos/dígitos): "
+                                   "el CNN no valida estos caracteres, revisá los "
+                                   "glifos antes de guardar")}
+
+    # Fallback (autocorrelación ambigua o sin match único): preset tentativo por
+    # estructura y suspect, para que el usuario reasigne a mano (E5).
     best_struct = None
     for name, lay in non_az.items():
         sc = score_layout_cheap(g, lay, deskewed=dk, bbox=bb)
