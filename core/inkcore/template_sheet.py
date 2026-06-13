@@ -42,6 +42,9 @@ PARES_FRECUENTES: tuple[str, ...] = ("qu", "ll", "rr", "ch", "de", "en", "la", "
 # Compat: el alfabeto español base (las 27 minúsculas) sigue siendo el default.
 SPANISH_ALPHABET = MINUSCULAS
 
+# El registro de presets (TEMPLATE_PRESETS) se puebla al final del módulo, tras
+# definir TemplateLayout. Ver _PRESET_SPECS y TEMPLATE_PRESETS más abajo.
+
 
 @dataclass
 class TemplateLayout:
@@ -204,6 +207,37 @@ def build_template_sheet(layout: TemplateLayout | None = None) -> Image.Image | 
         else:
             draw.text((x + 8, y + 4), "(libre)", fill="#C8C8C8", font=free_font)
     return img
+
+
+# ── Registro de presets (E3) ─────────────────────────────────────────
+# Presets de plantilla conocidos. La detección de layout por página prueba
+# estos candidatos por SCORING estructural barato; cols/rows salen solos de
+# TemplateLayout.__post_init__. Los charsets de las hojas densas (×8/×12) se
+# midieron por diff de píxeles contra las plantillas reales del usuario (las
+# "Tandas"), con diff 1.5-2.0 sobre 255 → coincidencia exacta de la grilla.
+#
+# Cuando dos presets comparten geometría (varias hojas de minúsculas parciales
+# caen en 6×16), el scoring estructural empata y el desempate lo hace el acuerdo
+# CNN casilla↔letra (todas son a-z). Las hojas de acentos/dígitos tienen
+# geometría única, así que no necesitan ese desempate.
+_PRESET_SPECS: dict[str, tuple[str, int]] = {
+    # Las que genera la UI hoy (checkbox minúsculas × reps 1-3).
+    "minusculas_x1": (MINUSCULAS, 1),       # 4×7 — el abecedario completo
+    "minusculas_x2": (MINUSCULAS, 2),       # 6×9
+    "minusculas_x3": (MINUSCULAS, 3),       # 6×14
+    # Hojas densas reales del usuario (charsets medidos contra los PDF).
+    "acentuadas_x12": ("áéíóúñ", 12),                # 6×12 — vocales acentuadas + ñ
+    "digitos_signos_x8": (DIGITOS + "¿?¡!:;-", 8),   # 9×16 — números y signos
+    "comunes_aeiosnr_x12": ("aeiosnr.", 12),         # 6×16 — comunes A
+    "comunes_ltcdmp_x12": ("ltcdmp.,", 12),          # 6×16 — comunes B
+    "resto_letras_x8": ("bfghjkqvwxyz", 8),          # 6×16 — resto de letras
+    "mayusculas_frec_x12": ("EACVSDLPMT", 12),       # 8×15 — mayúsculas frecuentes
+}
+
+TEMPLATE_PRESETS: dict[str, TemplateLayout] = {
+    name: TemplateLayout(charset=cs, repeats=reps)
+    for name, (cs, reps) in _PRESET_SPECS.items()
+}
 
 
 def save_template_sheet(out_path: str, layout: TemplateLayout | None = None) -> str:

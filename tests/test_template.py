@@ -365,6 +365,68 @@ def test_extract_auto_apaisada_orden_correcto(tmp_path):
     assert len(auto) >= 25, f"sólo {len(auto)} casillas tras autorrotar"
 
 
+def test_presets_geometrias_conocidas():
+    """E3: el registro reproduce las geometrías medidas contra los PDF reales."""
+    from core.inkcore.template_sheet import TEMPLATE_PRESETS
+    esperado = {
+        "minusculas_x1": (4, 7), "acentuadas_x12": (6, 12),
+        "digitos_signos_x8": (9, 16), "comunes_ltcdmp_x12": (6, 16),
+    }
+    for name, (cols, rows) in esperado.items():
+        lay = TEMPLATE_PRESETS[name]
+        assert (lay.cols, lay.rows) == (cols, rows), f"{name}: {lay.cols}x{lay.rows}"
+
+
+def test_rotation_candidates_por_aspecto():
+    """E3: retrato → {0,180}; apaisada → {90,270}."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _rotation_candidates
+    assert _rotation_candidates(np.zeros((1754, 1240), np.uint8)) == (0, 180)
+    assert _rotation_candidates(np.zeros((1240, 1754), np.uint8)) == (90, 270)
+
+
+def test_score_layout_cheap_premia_grilla_alineada(tmp_path):
+    """E3: el scoring estructural da más casillas sanas a la grilla correcta."""
+    import numpy as np
+
+    from core.inkcore.template_extract import score_layout_cheap
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout()
+    img = _fill_sheet(lay, range(len(lay.letters)))
+    gray = np.asarray(img.convert("L"))
+    sc = score_layout_cheap(gray, lay)
+    assert sc["n_inked"] > 0 and sc["n_healthy"] > 0
+    assert sc["score"] > 0.5, f"grilla correcta debería puntuar alto: {sc}"
+
+
+def test_extract_pdf_pages_identifica_minusculas(tmp_path):
+    """E3: una hoja de minúsculas se identifica como minusculas_x1, no suspect.
+
+    Sin fiduciales (hoja sintética rellena con fuente), el orquestador debe
+    elegir el preset de minúsculas por agreement CNN y extraer las letras. Si el
+    CNN no está disponible en el entorno, el agreement es None: igual no debe
+    romper (se acepta cualquiera de los dos desenlaces documentados).
+    """
+    from core.inkcore.template_extract import _load_template_cnn, extract_pdf_pages
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout()
+    img = _fill_sheet(lay, range(len(lay.letters)))
+    p = tmp_path / "minus.png"
+    img.save(p)
+    clf, c2l = _load_template_cnn()
+    metas = extract_pdf_pages([str(p)], clf=clf, char_to_label=c2l)
+    assert len(metas) == 1
+    meta = metas[0]
+    assert set(meta) >= {"results", "preset", "rotation", "suspect", "reason"}
+    if clf is not None:
+        # Con CNN, identifica minúsculas y no la marca suspect.
+        assert meta["preset"] == "minusculas_x1", meta["preset"]
+        assert meta["suspect"] is False
+        chars = [c for c, _g, _s in meta["results"]]
+        assert len(chars) >= 20, f"pocas casillas: {chars}"
+
+
 def _glyph_from_char(ch, size=64):
     """Glifo RGBA con una letra de fuente (alpha = tinta), para el gate sintético."""
     from PIL import Image, ImageDraw, ImageFont

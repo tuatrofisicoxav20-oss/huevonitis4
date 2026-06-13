@@ -268,11 +268,13 @@ class TemplateTabMixin:
         def worker():
             from core.inkcore.template_extract import (
                 _load_template_cnn,
-                extract_from_template_auto_meta,
+                extract_pdf_pages,
             )
             # Reutiliza el rasterizador de bulk_capture (poppler + cleanup de
-            # temporales). No procesamos con el extractor de renglón: cada página
-            # se extrae SIEMPRE por casilla con el flujo de plantilla, autorrotando.
+            # temporales). Cada página se extrae por casilla con el flujo de
+            # plantilla; el orquestador multi-layout (extract_pdf_pages) elige el
+            # preset correcto POR PÁGINA — un PDF puede mezclar minúsculas,
+            # acentos y dígitos, y aplicar un solo layout envenenaría el banco.
             tmp_tracker: list[str] = []
             no_poppler = False
             suspect_pages: list = []
@@ -288,8 +290,8 @@ class TemplateTabMixin:
                 else:
                     page_items = [(path, Path(path).name)]
 
-                # Cargar el CNN una vez (gate anti-corrupción + orientación);
-                # reinyectarlo por página evita recargar el modelo 29 veces.
+                # Cargar el CNN una vez (gate + orientación + identificación de
+                # layout); reinyectarlo por página evita recargar el modelo 29 veces.
                 clf, char_to_label = _load_template_cnn()
                 results: list = []
                 total = len(page_items)
@@ -297,14 +299,15 @@ class TemplateTabMixin:
                     if total > 1:
                         _set_status(f"🔎 Procesando {label} ({i}/{total})…")
                     try:
-                        meta = extract_from_template_auto_meta(
-                            page_path, layout, clf=clf, char_to_label=char_to_label)
+                        meta = extract_pdf_pages(
+                            [page_path], layout_hint=layout,
+                            clf=clf, char_to_label=char_to_label)[0]
                     except Exception as exc:
                         logger.error("tpl_load página %s: %s", label, exc, exc_info=True)
                         continue
                     # Gate anti-corrupción: una página con mapeo letra↔casilla
-                    # dudoso (números/acentos extraídos con el layout equivocado)
-                    # NO entra al banco. Se acumula aparte para avisar al usuario.
+                    # dudoso (números/acentos, o layout no identificado) NO entra
+                    # al banco. Se acumula aparte para avisar al usuario.
                     if meta["suspect"]:
                         suspect_pages.append((label, meta["reason"], len(meta["results"])))
                         logger.warning("tpl_load: %s DUDOSA — %s", label, meta["reason"])

@@ -25,7 +25,7 @@ from core.inkcore.glyph_metrics import (
     measure_ink_bbox,
     template_geometry,
 )
-from core.inkcore.template_sheet import TemplateLayout
+from core.inkcore.template_sheet import TEMPLATE_PRESETS, TemplateLayout
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +523,74 @@ def _sizable_components(mask: np.ndarray) -> int:
     return sum(1 for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= thr)
 
 
+def score_layout_cheap(
+    gray: np.ndarray, layout: TemplateLayout, *,
+    deskewed: np.ndarray | None = None, bbox: tuple | None = None,
+) -> dict:
+    """Puntúa BARATO qué tan bien la grilla de `layout` calza con la foto.
+
+    Sin CNN, sin to_rgba_smooth, sin assess_quality: sólo binariza y cuenta por
+    casilla rotulada. Pensado para elegir el preset correcto entre muchos
+    candidatos × 4 rotaciones sin reventar el i5 (<300ms/página/preset). La
+    extracción completa (cara) corre sólo sobre el ganador.
+
+    Idea: el preset CORRECTO alinea cada casilla con una celda real de la grilla
+    impresa → las casillas con tinta tienen UNA letra (pocas piezas, tinta en un
+    rango sano). Un preset con muy pocas columnas mete varias letras por celda
+    (tinta alta, >7 piezas); con demasiadas, parte letras (tinta ínfima). Ambos
+    desvíos bajan el score.
+
+    `deskewed`/`bbox` se pueden inyectar (el deskew Hough y el bbox son lo caro)
+    para reusarlos entre todos los presets de una misma rotación: el orquestador
+    los computa UNA vez por rotación. Si no se pasan, se calculan acá.
+
+    Devuelve {"score", "n_inked", "n_healthy", "n_crowded"} — el score en [−0.5,1]
+    es (sanas − 0.5·sobrepobladas) / casillas_con_tinta, o 0 si no hay tinta.
+    """
+    g = deskewed if deskewed is not None else _deskew(gray, _estimate_skew(gray))
+    bb = bbox if bbox is not None else _grid_content_bbox(g)
+    if bb is None:
+        return {"score": 0.0, "n_inked": 0, "n_healthy": 0, "n_crowded": 0}
+    gx0, gy0, gx1, gy1 = bb
+    xs = np.linspace(gx0, gx1, layout.cols + 1)
+    ys = np.linspace(gy0, gy1, layout.rows + 1)
+    n_inked = n_healthy = n_crowded = 0
+    for i in range(min(layout.n_cells, len(layout.charset) * layout.repeats)):
+        if layout.cell_letter(i) is None:
+            continue
+        r, c = divmod(i, layout.cols)
+        x0, x1 = xs[c], xs[c + 1]
+        y0, y1 = ys[r], ys[r + 1]
+        cw, chh = x1 - x0, y1 - y0
+        # Inset 13% para excluir los separadores de la grilla (como _extract_grid).
+        ix0, ix1 = int(x0 + 0.13 * cw), int(x1 - 0.13 * cw)
+        iy0, iy1 = int(y0 + 0.13 * chh), int(y1 - 0.13 * chh)
+        cell = g[iy0:iy1, ix0:ix1]
+        if cell.size == 0:
+            continue
+        thr = cv2.adaptiveThreshold(
+            cv2.GaussianBlur(cell, (3, 3), 0), 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 12,
+        )
+        ink_frac = float((thr > 0).mean())
+        if ink_frac < 0.002:            # casilla vacía: no cuenta ni a favor ni en contra
+            continue
+        n_inked += 1
+        if ink_frac > 0.25:             # demasiada tinta: celda abarca varias letras
+            n_crowded += 1
+            continue
+        ncomp = _sizable_components(thr)
+        if ncomp > 7:                   # muchas piezas: multi-letra / texto
+            n_crowded += 1
+        else:
+            n_healthy += 1
+    if n_inked == 0:
+        return {"score": 0.0, "n_inked": 0, "n_healthy": 0, "n_crowded": 0}
+    score = (n_healthy - 0.5 * n_crowded) / n_inked
+    return {"score": score, "n_inked": n_inked,
+            "n_healthy": n_healthy, "n_crowded": n_crowded}
+
+
 def _extract_grid(gray, lay, clf, char_to_label):
     """Extracción para plantillas SIN fiduciales: detecta la grilla en la foto.
 
@@ -895,6 +963,246 @@ def extract_from_template_auto(
     consume la versión `_meta` (o `extract_pdf_pages`) para respetar `suspect`.
     """
     return extract_from_template_auto_meta(image_path, layout)["results"]
+
+
+# Score estructural mínimo (E3) para CONFIAR en que un preset identificó el
+# layout de una página sin fiduciales. Por debajo: "layout no identificado" →
+# suspect, no se guarda. Calibrado con el harness contra el lote real.
+TEMPLATE_LAYOUT_MIN_SCORE = 0.45
+
+
+def _unique_geometries(presets: dict) -> dict:
+    """(cols, rows) → [nombres de presets con esa geometría].
+
+    El scoring barato sólo ve la estructura, así que presets con igual geometría
+    dan idéntico score: se agrupan para puntuar UNA vez por geometría y desempatar
+    luego por CNN (las hojas de minúsculas parciales caen todas en 6×16).
+    """
+    geoms: dict[tuple[int, int], list[str]] = {}
+    for name, lay in presets.items():
+        geoms.setdefault((lay.cols, lay.rows), []).append(name)
+    return geoms
+
+
+def _downscale(gray: np.ndarray, target_w: int = 800) -> np.ndarray:
+    """Reduce a `target_w` de ancho (para scoring estructural barato de rotación)."""
+    h, w = gray.shape[:2]
+    if w <= target_w:
+        return gray
+    s = target_w / w
+    return cv2.resize(gray, (target_w, max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+
+
+# Ancho al que se reduce la foto para el ANÁLISIS (rotación + geometría) por
+# agreement CNN. El CNN preprocesa a 28×28, así que ~1240px (resolución
+# canónica) no le quita señal y acelera ~4× vs los 2481-3508px de la foto. La
+# extracción FINAL del ganador corre a resolución completa (calidad de glifos).
+_ANALYSIS_WIDTH = 1240
+
+
+def _rotation_candidates(gray: np.ndarray) -> tuple[int, ...]:
+    """Rotaciones plausibles según el aspecto: la hoja canónica es retrato.
+
+    Una foto cargada en retrato (alto>ancho) está derecha o invertida → {0,180};
+    una apaisada la giró el escáner 90° → {90,270}. Reduce el barrido de
+    agreement de 4 a 2 candidatos (el agreement decide cuál de los 2, ya que la
+    estructura no distingue una hoja de su versión 180°).
+    """
+    h, w = gray.shape[:2]
+    return (0, 180) if h >= w else (90, 270)
+
+
+def _layout_agreement_fast(deskewed, bbox, lay, clf, char_to_label) -> tuple[float, int]:
+    """Acuerdo CNN (a-z) de un preset reusando deskew+bbox YA computados.
+
+    No vuelve a deskewar ni a hallar el bbox (lo caro): el orquestador los pasa
+    una vez por rotación y esta función sólo proyecta la grilla del preset y
+    puntúa las casillas a-z con tinta. Devuelve (agreement, n_casillas_az). Sin
+    to_rgba_smooth ni assess_quality — barato, sólo la máscara para el CNN.
+    """
+    if bbox is None or clf is None:
+        return 0.0, 0
+    gx0, gy0, gx1, gy1 = bbox
+    xs = np.linspace(gx0, gx1, lay.cols + 1)
+    ys = np.linspace(gy0, gy1, lay.rows + 1)
+    scores: list[float] = []
+    n_az = 0
+    for i in range(min(lay.n_cells, len(lay.charset) * lay.repeats)):
+        ch = lay.cell_letter(i)
+        if ch is None or char_to_label(ch) is None:
+            continue
+        r, c = divmod(i, lay.cols)
+        x0, x1 = xs[c], xs[c + 1]
+        y0, y1 = ys[r], ys[r + 1]
+        cw, chh = x1 - x0, y1 - y0
+        ix0, ix1 = int(x0 + 0.13 * cw), int(x1 - 0.13 * cw)
+        iy0, iy1 = int(y0 + 0.13 * chh), int(y1 - 0.13 * chh)
+        mask = _clean_cell_grid(deskewed[iy0:iy1, ix0:ix1])
+        if mask is None:
+            continue
+        n_az += 1
+        v = clf.score(mask, ch)
+        if v is not None:
+            scores.append(float(v))
+    return (sum(scores) / len(scores) if scores else 0.0), n_az
+
+
+def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label):
+    """Elige el preset por página (barrido rotación×geometría por agreement CNN).
+
+    El scoring ESTRUCTURAL no identifica la geometría de forma fiable (premia
+    grillas finas) ni la orientación 0°/180° (la grilla se ve igual invertida).
+    La señal confiable es el AGREEMENT CNN: la combinación (rotación, geometría)
+    correcta pone cada letra en su casilla → acuerdo alto; distingue además
+    minúsculas×1 de ×3 (con ×3 la casilla 1 se rotula 'a' pero contiene 'b').
+
+    Pasos (todo el análisis a resolución reducida; la extracción final del
+    ganador a resolución completa):
+      1. Candidatos de rotación por aspecto (retrato→{0,180}, apaisada→{90,270}).
+      2. Barrido (rotación × geometría a-z única) por agreement, reusando
+         deskew+bbox por rotación. Mejor (rot, geom).
+      3. Si la geometría ganadora es 6×16 (varias hojas la comparten), desempatar
+         el charset por agreement en la rotación ganadora.
+      4. Si el mejor agreement supera el umbral del gate → página de LETRAS:
+         extracción completa + gate.
+      5. Si no → no es página de letras (acentos/dígitos, que el CNN no puntúa):
+         NO se extrae completo (sería caro e inútil; igual quedaría suspect). Se
+         devuelve suspect con el preset tentativo por estructura para que el
+         usuario reasigne a mano (E5) y recién ahí se extraiga.
+
+    Devuelve el dict rico de la página. Ver `extract_pdf_pages`.
+    """
+    bgr = cv2.imread(image_path)
+    if bgr is None:
+        return {"results": [], "preset": None, "rotation": -1, "layout_score": 0.0,
+                "page_agreement": None, "suspect": True, "reason": "no se pudo leer la imagen"}
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    small_base = _downscale(gray, _ANALYSIS_WIDTH)
+
+    # Identificación en dos pasos para acotar el cómputo (deskew+bbox es lo caro):
+    #   (1) ROTACIÓN: se prueba el preset de referencia (minúsculas×1, 27 casillas
+    #       a-z, el más informativo) en las 2 rotaciones candidatas. El contenido
+    #       manuscrito está en la orientación correcta aunque la página no sea de
+    #       minúsculas, así que su agreement marca la rotación.
+    #   (2) GEOMETRÍA/CHARSET: en la rotación ganadora se prueba el resto de
+    #       presets a-z (los de 6×16 —aeiosnr/ltcdmp/resto— sólo difieren en el
+    #       charset y sólo el correcto da agreement alto).
+    az_names = [n for n, lay in presets.items()
+                if any(char_to_label(c) for c in lay.charset)]
+    ref_name = "minusculas_x1" if "minusculas_x1" in presets else (az_names[0] if az_names else None)
+
+    cache: dict[int, tuple] = {}
+    win_rot, ref_agr = _rotation_candidates(small_base)[0], -1.0
+    if ref_name is not None:
+        for rot in _rotation_candidates(small_base):
+            g = _rotate_cw(small_base, rot)
+            dk = _deskew(g, _estimate_skew(g))
+            bb = _grid_content_bbox(dk)
+            cache[rot] = (dk, bb)
+            agr, n_az = _layout_agreement_fast(dk, bb, presets[ref_name], clf, char_to_label)
+            if n_az >= 5 and agr > ref_agr:
+                ref_agr, win_rot = agr, rot
+
+    dk, bb = cache.get(win_rot, (None, None))
+    if dk is None:
+        g = _rotate_cw(small_base, win_rot)
+        dk = _deskew(g, _estimate_skew(g))
+        bb = _grid_content_bbox(dk)
+        cache[win_rot] = (dk, bb)
+    best = (ref_agr, ref_name) if ref_name is not None else (-1.0, None)
+    for name in az_names:
+        if name == ref_name:
+            continue
+        agr, n_az = _layout_agreement_fast(dk, bb, presets[name], clf, char_to_label)
+        if n_az < 5:
+            continue
+        if agr > best[0]:
+            best = (agr, name)
+
+    if best[1] is not None and best[0] >= TEMPLATE_PAGE_MIN_CNN_AGREEMENT:
+        win_agr, win_name = best
+        results = extract_from_template(image_path, presets[win_name], pre_rotate=win_rot)
+        agr2, suspect, reason = assess_page_agreement(results, clf, char_to_label)
+        agreement = agr2 if agr2 is not None else win_agr
+        if suspect:
+            logger.warning("multilayout %s: DUDOSA (%s)", win_name, reason)
+        else:
+            logger.info("multilayout: preset=%s rot=%d° agreement=%.3f n=%d",
+                        win_name, win_rot, agreement, len(results))
+        return {"results": results, "preset": win_name, "rotation": win_rot,
+                "layout_score": round(win_agr, 3), "page_agreement": agreement,
+                "suspect": suspect, "reason": reason}
+
+    # No es página de letras (acentos/dígitos): NO extraer completo (caro e
+    # inútil — queda suspect igual). Preset tentativo por estructura; el usuario
+    # reasigna en E5 y ahí se extrae.
+    win_rot = _rotation_candidates(small_base)[0]
+    g = _rotate_cw(small_base, win_rot)
+    dk, bb = cache.get(win_rot, (None, None))
+    if dk is None:
+        dk = _deskew(g, _estimate_skew(g))
+        bb = _grid_content_bbox(dk)
+    non_az = {n: lay for n, lay in presets.items()
+              if not any(char_to_label(c) for c in lay.charset)}
+    best_struct = None
+    for name, lay in non_az.items():
+        sc = score_layout_cheap(g, lay, deskewed=dk, bbox=bb)
+        if best_struct is None or sc["score"] > best_struct[0]:
+            best_struct = (sc["score"], name)
+    win_name = best_struct[1] if best_struct else max(presets, key=lambda n: presets[n].n_cells)
+    struct_score = best_struct[0] if best_struct else 0.0
+    reason = ("no parece página de letras (posibles acentos/dígitos, que el CNN "
+              "no valida) — elegí el preset a mano para extraer y guardar")
+    logger.warning("multilayout: página no-letras → tentativo=%s (suspect, sin extraer)",
+                   win_name)
+    return {"results": [], "preset": win_name, "rotation": win_rot,
+            "layout_score": round(struct_score, 3), "page_agreement": None,
+            "suspect": True, "reason": reason}
+
+
+def extract_pdf_pages(
+    image_paths: list[str], *, layout_hint: TemplateLayout | None = None,
+    presets: dict | None = None, clf=None, char_to_label=None,
+) -> list[dict]:
+    """Orquestador multi-layout (E3): elige el preset correcto POR PÁGINA.
+
+    Un PDF puede mezclar hojas de layouts distintos (minúsculas, acentos,
+    dígitos…). Aplicar UN solo layout a todas envenena el banco (un número
+    etiquetado como letra). Acá cada página se puntúa contra los presets
+    conocidos con scoring estructural BARATO (4 rotaciones × geometrías únicas),
+    se extrae completa sólo con el preset ganador y se valida con el gate
+    anti-corrupción. El snapshot del usuario (`layout_hint`) es sólo una pista de
+    prioridad (su preset se prueba primero ante empate), nunca una imposición.
+
+    Devuelve un dict por página:
+        {"results": [(char, glyph, score), ...],
+         "preset": str | None,          # nombre del preset elegido
+         "rotation": int,               # rotación horaria aplicada
+         "layout_score": float,         # score estructural del ganador
+         "page_agreement": float | None,# acuerdo CNN (a-z) del ganador
+         "suspect": bool,               # True = NO guardar
+         "reason": str}
+    """
+    if clf is None and char_to_label is None:
+        clf, char_to_label = _load_template_cnn()
+    presets = presets or TEMPLATE_PRESETS
+    # Resolver el hint a un nombre de preset (si coincide con uno registrado).
+    hint_name = None
+    if layout_hint is not None:
+        for name, lay in presets.items():
+            if lay.charset == layout_hint.charset and lay.repeats == layout_hint.repeats:
+                hint_name = name
+                break
+    out = []
+    for path in image_paths:
+        try:
+            out.append(_extract_page_multilayout(path, presets, hint_name, clf, char_to_label))
+        except Exception as exc:
+            logger.error("extract_pdf_pages %s: %s", path, exc, exc_info=True)
+            out.append({"results": [], "preset": None, "rotation": -1,
+                        "layout_score": 0.0, "page_agreement": None,
+                        "suspect": True, "reason": f"error: {exc}"})
+    return out
 
 
 def _quality_override_from_template(glyph, score, classify_tier) -> dict:
