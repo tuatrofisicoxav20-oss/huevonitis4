@@ -198,10 +198,15 @@ def main() -> int:
             suspect = bool(meta.get("suspect", False))
             reason = meta.get("reason", "")
         else:
-            results = te.extract_from_template_auto(page_path, lay_std)
-            m = re.search(r"rot (\d+)°", " ".join(tap.records))
-            if m:
-                rot = int(m.group(1))
+            # Camino de un solo layout (E2): usa la versión _meta para poblar
+            # suspect/agreement con el layout estándar (reproduce el bug del
+            # layout único y verifica que el gate frena las páginas no estándar).
+            meta = te.extract_from_template_auto_meta(page_path, lay_std)
+            results = meta["results"]
+            rot = meta.get("rotation", -1)
+            agreement = meta.get("page_agreement")
+            suspect = bool(meta.get("suspect", False))
+            reason = meta.get("reason", "")
         dt = time.time() - t0
         chars = [c for c, _g, _q in results]
         n_rej, top = _rejection_stats(tap.records)

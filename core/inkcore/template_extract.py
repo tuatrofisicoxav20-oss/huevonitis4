@@ -29,6 +29,15 @@ from core.inkcore.template_sheet import TemplateLayout
 
 logger = logging.getLogger(__name__)
 
+# Gate anti-corrupción (E2): acuerdo medio mínimo del CNN (P de la letra
+# esperada sobre las casillas a-z) para CONFIAR en el mapeo letra↔casilla de
+# una página y dejar que sus glifos entren al banco. Calibrado contra el lote
+# real de 29 fotos: páginas bien mapeadas dan 0.358-0.450; páginas con el
+# layout equivocado (un número etiquetado como letra, acentos cruzados) dan
+# 0.038-0.054 — separación de ~6.6×, así que 0.12 discrimina sin falsos
+# positivos. Por debajo: página suspect, no se guarda (ver assess_page_agreement).
+TEMPLATE_PAGE_MIN_CNN_AGREEMENT = 0.12
+
 try:
     import cv2
     import numpy as np
@@ -737,15 +746,15 @@ def _has_fiducials(image_path: str, lay: TemplateLayout) -> bool:
                for angle in (0, 90, 180, 270))
 
 
-def _grid_cnn_agreement(results, clf, char_to_label) -> float:
-    """Acuerdo medio del CNN entre cada casilla a-z y su letra esperada.
+def _page_cnn_scores(results, clf, char_to_label) -> list[float]:
+    """P(letra esperada) del CNN por cada casilla a-z extraída de la página.
 
-    Es la señal para elegir orientación sin fiduciales: la rotación correcta hace
-    que cada letra caiga en su casilla → P(letra esperada) alto (~0.4-0.6); una
-    rotación equivocada deja letras cruzadas → ~0.02. Diferencia de 10-15×, así
-    que discrimina con claridad. Solo cuenta a-z (la ñ no la cubre el CNN).
+    Solo a-z (la ñ, dígitos y signos no los cubre el CNN EMNIST). Devuelve la
+    lista cruda — el promedio (orientación) y el conteo (gate anti-corrupción)
+    la consumen distinto: una página de dígitos con su preset correcto da lista
+    VACÍA (no hay a-z), que NO es lo mismo que acuerdo bajo.
     """
-    scores = []
+    scores: list[float] = []
     for ch, glyph, _s in results:
         if char_to_label(ch) is None:
             continue
@@ -756,55 +765,136 @@ def _grid_cnn_agreement(results, clf, char_to_label) -> float:
         except Exception:
             v = None
         if v is not None:
-            scores.append(v)
+            scores.append(float(v))
+    return scores
+
+
+def _grid_cnn_agreement(results, clf, char_to_label) -> float:
+    """Acuerdo medio del CNN entre cada casilla a-z y su letra esperada.
+
+    Es la señal para elegir orientación sin fiduciales: la rotación correcta hace
+    que cada letra caiga en su casilla → P(letra esperada) alto (~0.4-0.6); una
+    rotación equivocada deja letras cruzadas → ~0.02. Diferencia de 10-15×, así
+    que discrimina con claridad. Solo cuenta a-z (la ñ no la cubre el CNN).
+    """
+    scores = _page_cnn_scores(results, clf, char_to_label)
     return sum(scores) / len(scores) if scores else 0.0
+
+
+def assess_page_agreement(
+    results, clf, char_to_label, *, min_agreement: float = TEMPLATE_PAGE_MIN_CNN_AGREEMENT,
+) -> tuple[float | None, bool, str]:
+    """Gate anti-corrupción: decide si una página es sospechosa de mapeo cruzado.
+
+    Devuelve (page_agreement, suspect, reason). El acuerdo del CNN discrimina
+    limpio entre una página bien mapeada (letras en su casilla → P alto) y una
+    con el layout equivocado (un '5' manuscrito etiquetado 'g' → P ínfima):
+    medido en el lote real, estándar ~0.4-0.6 vs cruzada ~0.02, 10-15× de
+    separación. Por debajo de `min_agreement` la página NO debe guardarse: mejor
+    fallar ruidosamente que envenenar el banco con etiquetas equivocadas.
+
+    Casos límite, por seguridad:
+      - Sin CNN disponible → (None, False, "sin validación CNN"): no se bloquea
+        al usuario, pero el reporte avisa que vuela a ciegas.
+      - Sin casillas a-z que puntuar (p. ej. una página de dígitos con su preset
+        correcto) → (None, False, "sin casillas a-z para validar"): el CNN no
+        aplica; la confianza la da la señal estructural del preset (Fase E3),
+        no este gate. Esto evita marcar suspect una página legítima de dígitos.
+    """
+    if clf is None:
+        return None, False, "sin validación CNN"
+    scores = _page_cnn_scores(results, clf, char_to_label)
+    if not scores:
+        return None, False, "sin casillas a-z para validar"
+    agreement = sum(scores) / len(scores)
+    if agreement < min_agreement:
+        return agreement, True, (
+            f"mapeo letra↔casilla no confiable (acuerdo CNN {agreement:.2f} "
+            f"< {min_agreement:.2f})"
+        )
+    return agreement, False, ""
+
+
+def _load_template_cnn():
+    """(clf, char_to_label) si el CNN EMNIST está disponible, si no (None, None).
+
+    El CNN es señal opcional (orientación + gate anti-corrupción), nunca un
+    requisito duro: sin torch/modelo se degrada con aviso, no se rompe.
+    """
+    try:
+        from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
+        clf = EMNISTCharClassifier()
+        if clf.available:
+            return clf, char_to_label
+    except Exception as exc:
+        logger.info("_load_template_cnn: CNN no disponible (%s)", exc)
+    return None, None
+
+
+def extract_from_template_auto_meta(
+    image_path: str, layout: TemplateLayout | None = None, *, clf=None, char_to_label=None,
+) -> dict:
+    """Extrae una página con autorrotación Y el veredicto del gate anti-corrupción.
+
+    Devuelve un dict rico:
+        {"results": [(char, glyph, score), ...],   # casillas con tinta
+         "rotation": int,                          # rotación horaria aplicada
+         "page_agreement": float | None,           # acuerdo CNN medio (a-z)
+         "suspect": bool,                          # True = NO guardar (mapeo dudoso)
+         "reason": str}                            # por qué es suspect / aviso
+
+    CON fiduciales: orienta por marcadores+título (`detect_template_rotation`).
+    SIN fiduciales: prueba las 4 rotaciones con extracción de grilla y se queda
+    con la de mayor acuerdo CNN casilla↔letra (la canónica está rota sin
+    marcadores, por eso no se usa). En ambos caminos, al final, el gate evalúa el
+    acuerdo de la página: una página con el layout equivocado (números/acentos
+    extraídos como minúsculas) cae muy por debajo del umbral → suspect=True y la
+    UI no la guarda. `clf`/`char_to_label` se pueden inyectar para no recargar el
+    modelo por página (lo hace el orquestador de PDF).
+    """
+    lay = layout or TemplateLayout()
+    if clf is None and char_to_label is None:
+        clf, char_to_label = _load_template_cnn()
+
+    if _has_fiducials(image_path, lay):
+        angle = detect_template_rotation(image_path, lay)
+        results = extract_from_template(image_path, lay, pre_rotate=angle)
+        rot = angle
+    elif clf is None:
+        results = extract_from_template(image_path, lay, pre_rotate=0)
+        rot = 0
+    else:
+        best_res, best_score, best_rot = [], -1.0, 0
+        for r in (0, 90, 180, 270):
+            res = extract_from_template(image_path, lay, pre_rotate=r)
+            sc = _grid_cnn_agreement(res, clf, char_to_label)
+            if sc > best_score:
+                best_score, best_res, best_rot = sc, res, r
+        results, rot = best_res, best_rot
+        logger.info(
+            "extract_from_template_auto: sin fiduciales — rot %d° (acuerdo CNN=%.3f)",
+            best_rot, best_score,
+        )
+
+    agreement, suspect, reason = assess_page_agreement(results, clf, char_to_label)
+    if suspect:
+        logger.warning(
+            "gate anti-corrupción: página DUDOSA (%s) — %d casillas NO se guardarán",
+            reason, len(results),
+        )
+    return {"results": results, "rotation": rot, "page_agreement": agreement,
+            "suspect": suspect, "reason": reason}
 
 
 def extract_from_template_auto(
     image_path: str, layout: TemplateLayout | None = None,
 ) -> list[tuple[str, Image.Image, float]]:
-    """Como `extract_from_template`, pero detecta y corrige la rotación primero.
-
-    CON fiduciales: usa `detect_template_rotation` (los marcadores y el título
-    bastan para orientar) y extrae con ese `pre_rotate`.
-
-    SIN fiduciales (grilla pelada, foto de celular): la rotación por CNN sobre la
-    extracción canónica NO es fiable (la canónica está rota sin marcadores), y el
-    escáner gira algunas hojas 90°. Por eso acá se prueban las 4 rotaciones con la
-    extracción de GRILLA y se elige la de mayor acuerdo CNN casilla↔letra. Esto
-    arregla las hojas apaisadas que antes quedaban mal mapeadas (la 'x' caía en la
-    casilla de 'd', la 'w' en la de 'o', etc.). Si no hay CNN, cae a 0°.
+    """Wrapper compat: como `extract_from_template_auto_meta` pero devuelve solo
+    la lista (char, glifo, score). Conserva la firma histórica que usan los tests
+    y cualquier llamador que no necesite el veredicto del gate. El flujo de la UI
+    consume la versión `_meta` (o `extract_pdf_pages`) para respetar `suspect`.
     """
-    lay = layout or TemplateLayout()
-    if _has_fiducials(image_path, lay):
-        angle = detect_template_rotation(image_path, lay)
-        return extract_from_template(image_path, lay, pre_rotate=angle)
-
-    # Sin fiduciales: búsqueda de orientación por acuerdo CNN sobre la grilla.
-    clf = None
-    char_to_label = None
-    try:
-        from core.inkcore.ai.char_cnn import EMNISTCharClassifier, char_to_label
-        _c = EMNISTCharClassifier()
-        if _c.available:
-            clf = _c
-    except Exception as exc:
-        logger.info("extract_from_template_auto: CNN no disponible (%s)", exc)
-
-    if clf is None:
-        return extract_from_template(image_path, lay, pre_rotate=0)
-
-    best_res, best_score, best_rot = [], -1.0, 0
-    for rot in (0, 90, 180, 270):
-        res = extract_from_template(image_path, lay, pre_rotate=rot)
-        score = _grid_cnn_agreement(res, clf, char_to_label)
-        if score > best_score:
-            best_score, best_res, best_rot = score, res, rot
-    logger.info(
-        "extract_from_template_auto: sin fiduciales — rot %d° (acuerdo CNN=%.3f)",
-        best_rot, best_score,
-    )
-    return best_res
+    return extract_from_template_auto_meta(image_path, layout)["results"]
 
 
 def _quality_override_from_template(glyph, score, classify_tier) -> dict:

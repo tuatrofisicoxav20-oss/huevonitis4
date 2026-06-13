@@ -365,6 +365,81 @@ def test_extract_auto_apaisada_orden_correcto(tmp_path):
     assert len(auto) >= 25, f"sólo {len(auto)} casillas tras autorrotar"
 
 
+def _glyph_from_char(ch, size=64):
+    """Glifo RGBA con una letra de fuente (alpha = tinta), para el gate sintético."""
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 48)
+    except Exception:
+        font = ImageFont.load_default()
+    draw.text((12, 4), ch, fill=(255, 255, 255, 255), font=font)
+    return img
+
+
+class _ScriptedCNN:
+    """CNN falso: score(mask, ch) devuelve un valor fijo por carácter."""
+
+    available = True
+
+    def __init__(self, per_char):
+        self._per_char = per_char
+
+    def score(self, _mask, ch):
+        return self._per_char.get(ch)
+
+
+def test_gate_frena_pagina_con_etiquetas_cruzadas():
+    """E2: una página con acuerdo CNN ínfimo (mapeo cruzado) se marca suspect."""
+    from core.inkcore.ai.char_cnn import char_to_label
+    from core.inkcore.template_extract import assess_page_agreement
+    results = [(c, _glyph_from_char(c), 0.5) for c in "abcdefg"]
+    # CNN ve casi cero probabilidad de la letra esperada (números disfrazados).
+    clf = _ScriptedCNN({c: 0.03 for c in "abcdefg"})
+    agreement, suspect, reason = assess_page_agreement(results, clf, char_to_label)
+    assert suspect is True
+    assert agreement is not None and agreement < 0.12
+    assert "no confiable" in reason
+
+
+def test_gate_deja_pasar_pagina_bien_mapeada():
+    """E2: acuerdo alto → no suspect."""
+    from core.inkcore.ai.char_cnn import char_to_label
+    from core.inkcore.template_extract import assess_page_agreement
+    results = [(c, _glyph_from_char(c), 0.8) for c in "abcdefg"]
+    clf = _ScriptedCNN({c: 0.55 for c in "abcdefg"})
+    agreement, suspect, reason = assess_page_agreement(results, clf, char_to_label)
+    assert suspect is False and reason == ""
+    assert agreement is not None and agreement >= 0.12
+
+
+def test_gate_sin_cnn_no_bloquea_pero_avisa():
+    """E2: sin CNN no se bloquea al usuario, pero el reason lo deja explícito."""
+    from core.inkcore.ai.char_cnn import char_to_label
+    from core.inkcore.template_extract import assess_page_agreement
+    results = [(c, _glyph_from_char(c), 0.5) for c in "abc"]
+    agreement, suspect, reason = assess_page_agreement(results, None, char_to_label)
+    assert agreement is None and suspect is False
+    assert "sin validación CNN" in reason
+
+
+def test_gate_pagina_de_digitos_no_es_suspect_por_cobertura():
+    """E2: una página de SOLO dígitos (sin casillas a-z) no se marca suspect.
+
+    El CNN EMNIST solo cubre a-z; sin casillas puntuables la decisión la toma la
+    señal estructural del preset (E3), no este gate. Marcarla suspect sería un
+    falso positivo que bloquearía una captura legítima de números.
+    """
+    from core.inkcore.ai.char_cnn import char_to_label
+    from core.inkcore.template_extract import assess_page_agreement
+    results = [(c, _glyph_from_char(c), 0.5) for c in "0123456789"]
+    clf = _ScriptedCNN({})   # score() → None para no-a-z
+    agreement, suspect, reason = assess_page_agreement(results, clf, char_to_label)
+    assert agreement is None and suspect is False
+    assert "sin casillas a-z" in reason
+
+
 class _FakeCNN:
     """Clasificador falso disponible — el scorer real se monkeypatchea aparte."""
     available = True

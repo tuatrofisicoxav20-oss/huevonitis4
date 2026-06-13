@@ -266,12 +266,16 @@ class TemplateTabMixin:
                 self.after(0, lambda: self._tpl_status.configure(text=text, text_color=color))
 
         def worker():
-            from core.inkcore.template_extract import extract_from_template_auto
+            from core.inkcore.template_extract import (
+                _load_template_cnn,
+                extract_from_template_auto_meta,
+            )
             # Reutiliza el rasterizador de bulk_capture (poppler + cleanup de
             # temporales). No procesamos con el extractor de renglón: cada página
             # se extrae SIEMPRE por casilla con el flujo de plantilla, autorrotando.
             tmp_tracker: list[str] = []
             no_poppler = False
+            suspect_pages: list = []
             try:
                 if is_pdf:
                     from core.inkcore.bulk_capture import _rasterize_pdf
@@ -284,17 +288,28 @@ class TemplateTabMixin:
                 else:
                     page_items = [(path, Path(path).name)]
 
+                # Cargar el CNN una vez (gate anti-corrupción + orientación);
+                # reinyectarlo por página evita recargar el modelo 29 veces.
+                clf, char_to_label = _load_template_cnn()
                 results: list = []
                 total = len(page_items)
                 for i, (page_path, label) in enumerate(page_items, start=1):
                     if total > 1:
                         _set_status(f"🔎 Procesando {label} ({i}/{total})…")
                     try:
-                        page_res = extract_from_template_auto(page_path, layout)
+                        meta = extract_from_template_auto_meta(
+                            page_path, layout, clf=clf, char_to_label=char_to_label)
                     except Exception as exc:
                         logger.error("tpl_load página %s: %s", label, exc, exc_info=True)
-                        page_res = []
-                    results.extend(page_res)
+                        continue
+                    # Gate anti-corrupción: una página con mapeo letra↔casilla
+                    # dudoso (números/acentos extraídos con el layout equivocado)
+                    # NO entra al banco. Se acumula aparte para avisar al usuario.
+                    if meta["suspect"]:
+                        suspect_pages.append((label, meta["reason"], len(meta["results"])))
+                        logger.warning("tpl_load: %s DUDOSA — %s", label, meta["reason"])
+                    else:
+                        results.extend(meta["results"])
             except Exception as exc:
                 logger.error("tpl_load worker: %s", exc, exc_info=True)
                 results = None
@@ -313,12 +328,22 @@ class TemplateTabMixin:
                     )
                     self.toast("Instalá poppler para leer PDFs", "error")
                     return
+                # Aviso de páginas frenadas por el gate anti-corrupción (mapeo
+                # letra↔casilla dudoso): NO se guardan, para no envenenar el banco.
+                susp = ""
+                if suspect_pages:
+                    n_cells = sum(c for _l, _r, c in suspect_pages)
+                    susp = (f"\n⚠ {len(suspect_pages)} pág dudosa(s) "
+                            f"({n_cells} casillas) — mapeo letra↔casilla no "
+                            "confiable, NO se guardarán.")
                 if not results:
-                    self._tpl_status.configure(
-                        text="⚠ No se detectaron letras (¿foto nítida? ¿marcadores visibles?)",
-                        text_color=theme.ACCENT_RED,
-                    )
-                    self.toast("No se extrajo ninguna letra", "error")
+                    msg = ("⚠ No se detectaron letras (¿foto nítida? "
+                           "¿marcadores visibles?)")
+                    if suspect_pages:
+                        msg = ("⚠ Todas las páginas quedaron dudosas (layout "
+                               "no coincide con la plantilla)." + susp)
+                    self._tpl_status.configure(text=msg, text_color=theme.ACCENT_RED)
+                    self.toast("No se extrajo ninguna letra válida", "error")
                     return
                 self._tpl_results = results
                 self._render_tpl_grid(results)
@@ -328,10 +353,14 @@ class TemplateTabMixin:
                     alphabet=layout.charset, scope="Plantilla",
                 )
                 self._tpl_status.configure(
-                    text=f"✓ {len(results)} casillas. {cov}\nRevisá y guardá en el banco.",
-                    text_color=theme.ACCENT_GREEN,
+                    text=f"✓ {len(results)} casillas. {cov}{susp}\n"
+                         "Revisá y guardá en el banco.",
+                    text_color=theme.ACCENT_GREEN if not suspect_pages else theme.ACCENT_ORANGE,
                 )
-                self.toast(f"{len(results)} letras extraídas", "success")
+                toast_msg = f"{len(results)} letras extraídas"
+                if suspect_pages:
+                    toast_msg += f" · {len(suspect_pages)} pág dudosa(s) omitida(s)"
+                self.toast(toast_msg, "success" if not suspect_pages else "warning")
 
             if self.winfo_exists():
                 self.after(0, _done)
