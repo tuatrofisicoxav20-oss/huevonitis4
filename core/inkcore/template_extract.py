@@ -44,34 +44,69 @@ except ImportError:
 
 
 def _detect_fiducials(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray | None:
-    """Devuelve los centros de los 4 marcadores (TL,TR,BL,BR) o None.
+    """Centros de los 4 marcadores (TL,TR,BL,BR) o None.
 
-    Busca cuadrados negros sólidos razonablemente grandes y los asigna a la
-    esquina más cercana de la imagen.
+    Robusto a iluminación despareja (binarización adaptativa, no Otsu global:
+    en fotos de celular un umbral único deja gris-roto el marcador de la esquina
+    iluminada), a perspectiva (área mínima ABSOLUTA por bbox, no relativa a la
+    foto: el fondo de mesa y los marcadores lejanos encogidos rompían el área
+    relativa) y a bordes rotos (densidad medida sobre la máscara dentro del
+    bbox, no contourArea).
+
+    NO filtrar por cercanía a las esquinas de la FOTO: si la hoja flota en el
+    centro con mucha mesa alrededor, los marcadores reales caen lejos de las
+    esquinas de la imagen. La sanidad la dan los filtros del final.
+
+    Medido contra el lote real: las palabras en negrita del título ("UNA",
+    "Tinta"…) pasan el filtro de forma/área a 300dpi (~35px) y un cuadrilátero
+    con una de ellas como cuarta esquina rectifica basura. Por eso, además del
+    cuadrilátero grande, se exige (a) oscuridad real en GRIS (un marcador es
+    ≥70% oscuro; una palabra tiene blanco entre letras), (b) coherencia de
+    tamaño entre los 4 elegidos (≤4× de área) y (c) orden geométrico TL/TR/
+    BL/BR consistente. Una foto con solo 2-3 marcadores en encuadre devuelve
+    None (correcto: mejor caer a la grilla que rectificar con una esquina falsa).
     """
     h, w = gray.shape[:2]
-    _, thr = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_area = (w * h) * 0.0004        # marcadores son chicos pero no motas
+    thr = cv2.adaptiveThreshold(
+        cv2.GaussianBlur(gray, (5, 5), 0), 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 51, 15,
+    )
+    thr = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    # Romper puentes finos: con mesa visible alrededor, el borde hoja↔fondo se
+    # binariza como un marco y puede conectarse a un marcador cercano formando
+    # un único blob gigante que lo esconde. El open no afecta a los
+    # marcadores (sólidos ≥30px) ni a sus anillos tras el close.
+    thr = cv2.morphologyEx(thr, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
+    # Componentes conexos, NO findContours(RETR_EXTERNAL): ese marco hoja↔fondo
+    # es un contorno cerrado y los marcadores quedan anidados en su hueco →
+    # RETR_EXTERNAL los omite. Los componentes no sufren anidamiento.
+    n_comp, _labels, stats, _cent = cv2.connectedComponentsWithStats(thr, connectivity=8)
+    min_area = 900                      # absoluto: ~30×30 px; no depende del fondo
     max_area = (w * h) * 0.02
-    cands: list[tuple[float, float, float]] = []  # (cx, cy, area)
-    for c in contours:
-        area = cv2.contourArea(c)
+    page_med = float(np.median(gray))
+    cands: list[tuple[float, float, float]] = []  # (cx, cy, area_bbox)
+    for ci in range(1, n_comp):
+        x, y, bw, bh = (stats[ci, cv2.CC_STAT_LEFT], stats[ci, cv2.CC_STAT_TOP],
+                        stats[ci, cv2.CC_STAT_WIDTH], stats[ci, cv2.CC_STAT_HEIGHT])
+        area = bw * bh
         if area < min_area or area > max_area:
             continue
-        x, y, bw, bh = cv2.boundingRect(c)
-        ar = bw / max(1, bh)
-        if not (0.6 <= ar <= 1.6):     # cuadrados
+        if not (0.6 <= bw / max(1, bh) <= 1.6):     # cuadrados
             continue
-        # Densidad alta (sólido), no un anillo
-        if area < 0.55 * bw * bh:
+        fill = float(stats[ci, cv2.CC_STAT_AREA]) / max(1, area)
+        if fill < 0.55:                 # sólido, no un anillo ni texto
             continue
-        cands.append((x + bw / 2.0, y + bh / 2.0, area))
+        # Oscuridad real: la adaptativa ahueca los cuadrados grandes (interior
+        # negro = media local negra), así que el sólido se verifica en gris.
+        dark = float((gray[y:y + bh, x:x + bw] < page_med - 60).mean())
+        if dark < 0.70:
+            continue
+        cands.append((x + bw / 2.0, y + bh / 2.0, float(area)))
     if len(cands) < 4:
         return None
 
     corners = [(0, 0), (w, 0), (0, h), (w, h)]  # TL, TR, BL, BR
-    chosen: list[tuple[float, float]] = []
+    chosen: list[tuple[float, float, float]] = []
     used: set[int] = set()
     for (corner_x, corner_y) in corners:
         best_i, best_d = -1, None
@@ -84,8 +119,23 @@ def _detect_fiducials(gray: np.ndarray, layout: TemplateLayout) -> np.ndarray | 
         if best_i < 0:
             return None
         used.add(best_i)
-        chosen.append((cands[best_i][0], cands[best_i][1]))
-    return np.array(chosen, dtype=np.float32)
+        chosen.append(cands[best_i])
+    # Sanidad 1: cuadrilátero grande (evita que 4 motas del centro pasen).
+    xs = [p[0] for p in chosen]
+    ys = [p[1] for p in chosen]
+    if (max(xs) - min(xs)) * (max(ys) - min(ys)) < 0.30 * w * h:
+        return None
+    # Sanidad 2: tamaños coherentes (la perspectiva encoge, pero no 4×).
+    areas = [p[2] for p in chosen]
+    if max(areas) > 4.0 * min(areas):
+        return None
+    # Sanidad 3: orden geométrico consistente (TL,TR,BL,BR de verdad).
+    (tl, tr, bl, br) = chosen
+    sep_x, sep_y = 0.15 * w, 0.15 * h
+    if not (tr[0] - tl[0] > sep_x and br[0] - bl[0] > sep_x
+            and bl[1] - tl[1] > sep_y and br[1] - tr[1] > sep_y):
+        return None
+    return np.array([(cx, cy) for cx, cy, _a in chosen], dtype=np.float32)
 
 
 def _rotate_cw(img: np.ndarray, angle: int) -> np.ndarray:

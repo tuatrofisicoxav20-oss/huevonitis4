@@ -200,6 +200,103 @@ def test_casillas_vacias_se_omiten(tmp_path):
     assert set(chars) == {"a", "b", "c"}, f"esperaba a,b,c y vino {chars}"
 
 
+def test_fiducials_con_iluminacion_despareja():
+    """E1: una sombra fuerte de un lado no debe romper la detección.
+
+    Con Otsu global el umbral único (medido ~182 en este sintético) binariza
+    rota la mitad oscura de la foto y los marcadores no aparecen como cuadrados
+    sólidos. La binarización adaptativa los recupera. Reproduce la causa raíz 1
+    del lote real de fotos de celular (0/29 páginas con fiduciales).
+    """
+    import cv2
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_fiducials
+    from core.inkcore.template_sheet import TemplateLayout, build_template_sheet
+    lay = TemplateLayout()
+    sheet = np.asarray(build_template_sheet(lay).convert("L")).astype(np.float64)
+    ramp = np.linspace(0.45, 1.0, sheet.shape[1])[None, :]   # sombra izq→der
+    base = np.where(sheet < 128, 90.0, 255.0)
+    grad = np.clip(base * ramp, 0, 255).astype(np.uint8)
+    # Sanity del sintético: el Otsu global de esta imagen está por encima del
+    # papel sombreado (es el escenario que rompía al detector viejo).
+    thr_val, _ = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    assert thr_val > 115, f"sintético no reproduce el caso (otsu={thr_val})"
+
+    fid = _detect_fiducials(grad, lay)
+    assert fid is not None, "fiduciales no detectados con iluminación despareja"
+    expected = lay.fiducial_centers()
+    for (cx, cy), (ex, ey) in zip(fid, expected, strict=True):
+        assert abs(cx - ex) < 10 and abs(cy - ey) < 10, (
+            f"centro corrido: ({cx:.0f},{cy:.0f}) vs ({ex},{ey})")
+
+
+def test_fiducials_foto_con_perspectiva_y_fondo():
+    """E1: hoja en perspectiva leve sobre fondo de mesa → detecta los 4.
+
+    El área mínima del candidato es absoluta (no relativa a la foto): el fondo
+    alrededor de la hoja no debe descalificar los marcadores encogidos.
+    """
+    import cv2
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_fiducials
+    from core.inkcore.template_sheet import TemplateLayout, build_template_sheet
+    lay = TemplateLayout()
+    sheet = np.asarray(build_template_sheet(lay).convert("L"))
+    h, w = sheet.shape[:2]
+    canvas_w, canvas_h = 2000, 2600                    # "foto" más grande que la hoja
+    src = np.array([(0, 0), (w, 0), (0, h), (w, h)], dtype=np.float32)
+    dst = np.array([(330, 300), (1700, 360), (290, 2300), (1730, 2210)],
+                   dtype=np.float32)
+    M = cv2.getPerspectiveTransform(src, dst)
+    photo = cv2.warpPerspective(sheet, M, (canvas_w, canvas_h),
+                                flags=cv2.INTER_LINEAR, borderValue=140)  # mesa gris
+    fid = _detect_fiducials(photo, lay)
+    assert fid is not None, "no detectó los marcadores en la foto con fondo"
+    # Los centros detectados deben caer cerca de la proyección de los reales.
+    real = cv2.perspectiveTransform(
+        np.array([lay.fiducial_centers()], dtype=np.float32), M)[0]
+    for (cx, cy), (ex, ey) in zip(fid, real, strict=True):
+        assert abs(cx - ex) < 15 and abs(cy - ey) < 15, (
+            f"esquina corrida: ({cx:.0f},{cy:.0f}) vs ({ex:.0f},{ey:.0f})")
+
+
+def test_fiducials_marcador_cortado_no_inventa_esquina():
+    """E1: con 3 marcadores en encuadre y una palabra oscura, devolver None.
+
+    Reproduce el falso positivo medido en el lote real: la foto cortó un
+    marcador y una palabra en negrita del título pasaba como cuarta esquina →
+    rectificación basura. Mejor 'sin fiduciales' (cae a grilla) que eso.
+    """
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_fiducials
+    from core.inkcore.template_sheet import TemplateLayout, build_template_sheet
+    lay = TemplateLayout()
+    sheet = np.asarray(build_template_sheet(lay).convert("L")).copy()
+    # "Cortar" el marcador BR: taparlo con papel.
+    cx, cy = lay.fiducial_centers()[3]
+    half = lay.fiducial // 2 + 4
+    sheet[cy - half:cy + half, cx - half:cx + half] = 255
+    # Palabra corta y oscura cerca del título (como "UNA" en negrita).
+    sheet[150:185, 800:842] = 20
+    assert _detect_fiducials(sheet, lay) is None
+
+
+def test_fiducials_rechaza_motas_centrales():
+    """E1: 4 manchas en el centro NO deben pasar por marcadores (cuadrilátero chico)."""
+    import numpy as np
+
+    from core.inkcore.template_extract import _detect_fiducials
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout()
+    img = np.full((1754, 1240), 255, np.uint8)
+    for (cx, cy) in ((580, 820), (660, 820), (580, 900), (660, 900)):
+        img[cy - 20:cy + 20, cx - 20:cx + 20] = 30
+    assert _detect_fiducials(img, lay) is None
+
+
 def _rotate_png_cw(src_png, dst_png, angle):
     """Guarda `src_png` rotada `angle`° en sentido horario (simula el escáner)."""
     import cv2
