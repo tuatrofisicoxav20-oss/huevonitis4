@@ -365,6 +365,46 @@ def test_extract_auto_apaisada_orden_correcto(tmp_path):
     assert len(auto) >= 25, f"sólo {len(auto)} casillas tras autorrotar"
 
 
+def test_grid_bbox_descarta_bordes_y_titulo():
+    """E4: el bbox de la grilla excluye una sombra de borde y la banda de título.
+
+    Reproduce las dos causas del Bug C (medidas en el lote real): una sombra
+    pegada al borde derecho estiraba el bbox a todo el ancho (desalineando la
+    última columna) y el título arriba corría la grilla (perdiendo la fila 0).
+    """
+    import numpy as np
+
+    from core.inkcore.template_extract import _grid_content_bbox
+    from core.inkcore.template_sheet import TemplateLayout, build_template_sheet
+    lay = TemplateLayout()
+    img = np.asarray(build_template_sheet(lay).convert("L")).copy()
+    _h, w = img.shape
+    img[:, w - 6:] = 20            # sombra de borde derecho (como en las fotos)
+    _x0, y0, x1, _y1 = _grid_content_bbox(img)
+    assert x1 < w - 6, f"el bbox se estiró al borde (x1={x1}, w={w})"
+    # El título canónico está por encima de la grilla (grid_y0); el bbox debe
+    # empezar cerca de la primera fila de casillas, no en el título.
+    assert y0 >= lay.grid_y0 - lay.cell_h, f"bbox incluye el título (y0={y0}, grid_y0={lay.grid_y0})"
+
+
+def test_cell_ink_mask_conserva_trazo_delgado():
+    """E4: un trazo fino (como una 'i' con punto) ya no se descarta como vacío.
+
+    El piso de tinta viejo (h·w·0.004 ≈ 264px en esta celda) rechazaba trazos
+    delgados; el nuevo max(25, h·w·0.0015 ≈ 99px) los conserva. El trazo se hace
+    corto (110px, < 0.55·alto) para no disparar el supresor de líneas de grilla.
+    """
+    import numpy as np
+
+    from core.inkcore.template_extract import _cell_ink_mask
+    cell = np.full((300, 220), 255, np.uint8)     # celda clara (66000 px)
+    cell[90:200, 104:114] = 30                     # asta fina (~10px ancho, 110 alto)
+    cell[70:80, 105:113] = 30                      # punto de la 'i'
+    mask = _cell_ink_mask(cell)
+    assert mask is not None, "el trazo delgado se descartó como vacío"
+    assert int((mask > 0).sum()) > 80
+
+
 def test_presets_geometrias_conocidas():
     """E3: el registro reproduce las geometrías medidas contra los PDF reales."""
     from core.inkcore.template_sheet import TEMPLATE_PRESETS

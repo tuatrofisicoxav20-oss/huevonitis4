@@ -401,28 +401,80 @@ def _deskew(gray: np.ndarray, angle: float) -> np.ndarray:
     return cv2.warpAffine(gray, m, (w, h), flags=cv2.INTER_LINEAR, borderValue=255)
 
 
-def _grid_content_bbox(gray: np.ndarray) -> tuple[int, int, int, int] | None:
-    """bbox de todo el contenido (tinta + líneas de grilla) por proyección.
+def _strip_title_band(comps: list, gy0: int, gy1: int) -> int:
+    """Sube `gy0` por debajo de la banda del título (texto impreso), si la hay.
 
-    Robusto a líneas tenues: no depende de detectarlas, sólo del extent del
-    contenido oscuro. Usa percentiles (no min/max) para ignorar motas de borde
-    del escáner. Devuelve (x0, y0, x1, y1) o None si no hay contenido.
+    En la foto de una plantilla, el bbox de contenido suele empezar en el TÍTULO
+    ("Plantilla de letra — Huevonitis" + instrucciones), no en la primera fila de
+    casillas. Eso corre toda la grilla hacia arriba: la fila 0 cae sobre el texto
+    y se descarta (medido en el lote: a/b/c perdidas). El título es una banda de
+    MUCHOS componentes PEQUEÑOS (letras de imprenta); las casillas tienen pocas
+    piezas GRANDES (letra manuscrita). Se recorta desde arriba mientras la franja
+    parezca texto, parando en la primera de contenido grande (la grilla).
+    `comps` = lista de (x,y,w,h,area) ya filtrados de bordes.
     """
+    span = gy1 - gy0
+    if span <= 0:
+        return gy0
+    nb = 40
+    step = max(1, span // nb)
+    small_thr = 0.05 * span          # "componente pequeño" (título) vs letra grande
+    new_y0 = gy0
+    for b in range(nb // 2):         # sólo la mitad superior puede ser título
+        lo, hi = gy0 + b * step, gy0 + (b + 1) * step
+        band = [c for c in comps if lo <= c[1] + c[3] / 2 < hi]
+        n_small = sum(1 for c in band if c[3] < small_thr)
+        # Franja de título: muchas piezas chicas alineadas. Si la franja ya tiene
+        # contenido grande (letra manuscrita) o poca densidad, paramos.
+        if len(band) >= 12 and n_small >= 0.6 * len(band):
+            new_y0 = hi
+        elif band and max(c[3] for c in band) >= small_thr:
+            break                    # llegó la primera fila de letras
+    return new_y0
+
+
+def _grid_content_bbox(gray: np.ndarray) -> tuple[int, int, int, int] | None:
+    """bbox de la grilla de casillas (sin título ni bordes de la foto).
+
+    Robusto a líneas tenues (no depende de detectarlas, sólo del extent del
+    contenido oscuro) y a fotos de celular: descarta los componentes pegados al
+    borde de la imagen (sombras/marco de la mesa, que estiraban el bbox hasta los
+    bordes y desalineaban las columnas) y recorta la banda del título superior
+    (que corría la grilla hacia arriba y hacía perder la primera fila). Devuelve
+    (x0, y0, x1, y1) o None si no hay contenido.
+    """
+    h_img, w_img = gray.shape[:2]
     binv = cv2.adaptiveThreshold(
         cv2.GaussianBlur(gray, (3, 3), 0), 255,
         cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 41, 10,
     )
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(binv, connectivity=8)
-    clean = np.zeros_like(binv)
+    n, _labels, stats, _c = cv2.connectedComponentsWithStats(binv, connectivity=8)
+    comps: list[tuple[int, int, int, int, int]] = []
     for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] >= 25:    # descartar motas
-            clean[labels == i] = 255
-    ys, xs = np.where(clean > 0)
-    if len(xs) == 0:
-        return None
-    x0, x1 = np.percentile(xs, [0.3, 99.7])
-    y0, y1 = np.percentile(ys, [0.3, 99.7])
-    return int(x0), int(y0), int(x1), int(y1)
+        x, y, bw, bh = (stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP],
+                        stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT])
+        if stats[i, cv2.CC_STAT_AREA] < 25:     # motas
+            continue
+        # Descartar componentes pegados al borde de la IMAGEN (sombras/marco de
+        # la foto): estiraban el bbox a 0..ancho y desalineaban la grilla.
+        if x <= 2 or y <= 2 or x + bw >= w_img - 2 or y + bh >= h_img - 2:
+            continue
+        comps.append((x, y, bw, bh, int(stats[i, cv2.CC_STAT_AREA])))
+    if not comps:
+        # Fallback: sin componentes interiores (p. ej. grilla que toca el borde),
+        # volver al método simple por percentiles de píxel.
+        ys, xs = np.where(binv > 0)
+        if len(xs) == 0:
+            return None
+        x0, x1 = np.percentile(xs, [0.3, 99.7])
+        y0, y1 = np.percentile(ys, [0.3, 99.7])
+        return int(x0), int(y0), int(x1), int(y1)
+    x0 = int(np.percentile([c[0] for c in comps], 1))
+    x1 = int(np.percentile([c[0] + c[2] for c in comps], 99))
+    y0 = int(np.percentile([c[1] for c in comps], 1))
+    y1 = int(np.percentile([c[1] + c[3] for c in comps], 99))
+    y0 = _strip_title_band(comps, y0, y1)
+    return x0, y0, x1, y1
 
 
 def _strip_edge_lines(thr: np.ndarray, band: float = 0.20, frac: float = 0.45) -> np.ndarray:
@@ -486,7 +538,11 @@ def _cell_ink_mask(cell: np.ndarray) -> np.ndarray | None:
             continue
         keep[labels == i] = 255
         ink += int(area)
-    if ink < h * w * 0.004:
+    # Piso de tinta bajo (E4): trazos delgados ('i', 'l', 't', comas, puntos)
+    # tienen poca área y el umbral viejo (h·w·0.004) los rechazaba como vacíos.
+    # max(25, h·w·0.0015) los conserva; las motas ya las filtró el guard de área
+    # de arriba, así que bajar el piso no reintroduce ruido.
+    if ink < max(25, h * w * 0.0015):
         return None
     return keep
 
