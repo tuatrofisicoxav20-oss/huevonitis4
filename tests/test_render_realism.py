@@ -309,25 +309,32 @@ def test_misma_seed_png_identico(stub_renderer):
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
-def test_fallback_duro_omite_sin_fuente_de_sistema(stub_renderer):
-    """R3/H8: un char sin glifo se OMITE (cero glifos pegados, reportado);
-    con allow_font_fallback=True aparece el placeholder rojo del preview."""
+def test_char_faltante_deja_marca_visible_siempre(stub_renderer):
+    """R3/H8 + fix-puente: un char sin glifo NUNCA se omite en silencio.
+    Deja SIEMPRE una marca VISIBLE (placeholder rojo subrayado), con o sin
+    allow_font_fallback, y se reporta en missing_chars — así "subió" no se
+    vuelve "subi" sin dejar rastro en un PDF real."""
     import numpy as np
 
     from core.inkcore.renderer import RenderOptions
 
+    def _rojo(page):
+        arr = np.asarray(page.convert("RGB")).astype(int)
+        rojo = (arr[:, :, 0] > 150) & (arr[:, :, 1] < 100) & (arr[:, :, 2] < 100)
+        return int(rojo.sum())
+
+    # Export real (allow_font_fallback=False): antes se omitía en silencio;
+    # ahora deja la marca roja igual, y lo registra como faltante.
     opts = RenderOptions(style="", background_style="hoja_blanca", seed=5)
     pages = stub_renderer.render_pages("@@@", opts)
     assert stub_renderer.last_missing_chars() == {"@"}
-    lum = np.asarray(pages[0].convert("L"))
-    assert int((lum < 150).sum()) == 0, "se pintó un fallback sin permiso"
+    assert _rojo(pages[0]) > 20, "el char faltante no dejó marca visible en export"
 
+    # Preview (allow_font_fallback=True): sigue marcando en rojo.
     opts2 = RenderOptions(style="", background_style="hoja_blanca", seed=5,
                           allow_font_fallback=True)
     pages2 = stub_renderer.render_pages("@@@", opts2)
-    arr = np.asarray(pages2[0].convert("RGB")).astype(int)
-    rojo = (arr[:, :, 0] > 150) & (arr[:, :, 1] < 100) & (arr[:, :, 2] < 100)
-    assert int(rojo.sum()) > 20, "el preview no marcó el faltante en rojo"
+    assert _rojo(pages2[0]) > 20, "el preview no marcó el faltante en rojo"
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")

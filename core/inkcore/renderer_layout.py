@@ -303,15 +303,17 @@ class LayoutMixin:
                         slant_extra=slant_walk.step() if slant_walk else 0.0)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
-                    # R3/H8 — glifo faltante: se OMITE y se registra (la UI
-                    # avisa antes de exportar). El placeholder de fuente de
-                    # sistema sólo con allow_font_fallback=True (preview).
+                    # R3/H8 — glifo faltante: se registra para que la UI avise
+                    # antes de exportar. NUNCA se omite en silencio: un char sin
+                    # glifo deja SIEMPRE una marca VISIBLE (placeholder rojo
+                    # subrayado), aunque allow_font_fallback=False (export real).
+                    # Así "subió" no se vuelve "subi" sin dejar rastro.
                     if not ch.isspace():
                         self._missing_chars.add(ch)
-                    glyph_img = (
-                        self._render_fallback_char(ch, options, missing=True)
-                        if getattr(options, "allow_font_fallback", False) else None
-                    )
+                        glyph_img = self._render_fallback_char(
+                            ch, options, missing=True)
+                    else:
+                        glyph_img = None
                 if glyph_img is None:
                     continue
 
