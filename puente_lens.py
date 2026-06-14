@@ -18,6 +18,8 @@ USO:
     python puente_lens.py entrada.txt -o salida.pdf
     python puente_lens.py entrada.txt --profile mi_perfil --no-lineas
     python puente_lens.py entrada.txt --diag      # reporte de chars faltantes
+    python puente_lens.py entrada.txt --corregir  # corrige con IA local antes de render
+    python puente_lens.py entrada.txt --corregir --si  # corrige y aprueba sin preguntar
     echo "texto suelto" | python puente_lens.py -  # lee de stdin
 
 SALIDA:
@@ -255,6 +257,66 @@ def _read_input(src: str) -> str:
     return p.read_text(encoding="utf-8-sig")
 
 
+def _aplicar_correccion(texto: str, *, modelo: str | None, auto_si: bool) -> str:
+    """Propone una corrección IA del texto y devuelve el que se usará.
+
+    Conservador por diseño: el corrector solo PROPONE. Si Ollama no está vivo o
+    la corrección falla, se queda con el ORIGINAL sin abortar (la tarea se
+    entrega igual, solo que sin corregir). Muestra ORIGINAL/CORREGIDO/CAMBIOS y
+    pide aprobación al usuario, salvo que `auto_si` sea True (flag --si).
+    """
+    try:
+        from corrector_ia import (
+            DEFAULT_MODEL,
+            corregir_texto,
+            diff_resumen,
+            ollama_disponible,
+        )
+    except ImportError as exc:
+        print(f"AVISO: no se pudo importar corrector_ia ({exc}). Sigo SIN corregir.")
+        return texto
+
+    if not ollama_disponible():
+        print("AVISO: Ollama no responde. Sigo SIN corregir (prendelo con: ollama serve).")
+        return texto
+
+    mdl = modelo or DEFAULT_MODEL
+    print(f"  corrigiendo con IA local (modelo: {mdl})… puede tardar en CPU.")
+    try:
+        corregido = corregir_texto(texto, modelo=mdl)
+    except RuntimeError as exc:
+        print(f"AVISO: falló la corrección ({exc}). Sigo SIN corregir.")
+        return texto
+
+    print("\n── ORIGINAL ───────────────────────────")
+    print(texto)
+    print("── CORREGIDO ──────────────────────────")
+    print(corregido)
+    cambios = diff_resumen(texto, corregido)
+    if cambios:
+        print("── CAMBIOS ────────────────────────────")
+        for o, c in cambios:
+            print(f"  {o!r} → {c!r}")
+    else:
+        print("── (sin cambios palabra-a-palabra detectables) ──")
+    print("───────────────────────────────────────")
+
+    if corregido.strip() == texto.strip():
+        print("  (la corrección no cambió nada; uso el texto tal cual)")
+        return texto
+
+    if auto_si:
+        print("  --si: usando el texto CORREGIDO automáticamente.")
+        return corregido
+
+    resp = input("¿Usar el texto CORREGIDO? [s/N]: ").strip().lower()
+    if resp in ("s", "si", "sí", "y", "yes"):
+        print("  → usando el texto CORREGIDO.")
+        return corregido
+    print("  → usando el texto ORIGINAL (sin corregir).")
+    return texto
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Puente Google Lens → Huevonitis: texto OCR → PDF en tu letra.",
@@ -268,6 +330,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="tamaño de fuente en px (default: 0 = automático)")
     ap.add_argument("--diag", action="store_true",
                     help="marca en ROJO los chars que faltan en el banco (preview)")
+    ap.add_argument("--corregir", action="store_true",
+                    help="corrige el texto con IA local (Ollama) antes de renderizar")
+    ap.add_argument("--si", "--yes", action="store_true",
+                    help="con --corregir, aprueba la corrección sin preguntar (no interactivo)")
+    ap.add_argument("--modelo", default=None,
+                    help="modelo de Ollama para --corregir (default: el del corrector)")
     ap.add_argument("--dump-clean", action="store_true",
                     help="además, guarda el texto ya limpio en <salida>.clean.txt para inspección")
     args = ap.parse_args(argv)
@@ -278,6 +346,14 @@ def main(argv: list[str] | None = None) -> int:
     if not clean:
         print("AVISO: el texto quedó vacío tras la limpieza. Nada que renderizar.")
         return 1
+
+    # Corrección IA opcional (conservadora, local vía Ollama). Solo PROPONE; la
+    # decisión de usar el texto corregido es del usuario (o --si para auto).
+    if args.corregir:
+        clean = _aplicar_correccion(clean, modelo=args.modelo, auto_si=args.si)
+        if not clean.strip():
+            print("AVISO: el texto quedó vacío. Nada que renderizar.")
+            return 1
 
     # Resolver ruta de salida.
     if args.output:
