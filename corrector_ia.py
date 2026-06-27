@@ -32,7 +32,6 @@ import sys
 import urllib.error
 import urllib.request
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuración
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,10 +90,10 @@ def _strip_wrapper(text: str) -> str:
     lines = t.split("\n")
     if len(lines) > 1:
         first_low = lines[0].strip().lower().rstrip(":")
-        if any(first_low.startswith(p.rstrip(":")) for p in _WRAPPER_PREFIXES):
-            # Solo si la línea es CORTA (un preámbulo, no contenido real).
-            if len(lines[0]) < 60:
-                t = "\n".join(lines[1:]).strip()
+        # Solo si la línea es CORTA (un preámbulo, no contenido real).
+        if (len(lines[0]) < 60
+                and any(first_low.startswith(p.rstrip(":")) for p in _WRAPPER_PREFIXES)):
+            t = "\n".join(lines[1:]).strip()
 
     return t
 
@@ -154,9 +153,9 @@ def corregir_texto(
             f"No se pudo contactar a Ollama en {url}.\n"
             f"  ¿Está corriendo? Probá: ollama serve\n"
             f"  Detalle: {exc}"
-        )
+        ) from exc
     except Exception as exc:
-        raise RuntimeError(f"Error llamando a Ollama: {exc}")
+        raise RuntimeError(f"Error llamando a Ollama: {exc}") from exc
 
     raw = body.get("response", "")
     cleaned = _strip_wrapper(raw)
@@ -181,7 +180,7 @@ def diff_resumen(original: str, corregido: str) -> list[tuple[str, str]]:
     c_words = corregido.split()
     cambios = []
     if len(o_words) == len(c_words):
-        for ow, cw in zip(o_words, c_words):
+        for ow, cw in zip(o_words, c_words, strict=True):
             if ow != cw:
                 cambios.append((ow, cw))
     return cambios
