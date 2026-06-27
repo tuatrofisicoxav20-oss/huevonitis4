@@ -132,3 +132,35 @@ def load_settings() -> None:
         v = float(s["min_glyph_quality"])
         if 0.0 <= v <= 1.0:
             MIN_GLYPH_QUALITY = v
+
+
+def update_settings(updates: dict) -> None:
+    """Lee settings.json, aplica `updates` y reescribe ATÓMICAMENTE (tmp+rename).
+
+    Punto único para que la UI persista preferencias (tema, animaciones, perfil
+    activo) sin truncar el archivo: antes varios sitios hacían write_text/json.dump
+    in-place y un crash a mitad corrompía settings.json (se perdían tema/perfil/
+    animaciones). Es read-modify-write del dict completo: pensado para llamarse
+    desde el hilo de UI (serializado), no concurrentemente.
+    """
+    import tempfile
+    data: dict = {}
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    data.update(updates)
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=SETTINGS_FILE.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise

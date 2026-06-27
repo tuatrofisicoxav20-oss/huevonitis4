@@ -9,7 +9,6 @@ Depende de atributos definidos en InkCoreView.__init__ / _build:
 y de métodos de otros mixins:
   self._reload_and_refresh_all, self.toast
 """
-import json
 import logging
 from tkinter import messagebox
 
@@ -150,15 +149,9 @@ class InkCoreViewProfileMixin:
         self._update_profile_count()
 
     def _persist_active_profile(self, profile_id: str) -> None:
-        """Guarda el id del perfil activo en settings.json."""
+        """Guarda el id del perfil activo en settings.json (escritura atómica)."""
         try:
-            data: dict = {}
-            if config.SETTINGS_FILE.exists():
-                with open(config.SETTINGS_FILE, encoding="utf-8") as f:
-                    data = json.load(f)
-            data["active_profile_id"] = profile_id
-            with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            config.update_settings({"active_profile_id": profile_id})
         except Exception as exc:
             logger.warning("No se pudo persistir active_profile_id: %s", exc)
 

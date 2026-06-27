@@ -413,28 +413,40 @@ class TemplateTabMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _render_tpl_grid(self, results):
+        # Render por LOTES: un PDF de plantilla de 29 páginas extrae ~780 celdas,
+        # y construirlas todas de golpe (una ImageTk.PhotoImage por glifo) en el
+        # hilo de UI congelaba la app varios segundos. Se usa el mismo
+        # _render_chunked que Banco/Captura (presupuesto por tick + after).
+        self._cancel_chunked("tpl_grid")
         for w in self._tpl_grid.winfo_children():
             w.destroy()
         self._tpl_thumb_photos.clear()
         if not _PIL_OK:
             return
         cols = 6
-        for i, (ch, glyph, score) in enumerate(results):
-            r, c = divmod(i, cols)
-            cell = ctk.CTkFrame(self._tpl_grid, fg_color=theme.BG_TERTIARY, corner_radius=6)
-            cell.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            # Glifo blanco sobre tile oscuro para que la tinta se vea.
-            tile = Image.new("RGBA", (84, 84), (20, 20, 30, 255))
-            g = glyph.copy()
-            g.thumbnail((74, 74), Image.LANCZOS)
-            tile.paste(g, ((84 - g.width) // 2, (84 - g.height) // 2), g)
-            photo = ImageTk.PhotoImage(tile)
-            self._tpl_thumb_photos.append(photo)
-            ctk.CTkLabel(cell, image=photo, text="").pack(padx=4, pady=(4, 0))
-            ctk.CTkLabel(
-                cell, text=f"{ch}  ·  {score:.0%}",
-                font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
-            ).pack(pady=(0, 4))
+
+        def _make(i, ch, glyph, score):
+            def _op():
+                r, c = divmod(i, cols)
+                cell = ctk.CTkFrame(self._tpl_grid, fg_color=theme.BG_TERTIARY, corner_radius=6)
+                cell.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+                # Glifo blanco sobre tile oscuro para que la tinta se vea.
+                tile = Image.new("RGBA", (84, 84), (20, 20, 30, 255))
+                g = glyph.copy()
+                g.thumbnail((74, 74), Image.LANCZOS)
+                tile.paste(g, ((84 - g.width) // 2, (84 - g.height) // 2), g)
+                photo = ImageTk.PhotoImage(tile)
+                self._tpl_thumb_photos.append(photo)
+                ctk.CTkLabel(cell, image=photo, text="").pack(padx=4, pady=(4, 0))
+                ctk.CTkLabel(
+                    cell, text=f"{ch}  ·  {score:.0%}",
+                    font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY,
+                ).pack(pady=(0, 4))
+            return _op
+
+        ops = [_make(i, ch, glyph, score)
+               for i, (ch, glyph, score) in enumerate(results)]
+        self._render_chunked("tpl_grid", ops)
 
     # ── E5: reporte por página + reasignación manual ─────────────
 

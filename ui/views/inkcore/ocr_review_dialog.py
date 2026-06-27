@@ -129,6 +129,14 @@ class OCRReviewDialog(ctk.CTkToplevel):
 
     # ── OCR ───────────────────────────────────────────────────────
     def _run_ocr(self):
+        def _ui(fn):
+            # El usuario puede cerrar el diálogo ("✕ Descartar") mientras el OCR
+            # corre: agendar/tocar widgets ya destruidos lanzaría TclError y
+            # mataría el worker en silencio. suppress protege el agendado; el
+            # callback vuelve a chequear winfo_exists ya en el hilo de UI.
+            with contextlib.suppress(Exception):
+                self.after(0, fn)
+
         def worker():
             try:
                 from core.ocr.engine import OCREngine
@@ -139,10 +147,11 @@ class OCRReviewDialog(ctk.CTkToplevel):
                 if self._extra_contrast:
                     path = self._make_contrast_copy(path)
                 lines = eng.extract_text_with_boxes(path)
-                self.after(0, lambda: self._fill_text(lines))
+                _ui(lambda: self._fill_text(lines))
             except Exception as exc:
                 logger.error("OCRReview OCR falló: %s", exc, exc_info=True)
-                self.after(0, lambda exc=exc: self._status.configure(text=f"Error de OCR: {exc}"))
+                _ui(lambda exc=exc: self.winfo_exists()
+                    and self._status.configure(text=f"Error de OCR: {exc}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -164,6 +173,8 @@ class OCRReviewDialog(ctk.CTkToplevel):
             return path
 
     def _fill_text(self, lines: list):
+        if not self.winfo_exists():   # diálogo cerrado mientras corría el OCR
+            return
         self._text.delete("0.0", "end")
         if not lines:
             self._status.configure(text="El OCR no devolvió texto. Probá 'más contraste' o corregí a mano.")

@@ -269,31 +269,19 @@ class HuevonitisApp(AppLayoutMixin, AppChromeMixin, ctk.CTk):
             view._refresh_profile_dropdown()
 
     def _cmd_toggle_theme(self):
-        import json
         current = _load_saved_theme()
         new_label = "Claro" if current == "dark" else "Oscuro"
         with contextlib.suppress(Exception):
-            data = {}
-            if config.SETTINGS_FILE.exists():
-                data = json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8"))
-            data["theme"] = new_label
-            config.SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                                            encoding="utf-8")
+            config.update_settings({"theme": new_label})
         self.toast(f"Tema {new_label} guardado — reinicia para aplicarlo", "info")
 
     def _cmd_cycle_motion(self):
-        import json
         order = ["Completas", "Reducidas", "Off"]
         current = motion.LABEL_BY_LEVEL.get(motion.get_motion_level(), "Completas")
         new_label = order[(order.index(current) + 1) % 3]
         motion.set_motion_level(new_label)
         with contextlib.suppress(Exception):
-            data = {}
-            if config.SETTINGS_FILE.exists():
-                data = json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8"))
-            data["animations"] = new_label
-            config.SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                                            encoding="utf-8")
+            config.update_settings({"animations": new_label})
         self.toast(f"Animaciones: {new_label}", "info")
 
     def toast(self, message: str, kind: str = "info"):
