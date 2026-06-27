@@ -121,8 +121,6 @@ class BulkCaptureRunner:
         # Pipeline lazy-init: lo creamos UNA vez y reusamos en todas las
         # imágenes (antes se re-creaba por iteración → recargaba modelos).
         self._pipeline = None
-        # Lock para proteger appends a `session.candidates` desde varios threads.
-        self._results_lock = threading.Lock()
         # BUG-04: tracker de tmp_dirs creados por _rasterize_pdf — se limpian
         # en _cleanup_raster_tmps() al final de run() / run_pdf().
         self._raster_tmp_dirs: list[str] = []
