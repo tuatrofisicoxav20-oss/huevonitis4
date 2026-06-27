@@ -40,7 +40,9 @@ def test_manual_270_swaps_dimensions():
 
 def test_no_manual_no_osd_leaves_image_unchanged(monkeypatch):
     """Sin override manual y sin OSD, NO rota (no arruina imágenes ya derechas)."""
-    import core.inkcore.extractor_preprocess as pp
+    # _osd_rotation vive ahora en extractor_orient (donde orient_by_content lo
+    # resuelve); parchear extractor_preprocess no tendría efecto.
+    import core.inkcore.extractor_orient as pp
     monkeypatch.setattr(pp, "_osd_rotation", lambda img: None)
     img = _tall_img()
     out = orient_by_content(img, None)
@@ -49,7 +51,7 @@ def test_no_manual_no_osd_leaves_image_unchanged(monkeypatch):
 
 
 def test_osd_rotation_applied_when_available(monkeypatch):
-    import core.inkcore.extractor_preprocess as pp
+    import core.inkcore.extractor_orient as pp
     monkeypatch.setattr(pp, "_osd_rotation", lambda img: 270)
     img = _tall_img()
     out = orient_by_content(img, None)
