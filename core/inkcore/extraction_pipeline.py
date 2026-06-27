@@ -6,7 +6,10 @@ Configurable por PipelineConfig; no rompe el flujo legacy si use_pipeline=False.
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import time
+from pathlib import Path
 
 import config as _config
 
@@ -28,6 +31,38 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# Subdirs de _temp_extract más viejos que esto se consideran extracciones
+# abandonadas (no guardadas) y se podan. Holgado a propósito: un lote concurrente
+# crea sus subdirs en segundos, así que jamás se borra el de un hilo activo.
+_EXTRACT_DIR_TTL_S = 3600.0
+
+
+def _prune_stale_extract_dirs(base_dir: Path, ttl_s: float = _EXTRACT_DIR_TTL_S) -> int:
+    """Borra subdirs de extracción VIEJOS (huérfanos), preservando los recientes.
+
+    Reemplaza al viejo `purge_temp_pngs` sobre un dir compartido, que destruía los
+    crops de páginas/hilos concurrentes. Acá sólo se eliminan subdirs cuya mtime
+    supera `ttl_s`, así que extracciones abandonadas de sesiones previas se limpian
+    sin tocar las que están en curso.
+    """
+    removed = 0
+    try:
+        now = time.time()
+    except Exception:
+        return 0
+    for sub in base_dir.glob("ex_*"):
+        if not sub.is_dir():
+            continue
+        try:
+            if now - sub.stat().st_mtime > ttl_s:
+                shutil.rmtree(sub, ignore_errors=True)
+                removed += 1
+        except OSError:
+            continue
+    if removed:
+        logger.info("_prune_stale_extract_dirs: %d subdir(s) huérfano(s) podado(s)", removed)
+    return removed
 
 
 class GlyphExtractionPipeline:
@@ -330,17 +365,23 @@ class GlyphExtractionPipeline:
         # Salto 3 — mapa caja→carácter esperado: posicional (default) o DP global.
         expected_map = self._build_expected_map(valid_fused, ref_chars, med_h, box_votes)
 
-        temp_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        # F10-B — higiene de orphans. Con el pipeline activo por defecto (F6) el
-        # path legacy _run (que purgaba al inicio) ya no corre, así que sin esto
-        # los temporales de extracciones abandonadas (no guardadas) se acumularían
-        # sin límite. Misma estrategia que el legacy: cada extracción reemplaza a
-        # la anterior en la UI (self._extracted = glyphs), así que purgar los
-        # PNG sueltos previos al empezar es seguro. El cleanup selectivo de
-        # save_glyphs_to_bank sigue borrando solo los que SÍ se guardaron.
-        from core.inkcore.glyph_ingest import purge_temp_pngs
-        purge_temp_pngs(temp_dir)
+        # Cada llamada a extract() usa su PROPIO subdir único. ANTES se compartía
+        # _temp_extract y se purgaba al inicio con purge_temp_pngs: eso destruía
+        # los crops de OTRAS páginas/llamadas. Dos fallos concretos que esto
+        # corrige: (a) en captura masiva el pipeline se reusa en varios hilos
+        # (ThreadPoolExecutor) → un hilo borraba los PNG recién escritos por otro;
+        # (b) aun secuencial, en un PDF de N páginas cada página purgaba los crops
+        # de la anterior y los nombres {char}_{i:04d} colisionaban entre páginas,
+        # así que al guardar sólo sobrevivían los de la última página y el resto
+        # se perdían en silencio (add_glyph descarta si el PNG fuente no existe).
+        # Con un subdir por llamada no hay purga compartida ni colisión de nombres.
+        base_dir = _config.TIPOGRAFIA_DIR / "_temp_extract"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        # Higiene de orphans (extracciones abandonadas, no guardadas): poda subdirs
+        # VIEJOS por antigüedad, nunca los recientes — un hilo concurrente del mismo
+        # lote puede estar escribiendo en su subdir en este instante.
+        _prune_stale_extract_dirs(base_dir)
+        temp_dir = Path(tempfile.mkdtemp(prefix="ex_", dir=base_dir))
 
         glyphs: list[GlyphEntry] = []
         boxes: list[list[int]] = []  # Salto 0 — caja [x,y,w,h] por glifo aceptado
