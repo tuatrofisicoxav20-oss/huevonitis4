@@ -1161,7 +1161,8 @@ def _layout_agreement_fast(deskewed, bbox, lay, clf, char_to_label) -> tuple[flo
     return (sum(scores) / len(scores) if scores else 0.0), n_az
 
 
-def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label):
+def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label,
+                              layout_hint=None):
     """Elige el preset por página (barrido rotación×geometría por agreement CNN).
 
     El scoring ESTRUCTURAL no identifica la geometría de forma fiable (premia
@@ -1260,6 +1261,26 @@ def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label
     non_az = {n: lay for n, lay in presets.items()
               if not any(char_to_label(c) for c in lay.charset)}
 
+    # Si el usuario pasó un layout_hint que es ÉL MISMO non-az (p. ej. una hoja
+    # de dígitos+puntuación generada desde la UI), ese hint es mejor señal que la
+    # autocorrelación de columnas: la geometría no distingue charsets non-az del
+    # mismo nº de columnas (numeros+signos vs digitos_signos comparten ~10 cols),
+    # y el CNN no puede validar estos caracteres. El usuario sabe qué plantilla
+    # imprimió → se respeta su hint y se extrae con él. Gate: solo cuando el hint
+    # es non-az; las páginas de letras ya retornaron arriba por agreement CNN.
+    if layout_hint is not None and not any(
+            char_to_label(c) for c in layout_hint.charset):
+        results = extract_from_template(image_path, layout_hint, pre_rotate=win_rot)
+        if results:
+            logger.info("multilayout: non-az por layout_hint del usuario "
+                        "(charset=%r) rot=%d n=%d",
+                        layout_hint.charset, win_rot, len(results))
+            return {"results": results, "preset": "layout_hint", "rotation": win_rot,
+                    "layout_score": 0.0, "page_agreement": None, "suspect": False,
+                    "reason": ("extraída con el layout que generaste (dígitos/"
+                               "signos): el CNN no valida estos caracteres, "
+                               "revisá los glifos antes de guardar")}
+
     dims = _estimate_grid_dims(dk, bb)
     if dims is not None and non_az:
         cols, _rows, conf = dims
@@ -1309,8 +1330,11 @@ def extract_pdf_pages(
     etiquetado como letra). Acá cada página se puntúa contra los presets
     conocidos con scoring estructural BARATO (4 rotaciones × geometrías únicas),
     se extrae completa sólo con el preset ganador y se valida con el gate
-    anti-corrupción. El snapshot del usuario (`layout_hint`) es sólo una pista de
-    prioridad (su preset se prueba primero ante empate), nunca una imposición.
+    anti-corrupción. El snapshot del usuario (`layout_hint`) se respeta SOLO
+    cuando la página no es de letras a-z y el hint es él mismo non-az (dígitos/
+    signos): ahí la geometría no distingue charsets del mismo nº de columnas y el
+    CNN no valida, así que el hint del usuario es la señal fiable. Para páginas
+    de letras manda el agreement CNN (el hint no impone).
 
     Devuelve un dict por página:
         {"results": [(char, glyph, score), ...],
@@ -1334,7 +1358,8 @@ def extract_pdf_pages(
     out = []
     for path in image_paths:
         try:
-            out.append(_extract_page_multilayout(path, presets, hint_name, clf, char_to_label))
+            out.append(_extract_page_multilayout(path, presets, hint_name, clf,
+                                                 char_to_label, layout_hint=layout_hint))
         except Exception as exc:
             logger.error("extract_pdf_pages %s: %s", path, exc, exc_info=True)
             out.append({"results": [], "preset": None, "rotation": -1,
