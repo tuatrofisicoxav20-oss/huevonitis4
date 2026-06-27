@@ -77,3 +77,27 @@ def test_all_job_types(monkeypatch, job_type):
     monkeypatch.setattr(config, "BASE_PRICE_PER_PAGE_MXN", 50.0)
     job = ClientJob(pages=1, urgency="Normal", job_type=job_type)
     assert calculate_price(job) > 0
+
+
+@pytest.mark.parametrize("bad", ["", None, "tres", "  ", "abc"])
+def test_price_pages_no_numerico_no_truena(monkeypatch, bad):
+    """pages vacío/None/no numérico desde el formulario → 1 página, sin crash.
+
+    Antes int(job.pages) lanzaba ValueError/TypeError y tumbaba la cotización.
+    """
+    import config
+    monkeypatch.setattr(config, "BASE_PRICE_PER_PAGE_MXN", 50.0)
+    job = ClientJob(pages=bad, urgency="Normal", job_type="Apunte")
+    price = calculate_price(job)
+    assert price == calculate_price(ClientJob(pages=1, urgency="Normal", job_type="Apunte"))
+    # y el desglose tampoco truena (mismo total que 1 página)
+    assert get_price_breakdown(job)["total"] == \
+        get_price_breakdown(ClientJob(pages=1, urgency="Normal", job_type="Apunte"))["total"]
+
+
+def test_price_pages_float_string(monkeypatch):
+    """'3.0' o '3 ' se normalizan a 3 páginas."""
+    import config
+    monkeypatch.setattr(config, "BASE_PRICE_PER_PAGE_MXN", 50.0)
+    assert calculate_price(ClientJob(pages="3.0", urgency="Normal", job_type="Apunte")) == \
+        calculate_price(ClientJob(pages=3, urgency="Normal", job_type="Apunte"))

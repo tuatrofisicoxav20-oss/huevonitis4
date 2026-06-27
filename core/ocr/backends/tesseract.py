@@ -55,15 +55,20 @@ class TesseractBackend(OCRBackend):
 
     def extract_text(self, image_path: str, lang: str = "spa") -> str:
         self._apply_cmd()
+        # En fallo se devuelve "" (no un mensaje de error): el texto de
+        # extract_text se agrega TAL CUAL al documento (TextBlocks → resumen →
+        # flashcards/quiz), así que un string de error se convertiría en contenido
+        # del documento. Mejor cadena vacía + log que envenenar el material.
         if not _TESSERACT_OK:
-            return (
-                "Error: pytesseract no está disponible.\n"
-                "Instalar: pip install pytesseract\n"
-                "También necesitas Tesseract: sudo dnf install tesseract tesseract-langpack-spa"
+            logger.error(
+                "Tesseract OCR: pytesseract no disponible (pip install pytesseract "
+                "+ paquete tesseract del sistema)"
             )
+            return ""
         path = Path(image_path)
         if not path.exists():
-            return f"Error: archivo no encontrado: {image_path}"
+            logger.error("Tesseract OCR: archivo no encontrado: %s", image_path)
+            return ""
         try:
             if _CV2_OK:
                 processed = self._preprocess(image_path)
@@ -79,7 +84,7 @@ class TesseractBackend(OCRBackend):
                 ).strip()
         except Exception as e:
             logger.error(f"Tesseract OCR error: {e}")
-            return f"Error en OCR: {e}"
+            return ""
 
     def extract_text_with_boxes(
         self, image_path: str, lang: str = "spa"

@@ -1,6 +1,5 @@
 from core.models import (
     ClientJob,
-    GlyphEntry,
     ImageElement,
     LineElement,
     Page,
@@ -105,28 +104,3 @@ def payment_from_dict(d: dict) -> Payment:
         if hasattr(pay, k):
             setattr(pay, k, v)
     return pay
-
-
-def glyph_to_dict(g: GlyphEntry) -> dict:
-    return {
-        "char": g.char,
-        "image_path": g.image_path,
-        "quality_score": g.quality_score,
-        "tier": g.tier,
-        "ink_coverage": g.ink_coverage,
-        "index": g.index,
-        "predicted_char": g.predicted_char,
-        "label_confidence": g.label_confidence,
-        "detector_sources": list(g.detector_sources),
-    }
-
-
-def glyph_from_dict(d: dict) -> GlyphEntry:
-    g = GlyphEntry()
-    for k in ("char", "image_path", "quality_score", "tier", "ink_coverage", "index"):
-        if k in d:
-            setattr(g, k, d[k])
-    g.predicted_char = d.get("predicted_char")
-    g.label_confidence = d.get("label_confidence")
-    g.detector_sources = list(d.get("detector_sources") or [])
-    return g

@@ -16,8 +16,22 @@ TYPE_MULTIPLIERS = {
 }
 
 
+def _safe_pages(value) -> int:
+    """Páginas como int >= 1, tolerante a la entrada del formulario.
+
+    `job.pages` puede llegar como "" / None / "3 hojas" desde la UI; `int()`
+    directo lanzaría ValueError/TypeError y tumbaría la cotización. Acá se
+    normaliza: vacío o no numérico → 1 (mínimo cobrable), float string → su parte
+    entera.
+    """
+    try:
+        return max(1, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return 1
+
+
 def calculate_price(job: ClientJob) -> float:
-    pages = max(1, int(job.pages))  # guard: pages must be >= 1 to avoid zero/negative price
+    pages = _safe_pages(job.pages)  # guard: >=1 y tolerante a "" / None / no numérico
     base = config.BASE_PRICE_PER_PAGE_MXN * pages
     urgency = URGENCY_MULTIPLIERS.get(job.urgency, 1.0)
     job_type = TYPE_MULTIPLIERS.get(job.job_type, 1.0)
@@ -26,7 +40,7 @@ def calculate_price(job: ClientJob) -> float:
 
 
 def get_price_breakdown(job: ClientJob) -> dict:
-    pages = max(1, int(job.pages))  # guard: pages must be >= 1 to avoid zero/negative price
+    pages = _safe_pages(job.pages)  # guard: >=1 y tolerante a "" / None / no numérico
     base = config.BASE_PRICE_PER_PAGE_MXN * pages
     urgency_m = URGENCY_MULTIPLIERS.get(job.urgency, 1.0)
     type_m = TYPE_MULTIPLIERS.get(job.job_type, 1.0)
