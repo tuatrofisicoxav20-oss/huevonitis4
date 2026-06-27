@@ -232,15 +232,32 @@ class TemplateTabMixin:
         if not path:
             return
         try:
-            from core.inkcore.template_sheet import save_template_sheet
-            out = save_template_sheet(path, layout)
+            from core.inkcore.template_registry import register_layouts
+            from core.inkcore.template_sheet import (
+                paginate_layouts,
+                save_template_sheets,
+            )
+            # Paginar los combos grandes: un charset que no entra legible en un A4
+            # se reparte en varias hojas (cada una con casillas usables). Cada
+            # hoja es un layout autónomo; se registran TODOS para que el extractor
+            # los reconozca al cargar la foto (presets candidatos persistidos).
+            pages = paginate_layouts(layout.charset, layout.repeats)
+            out_paths = save_template_sheets(path, pages)
+            register_layouts(pages)
+            out = out_paths[0]
+            n_pages = len(pages)
             extra = (f" ({reps} casillas por letra)" if reps > 1 else "")
+            pg = (f" · {n_pages} hojas (combo grande: repartido para que las "
+                  "casillas queden legibles)" if n_pages > 1 else "")
             self._tpl_status.configure(
-                text=f"✓ Plantilla guardada: {Path(out).name}{extra}. "
+                text=f"✓ Plantilla guardada: {Path(out).name}{extra}{pg}. "
                      "Imprimila y rellenala.",
                 text_color=theme.ACCENT_GREEN,
             )
-            self.toast(f"Plantilla guardada: {Path(out).name}", "success")
+            toast = f"Plantilla guardada: {Path(out).name}"
+            if n_pages > 1:
+                toast += f" ({n_pages} hojas)"
+            self.toast(toast, "success")
             # U6: avanza el paso 1 del stepper
             self._template_generated = True
             self._update_profile_count()
@@ -305,6 +322,12 @@ class TemplateTabMixin:
                 # Cargar el CNN una vez (gate + orientación + identificación de
                 # layout); reinyectarlo por página evita recargar el modelo 29 veces.
                 clf, char_to_label = _load_template_cnn()
+                # Presets candidatos = los fijos + los layouts que el usuario
+                # generó (persistidos). Así una plantilla MIXTA generada en la UI
+                # se auto-identifica por su propia geometría en vez de caer a
+                # "suspect": el extractor la elige sola por agreement CNN.
+                from core.inkcore.template_registry import augmented_presets
+                presets = augmented_presets()
                 results: list = []
                 total = len(page_items)
                 for i, (page_path, label) in enumerate(page_items, start=1):
@@ -312,7 +335,7 @@ class TemplateTabMixin:
                         _set_status(f"🔎 Procesando {label} ({i}/{total})…")
                     try:
                         meta = extract_pdf_pages(
-                            [page_path], layout_hint=layout,
+                            [page_path], layout_hint=layout, presets=presets,
                             clf=clf, char_to_label=char_to_label)[0]
                     except Exception as exc:
                         logger.error("tpl_load página %s: %s", label, exc, exc_info=True)
@@ -448,8 +471,8 @@ class TemplateTabMixin:
         if len(page_report) <= 1 and not suspect:
             return  # una sola imagen sin problemas: sin tabla
 
-        from core.inkcore.template_sheet import TEMPLATE_PRESETS
-        preset_options = ["(omitir)", *TEMPLATE_PRESETS.keys()]
+        from core.inkcore.template_registry import augmented_presets
+        preset_options = ["(omitir)", *augmented_presets().keys()]
         header = ctk.CTkFrame(self._tpl_report_frame, fg_color="transparent")
         header.pack(fill="x", padx=6)
         ctk.CTkLabel(header, text=f"Detalle por página ({len(page_report)}):",
@@ -500,8 +523,8 @@ class TemplateTabMixin:
             # layout) en vez del orquestador, que rechazaría acentos/dígitos por
             # no poder validarlos con el CNN.
             from core.inkcore.template_extract import extract_from_template_auto
-            from core.inkcore.template_sheet import TEMPLATE_PRESETS
-            lay = TEMPLATE_PRESETS.get(preset_name)
+            from core.inkcore.template_registry import augmented_presets
+            lay = augmented_presets().get(preset_name)
             try:
                 new = extract_from_template_auto(page_path, lay)
             except Exception as exc:

@@ -643,3 +643,140 @@ def test_rotacion_por_cnn_margen_insuficiente_devuelve_none(monkeypatch):
     from core.inkcore.template_extract import _detect_rotation_by_cnn
     _patch_cnn_scores(monkeypatch, {0: 0.12, 90: 0.10, 180: 0.05, 270: 0.04})
     assert _detect_rotation_by_cnn(np.zeros((10, 10), np.uint8), None) is None
+
+
+# ── Paginación + plantillas mixtas (extracción de todas las combinaciones) ──
+
+def test_paginate_combo_grande_se_reparte_legible():
+    """Un combo que no entra legible en un A4 se reparte en varias hojas usables.
+
+    El combo completo ×3 daba casillas de ~3px (ilegibles) apretujadas en una
+    sola hoja. `paginate_layouts` lo corta en frontera de carácter: cada hoja es
+    un layout autónomo con casillas por encima del piso de legibilidad.
+    """
+    from core.inkcore.template_sheet import (
+        DIGITOS,
+        MAYUSCULAS,
+        MIN_WRITE_PX,
+        MINUSCULAS,
+        PUNTUACION,
+        VOCALES_ACENTUADAS,
+        paginate_layouts,
+    )
+    full = MINUSCULAS + MAYUSCULAS + DIGITOS + PUNTUACION + VOCALES_ACENTUADAS
+    pages = paginate_layouts(full, repeats=3)
+    assert len(pages) >= 2, "el combo completo ×3 debe repartirse en varias hojas"
+    # Ninguna casilla de ninguna hoja queda por debajo del piso de legibilidad.
+    for lay in pages:
+        for i in range(lay.n_cells):
+            _wx, _wy, ww, wh = lay.writing_rect(i)
+            assert ww >= MIN_WRITE_PX and wh >= MIN_WRITE_PX, f"casilla ilegible {ww}x{wh}"
+    # No se pierde ni se duplica ningún carácter al paginar.
+    juntos = "".join(p.charset for p in pages)
+    assert juntos == full
+
+
+def test_paginate_combo_x2_sigue_en_una_hoja():
+    """El combo completo ×2 todavía entra legible en UNA hoja (no se sobre-pagina)."""
+    from core.inkcore.template_sheet import (
+        DIGITOS,
+        MAYUSCULAS,
+        MINUSCULAS,
+        PUNTUACION,
+        VOCALES_ACENTUADAS,
+        paginate_layouts,
+    )
+    full = MINUSCULAS + MAYUSCULAS + DIGITOS + PUNTUACION + VOCALES_ACENTUADAS
+    assert len(paginate_layouts(full, repeats=2)) == 1
+    assert len(paginate_layouts(MINUSCULAS, repeats=1)) == 1
+
+
+def test_registro_layouts_roundtrip_persistido():
+    """register_layouts persiste y load_user_presets reconstruye charset+repeats."""
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_sheet import DIGITOS, MINUSCULAS, TemplateLayout
+    lay = TemplateLayout(charset=MINUSCULAS + DIGITOS, repeats=1)
+    assert reg.register_layouts([lay]) == 1
+    # Re-registrar la misma no duplica.
+    assert reg.register_layouts([lay]) == 0
+    loaded = reg.load_user_presets()
+    assert reg.layout_key(lay) in loaded
+    got = loaded[reg.layout_key(lay)]
+    assert got.charset == MINUSCULAS + DIGITOS and got.repeats == 1
+    # augmented_presets incluye los fijos y el de usuario.
+    aug = reg.augmented_presets()
+    assert "minusculas_x1" in aug and reg.layout_key(lay) in aug
+
+
+def test_registro_layout_con_ligaduras_roundtrip():
+    """Un charset de LISTA (pares ligados R10) round-trip por el registro."""
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_sheet import TemplateLayout
+    lay = TemplateLayout(charset=["a", "qu", "ll", "b"], repeats=2)
+    reg.register_layouts([lay])
+    got = reg.load_user_presets()[reg.layout_key(lay)]
+    assert got.charset == ["a", "qu", "ll", "b"] and got.repeats == 2
+
+
+def test_extract_pdf_pages_identifica_plantilla_mixta(tmp_path):
+    """Clave: una plantilla MIXTA generada (min+dígitos+puntuación) se auto-
+    identifica por su propio layout registrado, no cae a suspect.
+
+    Es lo que antes fallaba: el orquestador sólo conocía los presets fijos, así
+    que una mixta con a-z quedaba suspect. Inyectando el layout del usuario como
+    preset candidato, el agreement CNN lo elige sobre minusculas_x1 (la geometría
+    correcta gana ~13× a la proyección torcida). Requiere CNN: sin él se
+    documenta el desenlace alterno sin romper.
+    """
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_extract import _load_template_cnn, extract_pdf_pages
+    from core.inkcore.template_sheet import DIGITOS, MINUSCULAS, TemplateLayout
+    cs = MINUSCULAS + DIGITOS
+    lay = TemplateLayout(charset=cs)
+    reg.register_layouts([lay])
+    img = _fill_sheet(lay, range(len(cs)))
+    p = tmp_path / "mixta.png"
+    img.save(p)
+    clf, c2l = _load_template_cnn()
+    presets = reg.augmented_presets()
+    meta = extract_pdf_pages([str(p)], layout_hint=lay, presets=presets,
+                             clf=clf, char_to_label=c2l)[0]
+    if clf is not None:
+        assert meta["preset"] == reg.layout_key(lay), meta["preset"]
+        assert meta["suspect"] is False, meta["reason"]
+        chars = {c for c, _g, _s in meta["results"]}
+        # Recupera tanto letras como dígitos (el punto sintético de fuente es
+        # demasiado chico; no se exige acá).
+        assert "a" in chars and "5" in chars, sorted(chars)
+
+
+def test_tandas_pura_sigue_autodetectando_pese_a_presets_de_usuario(tmp_path):
+    """Regresión: con layouts de usuario registrados, una hoja pura de minúsculas
+    (tipo 'Tandas') sigue identificándose como minusculas, NO como el preset mixto.
+
+    El riesgo de inyectar presets de usuario es que uno espurio gane sobre el
+    preset correcto. Como el agreement compara geometrías, una hoja de minúsculas
+    contra un layout mixto (más columnas) desalinea y puntúa bajo → gana el de
+    minúsculas. Este test fija esa propiedad.
+    """
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_extract import _load_template_cnn, extract_pdf_pages
+    from core.inkcore.template_sheet import (
+        DIGITOS,
+        MAYUSCULAS,
+        MINUSCULAS,
+        TemplateLayout,
+    )
+    # El usuario tiene registrado un combo mixto grande.
+    reg.register_layouts([TemplateLayout(charset=MINUSCULAS + MAYUSCULAS + DIGITOS)])
+    # Pero la foto que carga es una hoja pura de minúsculas.
+    lay = TemplateLayout()
+    img = _fill_sheet(lay, range(len(lay.letters)))
+    p = tmp_path / "puras.png"
+    img.save(p)
+    clf, c2l = _load_template_cnn()
+    meta = extract_pdf_pages([str(p)], presets=reg.augmented_presets(),
+                             clf=clf, char_to_label=c2l)[0]
+    if clf is not None:
+        assert meta["preset"] == "minusculas_x1", meta["preset"]
+        assert meta["suspect"] is False

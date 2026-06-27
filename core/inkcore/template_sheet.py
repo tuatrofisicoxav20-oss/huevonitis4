@@ -240,8 +240,63 @@ TEMPLATE_PRESETS: dict[str, TemplateLayout] = {
 }
 
 
+# Piso de legibilidad (px) del área de escritura de una casilla. Por debajo, la
+# casilla es demasiado chica para escribir cómodo. Es > 20 a propósito: el test
+# `test_charset_grande_entra_en_una_pagina_legible` ya codifica que ×2 del combo
+# completo (casilla mínima ~30px) entra en UNA hoja, así que el piso debe dejar
+# pasar ese caso y sólo paginar cuando la casilla caería de verdad ilegible
+# (combo completo ×3 da ~3px → se reparte en varias hojas).
+MIN_WRITE_PX = 22
+
+
+def paginate_layouts(
+    charset: str | list[str], repeats: int = 1, *, min_write: int = MIN_WRITE_PX,
+) -> list[TemplateLayout]:
+    """Reparte `charset` en una o varias hojas A4 con casillas LEGIBLES.
+
+    Una sola hoja A4 sólo acomoda tantas casillas antes de que el área de
+    escritura caiga por debajo de `min_write` (combo completo ×3 → ~3px,
+    ilegible). En vez de apretujar todo en una hoja (lo que rompía "bien
+    acomodadas"), se corta el charset en frontera de carácter: cada página es un
+    `TemplateLayout` autónomo con su propio slice, su grilla y sus casillas
+    legibles. La última página, parcial, arma su layout del slice real (cols/rows
+    salen solos de `__post_init__`), así nunca queda una hoja casi vacía mal
+    proporcionada.
+
+    Devuelve la lista de layouts (una entrada = una hoja). Las páginas comparten
+    `repeats`; la extracción identifica cada hoja por su geometría/charset.
+    """
+    repeats = max(1, repeats)
+    n = len(charset)
+    if n == 0:
+        return [TemplateLayout(charset=charset, repeats=repeats)]
+
+    def _legible(k: int) -> bool:
+        lay = TemplateLayout(charset=charset[:k], repeats=repeats)
+        _wx, _wy, ww, wh = lay.writing_rect(0)   # grilla uniforme: la casilla 0 representa a todas
+        return ww >= min_write and wh >= min_write
+
+    if _legible(n):
+        return [TemplateLayout(charset=charset, repeats=repeats)]
+    # Mayor nº de caracteres por hoja que sigue legible (barrido lineal: los
+    # saltos de columna de __post_init__ rompen la monotonía estricta y un
+    # binary search podría saltarse el límite real).
+    k = n
+    while k > 1 and not _legible(k):
+        k -= 1
+    k_max = max(1, k)
+    n_pages = math.ceil(n / k_max)
+    per_page = math.ceil(n / n_pages)   # repartir parejo (no 80/7 sino p. ej. 44/43)
+    return [TemplateLayout(charset=charset[s:s + per_page], repeats=repeats)
+            for s in range(0, n, per_page)]
+
+
 def save_template_sheet(out_path: str, layout: TemplateLayout | None = None) -> str:
-    """Genera y guarda la plantilla (PNG o PDF según extensión)."""
+    """Genera y guarda UNA hoja de plantilla (PNG o PDF según extensión).
+
+    Compat: una sola hoja con el layout dado tal cual (sin paginar). El flujo de
+    la UI usa `save_template_sheets`, que pagina los combos grandes.
+    """
     img = build_template_sheet(layout)
     if img is None:
         raise RuntimeError("PIL no disponible: no se puede generar la plantilla")
@@ -253,3 +308,34 @@ def save_template_sheet(out_path: str, layout: TemplateLayout | None = None) -> 
     else:
         img.save(p)
     return str(p)
+
+
+def save_template_sheets(out_path: str, layouts: list[TemplateLayout]) -> list[str]:
+    """Guarda una o varias hojas. PDF → multipágina; PNG → una por archivo.
+
+    Devuelve la lista de rutas escritas. Para `.pdf` se escribe un único PDF con
+    todas las páginas (`save_all=True`); para imágenes (no multipágina) cada hoja
+    va a `nombre_p1.png`, `nombre_p2.png`, … salvo que sea una sola.
+    """
+    if not layouts:
+        raise RuntimeError("save_template_sheets: lista de layouts vacía")
+    from pathlib import Path
+    imgs = [build_template_sheet(lay) for lay in layouts]
+    imgs = [im for im in imgs if im is not None]
+    if not imgs:
+        raise RuntimeError("PIL no disponible: no se puede generar la plantilla")
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.suffix.lower() == ".pdf":
+        imgs[0].save(p, "PDF", resolution=150.0, save_all=True,
+                     append_images=imgs[1:])
+        return [str(p)]
+    if len(imgs) == 1:
+        imgs[0].save(p)
+        return [str(p)]
+    out_paths = []
+    for i, im in enumerate(imgs, start=1):
+        pp = p.with_name(f"{p.stem}_p{i}{p.suffix}")
+        im.save(pp)
+        out_paths.append(str(pp))
+    return out_paths
