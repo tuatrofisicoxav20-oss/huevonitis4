@@ -9,13 +9,11 @@ Devuelve True si el usuario eligió continuar (independiente de si arregló o no
 from __future__ import annotations
 
 import logging
-import tkinter as tk
 
 import customtkinter as ctk
 
 from core.session_diagnostic import CheckResult
 from ui import theme
-from ui.modal_utils import safe_grab
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +36,21 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
         logger.info("Diagnóstico: todos los checks OK, sin modal")
         return True
 
-    root = tk.Tk()
-    root.withdraw()  # ocultar root, solo usamos como dueño del toplevel
-
-    win = ctk.CTkToplevel(root)
+    # Usamos un ctk.CTk() directo en vez de un CTkToplevel sobre un root oculto:
+    # ese patrón (tk.Tk().withdraw() + Toplevel) NO se mapea como ventana bajo
+    # Hyprland/XWayland, así que el proceso quedaba colgado en mainloop() sin
+    # nada visible en pantalla. El CTk normal sí se mapea (es lo que usa la app).
+    win = ctk.CTk()
     win.title("Diagnóstico de sesión")
     win.configure(fg_color=theme.BG_PRIMARY)
     win.geometry("640x520")
-    win.transient(root)
-    safe_grab(win, root)
+    # Forzar que la ventana aparezca al frente y con foco (algunos WM no lo
+    # hacen solos para una ventana recién creada).
+    win.deiconify()
+    win.lift()
+    win.focus_force()
+    win.attributes("-topmost", True)
+    win.after(300, lambda: win.attributes("-topmost", False))
 
     user_continued = {"ok": False}
 
@@ -143,12 +147,10 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     def _close_continue():
         user_continued["ok"] = True
         win.destroy()
-        root.destroy()
 
     def _close_quit():
         user_continued["ok"] = False
         win.destroy()
-        root.destroy()
 
     ctk.CTkButton(
         btn_bar, text="✕ Salir de Huevonitis", width=180, height=36,
@@ -164,6 +166,6 @@ def show_diagnostic_modal(results: list[CheckResult]) -> bool:
     ).pack(side="right", padx=8)
 
     win.protocol("WM_DELETE_WINDOW", _close_continue)
-    root.mainloop()
+    win.mainloop()
 
     return user_continued["ok"]

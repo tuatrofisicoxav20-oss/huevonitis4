@@ -199,15 +199,27 @@ def main():
         from core.session_diagnostic import run_diagnostic, should_skip_diagnostic
         if not should_skip_diagnostic():
             results = run_diagnostic()
-            issues = [r for r in results if r.severity in ("warning", "error")]
-            if issues:
-                logger.info("Diagnóstico: %d issues — mostrando modal", len(issues))
+            # Solo los errores deben frenar el arranque con el modal bloqueante.
+            # Los warnings (p. ej. orphan_pngs, cuyo auto_fix es no-op y por tanto
+            # nunca se limpia) se registran pero NO gatean la app: si lo hicieran,
+            # el modal reaparecería en cada arranque y —bajo Hyprland/XWayland el
+            # CTkToplevel con root oculto no se mapea— dejaría el proceso colgado
+            # para siempre en mainloop().
+            errors = [r for r in results if r.severity == "error"]
+            warnings = [r for r in results if r.severity == "warning"]
+            if warnings:
+                logger.info(
+                    "Diagnóstico: %d warning(s) (no bloqueante): %s",
+                    len(warnings), ", ".join(w.name for w in warnings),
+                )
+            if errors:
+                logger.info("Diagnóstico: %d error(es) — mostrando modal", len(errors))
                 from ui.views.diagnostic_modal import show_diagnostic_modal
                 ok = show_diagnostic_modal(results)
                 if not ok:
                     logger.info("Usuario eligió salir desde el modal de diagnóstico")
                     return
-            else:
+            elif not warnings:
                 logger.info("Diagnóstico: todo OK")
     except Exception as e:
         logger.error("Diagnóstico falló (no crítico): %s", e, exc_info=True)
