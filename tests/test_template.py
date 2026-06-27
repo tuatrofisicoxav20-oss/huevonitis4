@@ -610,12 +610,14 @@ class _FakeCNN:
 
 def _patch_cnn_scores(monkeypatch, scores_por_angulo):
     """Hace que el fallback CNN use scores fijos por ángulo (0,90,180,270)."""
-    from core.inkcore import template_extract as te
+    # _rotation_cnn_score y _detect_rotation_by_cnn viven en template_fiducials;
+    # parchear ahí (donde _detect_rotation_by_cnn lo resuelve), no en template_extract.
+    from core.inkcore import template_fiducials as tf
     monkeypatch.setattr(
         "core.inkcore.ai.char_cnn.EMNISTCharClassifier", _FakeCNN, raising=False,
     )
     seq = iter([scores_por_angulo[a] for a in (0, 90, 180, 270)])
-    monkeypatch.setattr(te, "_rotation_cnn_score", lambda *a, **k: next(seq))
+    monkeypatch.setattr(tf, "_rotation_cnn_score", lambda *a, **k: next(seq))
 
 
 def test_rotacion_por_cnn_elige_ganador_claro(monkeypatch):
