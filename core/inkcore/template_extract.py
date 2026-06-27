@@ -1283,10 +1283,16 @@ def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label
 
     dims = _estimate_grid_dims(dk, bb)
     if dims is not None and non_az:
-        cols, _rows, conf = dims
-        # Match por nº de columnas (la señal robusta; las filas son menos
-        # precisas con casillas vacías). Acentos=6, dígitos=9: bien separados.
-        matches = [(n, lay) for n, lay in non_az.items() if abs(lay.cols - cols) <= 1]
+        cols, rows, conf = dims
+        # Match por nº de columnas (la señal robusta) Y filas (con tolerancia
+        # amplia: las filas son menos precisas con casillas vacías). Exigir AMBAS
+        # evita que una página densa de letras (p. ej. un combo mixto 10×20, que
+        # el agreement no pudo identificar) se confunda con digitos_signos (9×16)
+        # sólo por compartir ~9-10 columnas y se GUARDE mal (suspect=False
+        # envenenaría el banco). Sin el match de filas, 10 cols ≈ 9 cols bastaba.
+        # Acentos=6×12, dígitos=9×16: ambas dimensiones bien separadas.
+        matches = [(n, lay) for n, lay in non_az.items()
+                   if abs(lay.cols - cols) <= 1 and abs(lay.rows - rows) <= 3]
         if len(matches) == 1 and conf >= TEMPLATE_LAYOUT_MIN_AUTOCORR:
             win_name = matches[0][0]
             results = extract_from_template(image_path, presets[win_name], pre_rotate=win_rot)
