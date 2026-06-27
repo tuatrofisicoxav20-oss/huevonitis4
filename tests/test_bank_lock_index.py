@@ -89,3 +89,21 @@ def test_queue_y_report_no_truenan_con_mutacion_concurrente(big_bank):
         stop.set()
         t.join(timeout=2)
     assert not errors, f"iteración sin lock detectada: {errors}"
+
+
+def test_rename_glyph_actualiza_indice_por_char(big_bank):
+    """rename_glyph debe mover el glifo en _by_char: aparece bajo el nuevo char y
+    deja de aparecer bajo el viejo, sin recargar el banco.
+
+    Regresión: antes rename_glyph mutaba e.char pero NO tocaba _by_char, así que
+    get_best_glyph(nuevo) no lo encontraba y get_best_glyph(viejo) lo seguía
+    devolviendo mal etiquetado.
+    """
+    victim = big_bank._by_char["m"][0]
+    n_m_antes = len(big_bank._by_char["m"])
+    n_z_antes = len(big_bank._by_char.get("z", []))
+    assert big_bank.rename_glyph(victim, "z") is True
+    assert len(big_bank._by_char["m"]) == n_m_antes - 1
+    assert len(big_bank._by_char["z"]) == n_z_antes + 1
+    assert victim not in big_bank._by_char["m"]
+    assert big_bank.get_best_glyph("z").char == "z"

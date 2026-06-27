@@ -237,34 +237,45 @@ class GlyphBank:
         stats["available"] = True
 
         demoted: list[GlyphEntry] = []
+        # Snapshot BARATO bajo el lock: sólo se copian las listas de entries por
+        # char. La inferencia del CNN (clf.score / predict_topk, potencialmente
+        # segundos sobre todo el banco) corre FUERA del lock — antes envolvía todo
+        # el loop, así que cualquier select_glyph/get_best_glyph del hilo de render
+        # o UI quedaba bloqueado durante la inferencia (auto_curate corre tras cada
+        # extracción). Las GlyphEntry son objetos compartidos; leer e.image_path y
+        # mutar e.tier no necesita el lock (la consistencia del índice se rehace al
+        # aplicar). Re-adquirir el lock sólo para escribir es barato.
         with _bank_lock:
-            for char, entries in list(self._by_char.items()):
-                if char_to_label(char) is None:
-                    continue  # ñ / dígitos: el CNN no aplica
-                rotation = [e for e in entries if e.tier in ("Gold", "Silver")]
-                if len(rotation) < 2:
-                    continue  # con uno solo no se puede demover sin vaciar
-                scored = []
-                for e in rotation:
-                    mask = self._ink_mask_for_cnn(e.image_path)
-                    if mask is None:
-                        continue
-                    sc = clf.score(mask, char)
-                    top = clf.predict_topk(mask, 1)
-                    top_char = top[0][0] if top else "?"
-                    scored.append((e, sc if sc is not None else -1.0, top_char))
-                if len(scored) < 2:
+            snapshot = [
+                (char, [e for e in entries if e.tier in ("Gold", "Silver")])
+                for char, entries in list(self._by_char.items())
+                if char_to_label(char) is not None  # ñ / dígitos: el CNN no aplica
+            ]
+        for char, rotation in snapshot:
+            if len(rotation) < 2:
+                continue  # con uno solo no se puede demover sin vaciar
+            scored = []
+            for e in rotation:
+                mask = self._ink_mask_for_cnn(e.image_path)
+                if mask is None:
                     continue
-                stats["checked"] += len(scored)
-                # Proteger siempre el mejor (mayor P(esperada)) de cada letra.
-                best = max(scored, key=lambda t: t[1])
-                for e, sc, top_char in scored:
-                    if e is best[0]:
-                        continue
-                    if 0 <= sc < _CURATE_MISCLASS_FLOOR and top_char != char:
-                        demoted.append(e)
-                        stats["by_char"][char] = stats["by_char"].get(char, 0) + 1
-            if demoted and not dry_run:
+                sc = clf.score(mask, char)
+                top = clf.predict_topk(mask, 1)
+                top_char = top[0][0] if top else "?"
+                scored.append((e, sc if sc is not None else -1.0, top_char))
+            if len(scored) < 2:
+                continue
+            stats["checked"] += len(scored)
+            # Proteger siempre el mejor (mayor P(esperada)) de cada letra.
+            best = max(scored, key=lambda t: t[1])
+            for e, sc, top_char in scored:
+                if e is best[0]:
+                    continue
+                if 0 <= sc < _CURATE_MISCLASS_FLOOR and top_char != char:
+                    demoted.append(e)
+                    stats["by_char"][char] = stats["by_char"].get(char, 0) + 1
+        if demoted and not dry_run:
+            with _bank_lock:
                 for e in demoted:
                     e.tier = "Bronze"
                 self._rebuild_indices()
@@ -595,6 +606,11 @@ class GlyphBank:
                     break
             else:
                 return False
+            # Reconstruir el índice _by_char: get_best_glyph/select_glyph (render)
+            # buscan por ahí, no por _entries. Sin esto el glifo renombrado no
+            # aparecía bajo su nuevo char y SEGUÍA apareciendo (mal etiquetado)
+            # bajo el viejo hasta recargar el banco.
+            self._rebuild_indices()
         self.save()
         return True
 
