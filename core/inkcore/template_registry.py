@@ -57,24 +57,58 @@ def _charset_from_str(s: str, *, is_list: bool) -> str | list[str]:
     return s.split("\x1f") if is_list else s
 
 
-def layout_key(layout: TemplateLayout) -> str:
-    """Nombre estable y único para un layout, derivado de (charset, repeats).
+def _describe_charset(charset: str | list[str], repeats: int) -> str:
+    """Descripción compacta y legible del charset (para nombrar el preset).
 
-    Dos plantillas con el mismo charset y repeticiones comparten clave (es la
-    MISMA plantilla), así el registro deduplica solo.
+    En vez de un hash opaco, el usuario ve "tuya:min+díg×3" en el selector de
+    reasignación manual (E5). Reconoce qué conjuntos incluye la plantilla.
+    """
+    from core.inkcore.template_sheet import (
+        DIGITOS,
+        MAYUSCULAS,
+        MINUSCULAS,
+        PUNTUACION,
+        VOCALES_ACENTUADAS,
+    )
+    chars = charset if isinstance(charset, str) else "".join(charset)
+    parts = []
+    if any(c in chars for c in MINUSCULAS):
+        parts.append("min")
+    if any(c in chars for c in MAYUSCULAS):
+        parts.append("MAY")
+    if any(c in chars for c in DIGITOS):
+        parts.append("díg")
+    if any(c in chars for c in PUNTUACION):
+        parts.append("punt")
+    if any(c in chars for c in VOCALES_ACENTUADAS):
+        parts.append("acent")
+    if not isinstance(charset, str):
+        parts.append("pares")
+    desc = "+".join(parts) if parts else (chars[:8] or "?")
+    return f"tuya:{desc}×{repeats}"
+
+
+def layout_key(layout: TemplateLayout) -> str:
+    """Nombre estable, único y LEGIBLE para un layout, de (charset, repeats).
+
+    Forma: "tuya:min+díg×3·a1b2c3" — la descripción para que el usuario lo
+    reconozca en el selector de reasignación (E5), y un hash corto que garantiza
+    unicidad (dos charsets con la misma descripción no colisionan). Dos plantillas
+    con idéntico charset y repeats comparten clave → el registro deduplica solo.
     """
     raw = f"{_charset_str(layout.charset)}\x00{layout.repeats}"
-    return "user_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    h = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6]
+    return f"{_describe_charset(layout.charset, layout.repeats)}·{h}"
 
 
 def _layout_to_record(layout: TemplateLayout) -> dict:
+    # cols/rows NO se persisten: __post_init__ los recalcula deterministas desde
+    # charset+repeats, así que guardarlos sería dato muerto que podría driftear.
     return {
         "key": layout_key(layout),
         "charset": _charset_str(layout.charset),
         "is_list": not isinstance(layout.charset, str),
         "repeats": int(layout.repeats),
-        "cols": int(layout.cols),
-        "rows": int(layout.rows),
     }
 
 
@@ -126,11 +160,20 @@ def register_layouts(layouts: list[TemplateLayout]) -> int:
     if not layouts:
         return 0
     try:
+        from core.inkcore.template_sheet import TEMPLATE_PRESETS
+        # No registrar layouts que YA son un preset fijo (p. ej. el camino default
+        # genera minúsculas×1 = minusculas_x1): registrarlo crearía un candidato
+        # equivalente bajo otra clave → pasada de agreement redundante por página
+        # y dos entradas equivalentes en el dropdown. Se comparan por (charset,
+        # repeats), que es lo que define el preset.
+        fixed = {(_charset_str(p.charset), p.repeats) for p in TEMPLATE_PRESETS.values()}
         records = _read_records()
         by_key = {r["key"]: r for r in records if "key" in r}
         order = [r["key"] for r in records if "key" in r]
         added = 0
         for lay in layouts:
+            if (_charset_str(lay.charset), lay.repeats) in fixed:
+                continue  # ya cubierto por un preset fijo
             rec = _layout_to_record(lay)
             if rec["key"] not in by_key:
                 added += 1

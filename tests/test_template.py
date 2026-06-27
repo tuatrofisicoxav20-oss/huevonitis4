@@ -780,3 +780,24 @@ def test_tandas_pura_sigue_autodetectando_pese_a_presets_de_usuario(tmp_path):
     if clf is not None:
         assert meta["preset"] == "minusculas_x1", meta["preset"]
         assert meta["suspect"] is False
+
+
+def test_registro_no_duplica_preset_fijo():
+    """Generar la plantilla del camino default (minúsculas×1 = minusculas_x1) NO
+    debe registrar un preset de usuario equivalente: ya lo cubre el fijo.
+    """
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_sheet import MINUSCULAS, TemplateLayout
+    assert reg.register_layouts([TemplateLayout(charset=MINUSCULAS, repeats=1)]) == 0
+    assert reg.load_user_presets() == {}
+
+
+def test_layout_key_es_legible():
+    """La clave del preset de usuario es legible (no un hash opaco): describe los
+    conjuntos para que el usuario lo reconozca en el selector de reasignación.
+    """
+    from core.inkcore import template_registry as reg
+    from core.inkcore.template_sheet import DIGITOS, MINUSCULAS, TemplateLayout
+    k = reg.layout_key(TemplateLayout(charset=MINUSCULAS + DIGITOS, repeats=3))
+    assert k.startswith("tuya:")
+    assert "min" in k and "díg" in k and "×3" in k

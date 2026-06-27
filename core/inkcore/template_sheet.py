@@ -221,7 +221,10 @@ def build_template_sheet(layout: TemplateLayout | None = None) -> Image.Image | 
 # CNN casilla↔letra (todas son a-z). Las hojas de acentos/dígitos tienen
 # geometría única, así que no necesitan ese desempate.
 _PRESET_SPECS: dict[str, tuple[str, int]] = {
-    # Las que genera la UI hoy (checkbox minúsculas × reps 1-3).
+    # Presets fijos de referencia. La UI genera combos ARBITRARIOS (minúsculas +
+    # MAYÚSCULAS + dígitos + puntuación + acentos + pares ligados, reps 1-3) y los
+    # registra como presets de usuario (ver template_registry); estos fijos cubren
+    # las hojas densas reales del usuario y sirven de candidatos base al extraer.
     "minusculas_x1": (MINUSCULAS, 1),       # 4×7 — el abecedario completo
     "minusculas_x2": (MINUSCULAS, 2),       # 6×9
     "minusculas_x3": (MINUSCULAS, 3),       # 6×14
