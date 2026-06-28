@@ -420,7 +420,7 @@ def test_estimate_grid_dims_distingue_acentos_de_digitos():
         _grid_content_bbox,
     )
     from core.inkcore.template_sheet import TEMPLATE_PRESETS
-    for name, exp_cols in (("acentuadas_x12", 6), ("digitos_signos_x8", 9)):
+    for name, exp_cols in (("acentuadas_x12", 6), ("digitos_signos_x8", 10)):
         lay = TEMPLATE_PRESETS[name]
         img = _fill_sheet(lay, range(lay.cols * lay.rows))
         gray = np.asarray(img.convert("L"))
@@ -471,7 +471,7 @@ def test_presets_geometrias_conocidas():
     from core.inkcore.template_sheet import TEMPLATE_PRESETS
     esperado = {
         "minusculas_x1": (4, 7), "acentuadas_x12": (6, 12),
-        "digitos_signos_x8": (9, 16), "comunes_ltcdmp_x12": (6, 16),
+        "digitos_signos_x8": (10, 19), "comunes_ltcdmp_x12": (6, 16),
     }
     for name, (cols, rows) in esperado.items():
         lay = TEMPLATE_PRESETS[name]

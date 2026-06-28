@@ -230,7 +230,7 @@ _PRESET_SPECS: dict[str, tuple[str, int]] = {
     "minusculas_x3": (MINUSCULAS, 3),       # 6×14
     # Hojas densas reales del usuario (charsets medidos contra los PDF).
     "acentuadas_x12": ("áéíóúñ", 12),                # 6×12 — vocales acentuadas + ñ
-    "digitos_signos_x8": (DIGITOS + "¿?¡!:;-", 8),   # 9×16 — números y signos
+    "digitos_signos_x8": (DIGITOS + PUNTUACION, 8),  # 10×19 — números y puntuación
     "comunes_aeiosnr_x12": ("aeiosnr.", 12),         # 6×16 — comunes A
     "comunes_ltcdmp_x12": ("ltcdmp.,", 12),          # 6×16 — comunes B
     "resto_letras_x8": ("bfghjkqvwxyz", 8),          # 6×16 — resto de letras

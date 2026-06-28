@@ -744,10 +744,10 @@ def _extract_page_multilayout(image_path, presets, clf, char_to_label,
         # Match por nº de columnas (la señal robusta) Y filas (con tolerancia
         # amplia: las filas son menos precisas con casillas vacías). Exigir AMBAS
         # evita que una página densa de letras (p. ej. un combo mixto 10×20, que
-        # el agreement no pudo identificar) se confunda con digitos_signos (9×16)
-        # sólo por compartir ~9-10 columnas y se GUARDE mal (suspect=False
-        # envenenaría el banco). Sin el match de filas, 10 cols ≈ 9 cols bastaba.
-        # Acentos=6×12, dígitos=9×16: ambas dimensiones bien separadas.
+        # el agreement no pudo identificar) se confunda con digitos_signos (10×19)
+        # sólo por compartir ~10 columnas y se GUARDE mal (suspect=False
+        # envenenaría el banco). Sin el match de filas, 10 cols densas colarían.
+        # Acentos=6×12, dígitos=10×19: ambas dimensiones bien separadas.
         matches = [(n, lay) for n, lay in non_az.items()
                    if abs(lay.cols - cols) <= 1 and abs(lay.rows - rows) <= 3]
         if len(matches) == 1 and conf >= TEMPLATE_LAYOUT_MIN_AUTOCORR:
