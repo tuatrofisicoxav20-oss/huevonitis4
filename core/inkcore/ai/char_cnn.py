@@ -94,8 +94,16 @@ def label_to_char(label: int) -> str:
 
 
 def char_to_label(ch: str) -> int | None:
-    """Letra a..z → label 1..26. Devuelve None si no es a..z (p. ej. ñ)."""
-    if not ch:
+    """Letra a..z → label 1..26. Devuelve None si no es a..z (p. ej. ñ).
+
+    Guard de longitud: un charset de plantilla puede traer tokens de 2 letras
+    (ligaduras R10 como "qu"/"ll"/"ch"). Sin el `len(c) == 1`, la comparación
+    `"a" <= "qu" <= "z"` es True en Python y `ord("qu")` revienta — eso mataba
+    `extract_pdf_pages` entero apenas un preset de usuario con pares entraba en
+    `augmented_presets()` (ver template_extract:663). Una ligadura no es una
+    letra a-z clasificable por el CNN, así que None es la semántica correcta.
+    """
+    if not ch or len(ch) != 1:
         return None
     c = ch.lower()
     if "a" <= c <= "z":

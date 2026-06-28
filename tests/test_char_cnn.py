@@ -21,6 +21,12 @@ def test_label_char_roundtrip():
     assert char_to_label("") is None
     # mayúsculas se fusionan con minúsculas
     assert char_to_label("A") == 1
+    # tokens multi-char (ligaduras R10 "qu"/"ll"/... de un charset-lista) → None.
+    # Regresión: sin el guard de longitud, `"a" <= "qu" <= "z"` era True y
+    # `ord("qu")` reventaba extract_pdf_pages entero al entrar un preset de
+    # usuario con pares en augmented_presets() (template_extract:663).
+    for pair in ("qu", "ll", "rr", "ch", "de", "en", "la", "es"):
+        assert char_to_label(pair) is None
 
 
 def test_preprocess_encuadre_emnist():

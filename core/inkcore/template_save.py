@@ -103,7 +103,10 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
             rejects.append((ch, i, reason))
             logger.info("gate de captura: '%s' celda #%d rechazado — %s", ch, i, reason)
             continue
-        safe = ch if ch.isalnum() else f"u{ord(ch)}"
+        # ch[0]: un token multi-char NO alfanumérico (caso latente, hoy ninguno —
+        # las ligaduras PARES_FRECUENTES son alnum y caen en la rama `ch`) haría
+        # reventar `ord(ch)`. Mismo guard que char_to_label contra ligaduras.
+        safe = ch if ch.isalnum() else f"u{ord(ch[0])}"
         p = temp_dir / f"{safe}_{i:03d}.png"
         try:
             glyph.save(p)
