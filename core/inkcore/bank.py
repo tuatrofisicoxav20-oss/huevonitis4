@@ -367,7 +367,10 @@ class GlyphBank:
                     char,
                 )
             idx = max((e.index for e in existing), default=-1) + 1
-            safe = char if char.isalnum() else f"punct_{ord(char)}"
+            # ord(char[0]): un token multi-char no-alnum (caso latente) reventaría
+            # `ord(char)`; mismo guard que char_to_label/template_save contra
+            # ligaduras. Las ligaduras actuales son alnum y caen en la rama `char`.
+            safe = char if char.isalnum() else f"punct_{ord(char[0])}"
             dest = self.bank_dir / f"{safe}_{idx:03d}.png"
             try:
                 shutil.copy2(source_path, dest)

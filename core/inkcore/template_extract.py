@@ -618,7 +618,7 @@ def _layout_agreement_fast(deskewed, bbox, lay, clf, char_to_label) -> tuple[flo
     return (sum(scores) / len(scores) if scores else 0.0), n_az
 
 
-def _extract_page_multilayout(image_path, presets, hint_name, clf, char_to_label,
+def _extract_page_multilayout(image_path, presets, clf, char_to_label,
                               layout_hint=None):
     """Elige el preset por página (barrido rotación×geometría por agreement CNN).
 
@@ -811,17 +811,10 @@ def extract_pdf_pages(
     if clf is None and char_to_label is None:
         clf, char_to_label = _load_template_cnn()
     presets = presets or TEMPLATE_PRESETS
-    # Resolver el hint a un nombre de preset (si coincide con uno registrado).
-    hint_name = None
-    if layout_hint is not None:
-        for name, lay in presets.items():
-            if lay.charset == layout_hint.charset and lay.repeats == layout_hint.repeats:
-                hint_name = name
-                break
     out = []
     for path in image_paths:
         try:
-            out.append(_extract_page_multilayout(path, presets, hint_name, clf,
+            out.append(_extract_page_multilayout(path, presets, clf,
                                                  char_to_label, layout_hint=layout_hint))
         except Exception as exc:
             logger.error("extract_pdf_pages %s: %s", path, exc, exc_info=True)

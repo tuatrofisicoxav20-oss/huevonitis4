@@ -70,16 +70,22 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
     en vez de que add_glyph lo recalcule desde cero: así get_best_glyph elige las
     muestras buenas de otras hojas y no se pierde la bandera de baja confianza.
     """
+    import shutil
     import tempfile
     from pathlib import Path
 
     from core.inkcore.glyph_filters import capture_gate, measure_glyph
     from core.inkcore.quality import classify_tier
-    if temp_dir is None:
+    # `own_dir`: si creamos el temp_dir nosotros, lo borramos entero al final. Si
+    # lo pasó el llamador, NO tocamos su contenido ajeno: solo limpiamos los PNGs
+    # que ESTA función escribió (ver `created`), nunca un glob ciego del dir.
+    own_dir = temp_dir is None
+    if own_dir:
         temp_dir = Path(tempfile.mkdtemp(prefix="tpl_glyphs_"))
     else:
         temp_dir = Path(temp_dir)
         temp_dir.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
     saved = dupes = rejected = 0
     rejects: list[tuple[str, int, str]] = []
     # Gate de captura: los umbrales relativos se calibran con la mediana de lo
@@ -110,6 +116,7 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
         p = temp_dir / f"{safe}_{i:03d}.png"
         try:
             glyph.save(p)
+            created.append(p)
         except Exception as exc:
             logger.warning("save_template: no se pudo escribir %s: %s", p, exc)
             continue
@@ -128,9 +135,16 @@ def save_template_glyphs_to_bank(results, bank, temp_dir=None) -> dict:
             dupes += 1
         else:
             saved += 1
-    for f in temp_dir.glob("*.png"):
+    # Limpieza acotada: borrar SOLO los PNGs que escribimos (no un glob del dir,
+    # que arrasaría archivos ajenos si el llamador pasó un temp_dir compartido).
+    # add_glyph ya copió el PNG al banco, así que estos temporales son
+    # descartables. Si creamos el dir nosotros, lo borramos entero (antes quedaba
+    # el directorio vacío colgando por cada guardado).
+    for f in created:
         with contextlib.suppress(OSError):
             f.unlink()
+    if own_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
     if rejects:
         _append_reject_log(rejects)
     logger.info("save_template_glyphs_to_bank: saved=%d dupes=%d rejected=%d total=%d",

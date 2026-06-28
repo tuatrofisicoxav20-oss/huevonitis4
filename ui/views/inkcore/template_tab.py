@@ -479,8 +479,23 @@ class TemplateTabMixin(TemplateReportTabMixin):
                 bank_cov = ""
                 try:
                     from core.inkcore.alphabet_coverage import coverage_message
+                    from core.inkcore.template_sheet import (
+                        DIGITOS,
+                        MAYUSCULAS,
+                        MINUSCULAS,
+                        PUNTUACION,
+                        VOCALES_ACENTUADAS,
+                    )
+                    # Charset objetivo REAL del banco (no solo 27 minúsculas): así
+                    # 'faltan' lista mayúsculas/dígitos/signos/acentos sin capturar,
+                    # y case_sensitive distingue 'A' de 'a' (antes una 'A' del banco
+                    # contaba como 'a' cubierta — feedback engañoso).
+                    bank_alphabet = (MINUSCULAS + MAYUSCULAS + DIGITOS
+                                     + VOCALES_ACENTUADAS + PUNTUACION)
                     bank_chars = [e.char for e in self._pipeline.bank.get_all()]
-                    bank_cov = "\n" + coverage_message(bank_chars, scope="Banco")
+                    bank_cov = "\n" + coverage_message(
+                        bank_chars, alphabet=bank_alphabet, scope="Banco",
+                        case_sensitive=True)
                 except Exception as exc:
                     logger.warning("tpl_save: cobertura no disponible: %s", exc)
                 # Desglose completo: guardadas / duplicadas / rechazadas por el
