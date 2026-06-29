@@ -186,9 +186,16 @@ class WriterTabMixin(WriterPreviewMixin):
         btn_photo.pack(side="left", padx=(0, 6))
         btn_pdf = self.primary_button(btn_row, "Exportar PDF con mi letra", self._export_writer_pdf, 220)
         btn_pdf.configure(image=icons.get_icon("export", 14, theme.ACCENT_TEXT_ON), compound="left")
-        btn_pdf.pack(side="left", padx=(0, 6))
-        btn_pdf2hw = self.secondary_button(btn_row, "PDF → mi letra", self._export_pdf_from_pdf, 150)
-        btn_pdf2hw.configure(image=icons.get_icon("export", 14), compound="left")
+        btn_pdf.pack(side="left")
+
+        # Fila propia para "PDF → mi letra" (importar un PDF y re-renderizarlo
+        # con la letra del usuario). En su propio row para que NUNCA se corte.
+        pdf2hw_row = ctk.CTkFrame(left, fg_color="transparent")
+        pdf2hw_row.pack(fill="x", padx=12, pady=(0, 6))
+        btn_pdf2hw = self.primary_button(
+            pdf2hw_row, "📄 Convertir un PDF a mi letra", self._export_pdf_from_pdf, 280)
+        btn_pdf2hw.configure(image=icons.get_icon("export", 14, theme.ACCENT_TEXT_ON),
+                             compound="left")
         btn_pdf2hw.pack(side="left")
 
         right = self.card_frame(main)
