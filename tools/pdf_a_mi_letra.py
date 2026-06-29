@@ -80,7 +80,7 @@ def main() -> None:
     from core.export.pdf_to_handwriting import convert_pdf_to_handwriting
     try:
         res = convert_pdf_to_handwriting(
-            src, renderer, RenderOptions(render_dpi=150), out_path,
+            src, renderer, RenderOptions(render_dpi=150, style="Bolígrafo"), out_path,
             progress_cb=_progress,
         )
     except Exception as exc:

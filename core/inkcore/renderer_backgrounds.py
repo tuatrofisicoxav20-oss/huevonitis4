@@ -64,6 +64,16 @@ STYLE_PRESETS: dict[str, dict] = {
     "Relajado": {"jitter_px": 6, "size_variation": 0.20, "rotation_range": 4.0},
     "Examen": {"jitter_px": 3, "size_variation": 0.10, "rotation_range": 1.8,
                "draw_lines": True, "background_style": "libreta"},
+    # Bolígrafo (R7/P2): trazo de tinta azul-negra sólido como una pluma de
+    # bolígrafo real, con variación de carga de tinta a lo largo del texto
+    # (ink_texture) y micro-variación de color por glifo (ink_hsv_jitter). El
+    # ink_boost más agresivo (gamma menor) empuja el antialiasing a opaco para
+    # que el trazo no se vea gris/lápiz tras el downscale del supersampling.
+    "Bolígrafo": {"jitter_px": 2, "size_variation": 0.09, "rotation_range": 1.3,
+                  "background_style": "hoja_blanca", "scan_skew": False,
+                  "ink_color": "#16245C", "ink_boost": 0.5,
+                  "ink_texture_strength": 0.22, "ink_bleed": 0.55,
+                  "ink_hsv_jitter": (0.05, 0.07)},
 }
 
 

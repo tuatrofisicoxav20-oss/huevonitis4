@@ -91,7 +91,7 @@ class WriterTabMixin(WriterPreviewMixin):
         ).grid(row=2, column=0, sticky="w")
         self._style_menu = ctk.CTkOptionMenu(
             opts,
-            values=["Limpio", "Escolar", "Universitario", "Relajado"],
+            values=["Limpio", "Bolígrafo", "Escolar", "Universitario", "Relajado"],
             fg_color=theme.BG_TERTIARY,
             button_color=theme.ACCENT_GREEN,
             button_hover_color=theme.ACCENT_GREEN_HOVER,
@@ -487,6 +487,7 @@ class WriterTabMixin(WriterPreviewMixin):
             return
         try:
             options = self._get_render_options()
+            options.style = "Bolígrafo"  # convertir PDF → letra de bolígrafo
         except Exception as exc:
             logger.error("pdf2hw options: %s", exc, exc_info=True)
             self.toast(f"No se pudo preparar la exportación: {exc}", "error")
