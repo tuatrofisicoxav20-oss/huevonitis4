@@ -69,10 +69,10 @@ STYLE_PRESETS: dict[str, dict] = {
     # (ink_texture) y micro-variación de color por glifo (ink_hsv_jitter). El
     # ink_boost más agresivo (gamma menor) empuja el antialiasing a opaco para
     # que el trazo no se vea gris/lápiz tras el downscale del supersampling.
-    "Bolígrafo": {"jitter_px": 3, "size_variation": 0.16, "rotation_range": 2.8,
+    "Bolígrafo": {"jitter_px": 4, "size_variation": 0.22, "rotation_range": 4.2,
                   "background_style": "hoja_blanca", "scan_skew": False,
-                  "baseline_drift": 3.5, "kerning_jitter": 0.5,
-                  "warp_strength": 0.16, "glyph_slant_drift_deg": 1.8,
+                  "baseline_drift": 5.5, "kerning_jitter": 0.7,
+                  "warp_strength": 0.24, "glyph_slant_drift_deg": 2.8,
                   "ink_color": "#16245C", "ink_boost": 0.5,
                   "ink_texture_strength": 0.22, "ink_bleed": 0.55,
                   "ink_hsv_jitter": (0.05, 0.07)},
