@@ -341,6 +341,17 @@ class WriterTabMixin(WriterPreviewMixin):
                 return renderer.render_document(doc, options)
             except Exception as exc:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
+        # Capa de layout estructurado (apuntes): SÓLO si el texto trae marcas
+        # (#, viñeta, N:). Prosa sin marcas → render_pages plano IDÉNTICO a hoy.
+        from core.inkcore.writer_structure import (
+            WriterStructureRenderer,
+            detect_structure,
+        )
+        if detect_structure(text):
+            try:
+                return WriterStructureRenderer(renderer).render(text, options)
+            except Exception as exc:
+                logger.warning("render estructurado falló (%s); uso texto plano", exc)
         return renderer.render_pages(text, options)
 
     def _iter_pages_for_export(self, renderer, text: str, options: "RenderOptions", page_height: "int | None" = None):
@@ -360,6 +371,17 @@ class WriterTabMixin(WriterPreviewMixin):
                 return renderer.render_document(doc, options, page_height)
             except Exception as exc:
                 logger.warning("render_document falló (%s); uso texto plano", exc)
+        # Apuntes estructurados → lista (sin streaming, como render_document);
+        # texto plano conserva iter_pages perezoso. SÓLO con marcas presentes.
+        from core.inkcore.writer_structure import (
+            WriterStructureRenderer,
+            detect_structure,
+        )
+        if detect_structure(text):
+            try:
+                return WriterStructureRenderer(renderer).render(text, options, page_height)
+            except Exception as exc:
+                logger.warning("render estructurado falló (%s); uso texto plano", exc)
         return renderer.iter_pages(text, options, page_height)
 
     def _warn_missing_chars(self, text: str) -> None:
@@ -371,7 +393,11 @@ class WriterTabMixin(WriterPreviewMixin):
             renderer = self._pipeline.renderer
             if renderer is None:
                 return
-            rep = renderer.coverage_report(text)
+            # Apuntes estructurados: chequear cobertura sobre el texto que SÍ se
+            # pinta (sin las marcas #/* que el parser descarta), para no avisar
+            # de glifos "faltantes" que en realidad nunca se renderizan.
+            from core.inkcore.writer_structure import render_text_for_coverage
+            rep = renderer.coverage_report(render_text_for_coverage(text))
         except Exception:
             return
         if rep.get("missing"):
