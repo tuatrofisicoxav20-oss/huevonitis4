@@ -2,7 +2,8 @@
 import contextlib
 import logging
 import threading
-from tkinter import filedialog
+from datetime import datetime
+from pathlib import Path
 
 import customtkinter as ctk
 
@@ -407,19 +408,51 @@ class WriterTabMixin(WriterPreviewMixin):
             self.toast("Mayúsculas usando su minúscula: "
                        + " ".join(rep["case_downgraded"]), "info")
 
+    def _export_dir(self) -> Path:
+        """Carpeta fija de exportación (Wayland-safe: sin diálogo de guardado).
+
+        En Hyprland/Wayland los filedialog de tkinter no se renderizan, así
+        que guardamos directo a ~/Documentos/huevonitis_exports/. Si la
+        carpeta "Documentos" no existe (sistema en otro idioma o layout
+        distinto), caemos a ~/huevonitis_exports/ para no tronar el export.
+        """
+        docs = Path.home() / "Documentos"
+        base = docs if docs.is_dir() else Path.home()
+        out = base / "huevonitis_exports"
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
+    def _export_path(self, ext: str) -> str:
+        """Ruta destino directa con timestamp: apunte_YYYYMMDD_HHMMSS.<ext>."""
+        ext = ext.lstrip(".")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return str(self._export_dir() / f"apunte_{stamp}.{ext}")
+
+    def _announce_saved(self, path):
+        """Mostrar al usuario la ruta exacta donde quedó el archivo (UI).
+
+        Llamar SIEMPRE desde el hilo de UI (los exports en worker thread
+        deben envolver esta llamada en self.after()).
+        """
+        p = Path(path)
+
+        def _open_folder():
+            import subprocess
+            with contextlib.suppress(Exception):
+                subprocess.Popen(["xdg-open", str(p.parent)])
+
+        with contextlib.suppress(Exception):
+            self._page_count_label.configure(text=f"Guardado: {p}")
+        self.toast(f"✓ Guardado en: {p}", "success",
+                   action=("Abrir carpeta", _open_folder))
+
     def _export_writer_pdf(self):
         text = self._writer_text.get("0.0", "end").strip()
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
         self._warn_missing_chars(text)
-        path = filedialog.asksaveasfilename(
-            title="Guardar PDF con mi letra",
-            defaultextension=".pdf",
-            filetypes=[("PDF", "*.pdf")],
-        )
-        if not path:
-            return
+        path = self._export_path("pdf")
         self._save_writer_params()  # Fase 7 — persistir entre sesiones
         # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Como el layout
         # está en mm, basta construir las opciones con el DPI elegido: el
@@ -447,9 +480,11 @@ class WriterTabMixin(WriterPreviewMixin):
 
                 ok = export_pages_streaming(pages, path, page_size="letter", progress_cb=_progress)
                 self.after(0, lambda: self._page_count_label.configure(text=""))
-                msg = "PDF exportado" if ok else "Error al exportar PDF (revisá el log)"
-                kind = "success" if ok else "error"
-                self.after(0, lambda: self.toast(msg, kind))
+                if ok:
+                    # worker thread → marshalear al hilo de UI con after()
+                    self.after(0, lambda: self._announce_saved(path))
+                else:
+                    self.after(0, lambda: self.toast("Error al exportar PDF (revisá el log)", "error"))
             except Exception as exc:
                 logger.error("export_writer_pdf: %s", exc, exc_info=True)
                 self.after(0, lambda exc=exc: self.toast(f"Error: {exc}", "error"))
@@ -513,48 +548,36 @@ class WriterTabMixin(WriterPreviewMixin):
         threading.Thread(target=_render, daemon=True).start()
 
     def _export_png_finish(self, pages):
+        # Corre en el hilo de UI (lo invoca _export_png vía after), así que
+        # toast/_announce_saved se llaman directo. Guardado directo Wayland-safe.
         if not pages:
             self.toast("Error al renderizar", "error")
             return
-
-        if len(pages) == 1:
-            path = filedialog.asksaveasfilename(
-                defaultextension=".png",
-                filetypes=[("PNG", "*.png")],
-                title="Exportar página",
-            )
-            if not path:
-                return
-            pages[0].save(path)
-            self.toast("PNG exportado", "success")
-        else:
-            from pathlib import Path as _Path
-            path = filedialog.asksaveasfilename(
-                defaultextension=".pdf",
-                filetypes=[("PDF", "*.pdf"), ("PNG primer página", "*.png")],
-                title=f"Exportar {len(pages)} páginas",
-            )
-            if not path:
-                return
-            suffix = _Path(path).suffix.lower()
-            if suffix == ".pdf":
+        try:
+            if len(pages) == 1:
+                # 1 página → PNG
+                path = self._export_path("png")
+                pages[0].save(path)
+                self._announce_saved(path)
+            else:
+                # N páginas → un solo PDF (confirmado por el usuario);
+                # si el guardado PDF falla, fallback a PNGs numerados.
+                path = self._export_path("pdf")
                 try:
                     pages[0].save(
                         path, save_all=True, append_images=pages[1:],
                         resolution=150,
                     )
-                    self.toast(f"PDF exportado ({len(pages)} páginas)", "success")
+                    self._announce_saved(path)
                 except Exception as exc:
                     logger.warning("PDF export failed: %s; falling back to numbered PNGs", exc)
-                    base = str(_Path(path).with_suffix(""))
+                    base = str(Path(path).with_suffix(""))
                     for i, pg in enumerate(pages, 1):
                         pg.save(f"{base}_p{i:02d}.png")
-                    self.toast(f"{len(pages)} PNGs exportados", "success")
-            else:
-                base = str(_Path(path).with_suffix(""))
-                for i, pg in enumerate(pages, 1):
-                    pg.save(f"{base}_p{i:02d}.png")
-                self.toast(f"{len(pages)} PNGs exportados", "success")
+                    self._announce_saved(f"{base}_p01.png")
+        except Exception as exc:
+            logger.error("export_png_finish: %s", exc, exc_info=True)
+            self.toast(f"Error al guardar: {exc}", "error")
 
     def _export_photo(self):
         """R7 (F4/F2/I4) — export '📷 Foto de tarea': la página se renderiza
@@ -588,13 +611,7 @@ class WriterTabMixin(WriterPreviewMixin):
         if not pages:
             self.toast("Error al renderizar", "error")
             return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".jpg",
-            filetypes=[("JPEG", "*.jpg")],
-            title=f"Exportar foto{'s' if len(pages) > 1 else ''} de tarea",
-        )
-        if not path:
-            return
+        path = self._export_path("jpg")
         try:
             import random as _random
 
@@ -602,7 +619,7 @@ class WriterTabMixin(WriterPreviewMixin):
             seed = getattr(self._get_render_options(), "seed", None)
             rng = _random.Random(seed)
             outs = export_photo_pages(pages, path, rng)
-            self.toast(f"📷 {len(outs)} foto{'s' if len(outs) > 1 else ''} exportada{'s' if len(outs) > 1 else ''}", "success")
+            self._announce_saved(outs[0] if outs else path)
         except Exception as exc:
             logger.error("export foto error: %s", exc, exc_info=True)
             self.toast(f"Error al exportar foto: {exc}", "error")
