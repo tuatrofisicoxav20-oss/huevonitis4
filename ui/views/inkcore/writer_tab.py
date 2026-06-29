@@ -451,15 +451,25 @@ class WriterTabMixin(WriterPreviewMixin):
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
-        self._warn_missing_chars(text)
-        path = self._export_path("pdf")
-        self._save_writer_params()  # Fase 7 — persistir entre sesiones
-        # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Como el layout
-        # está en mm, basta construir las opciones con el DPI elegido: el
-        # bitmap sale a más resolución con EXACTAMENTE el mismo layout físico.
-        dpi = int(self._dpi_var.get()) if getattr(self, "_dpi_var", None) else 150
-        options = self._get_render_options(dpi)
-        page_height = options.page_height_px
+        # Prelude síncrono: corre en el callback del botón. Sin este try/except
+        # cualquier excepción aquí (ruta, params, opciones de render) se va al
+        # report_callback_exception default de Tk → stderr, que con
+        # Terminal=false es INVISIBLE y no llega a app.log: el usuario ve "nada
+        # en absoluto" al hacer click. Lo atrapamos y avisamos en la UI (req #5).
+        try:
+            self._warn_missing_chars(text)
+            path = self._export_path("pdf")
+            self._save_writer_params()  # Fase 7 — persistir entre sesiones
+            # Fase 5/7 — DPI: 150 (default) o 300 (alta calidad). Como el layout
+            # está en mm, basta construir las opciones con el DPI elegido: el
+            # bitmap sale a más resolución con EXACTAMENTE el mismo layout físico.
+            dpi = int(self._dpi_var.get()) if getattr(self, "_dpi_var", None) else 150
+            options = self._get_render_options(dpi)
+            page_height = options.page_height_px
+        except Exception as exc:
+            logger.error("export_writer_pdf prelude: %s", exc, exc_info=True)
+            self.toast(f"No se pudo preparar la exportación: {exc}", "error")
+            return
 
         def worker():
             try:
@@ -528,8 +538,13 @@ class WriterTabMixin(WriterPreviewMixin):
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
-        self._warn_missing_chars(text)
-        opts = self._get_render_options()
+        try:
+            self._warn_missing_chars(text)
+            opts = self._get_render_options()
+        except Exception as exc:
+            logger.error("export_png prelude: %s", exc, exc_info=True)
+            self.toast(f"No se pudo preparar la exportación: {exc}", "error")
+            return
         renderer = self._pipeline.renderer
         if renderer is None:
             self.toast("El banco no está listo", "error")
@@ -587,9 +602,14 @@ class WriterTabMixin(WriterPreviewMixin):
         if not text:
             self.toast("Escribe algo primero", "warning")
             return
-        self._warn_missing_chars(text)
-        opts = self._get_render_options()
-        opts.scan_skew = True  # la hoja fotografiada nunca está alineada
+        try:
+            self._warn_missing_chars(text)
+            opts = self._get_render_options()
+            opts.scan_skew = True  # la hoja fotografiada nunca está alineada
+        except Exception as exc:
+            logger.error("export_photo prelude: %s", exc, exc_info=True)
+            self.toast(f"No se pudo preparar la exportación: {exc}", "error")
+            return
         renderer = self._pipeline.renderer
         if renderer is None:
             self.toast("El banco no está listo", "error")
@@ -611,8 +631,8 @@ class WriterTabMixin(WriterPreviewMixin):
         if not pages:
             self.toast("Error al renderizar", "error")
             return
-        path = self._export_path("jpg")
         try:
+            path = self._export_path("jpg")
             import random as _random
 
             from core.export.photo_export import export_photo_pages
