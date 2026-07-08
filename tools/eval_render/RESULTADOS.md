@@ -279,3 +279,39 @@ al apoyarse. Perilla `ink_blob_strength` (default **0.30**, clamp 0..0.6).
   tarea comprimida se atenúan (el jurado abstracto no los registra fuerte),
   pero NO introducen artefactos. El jurado sigue en ~15-22 (techo de mixed-case
   + clones, inherentes). Rollback: `ink_blob_strength=0.0`.
+
+### R17c — tinta "viva": deriva de presión por página + textura de trazo
+
+Objetivo directo del usuario ("que no se vea IMPRESO"). El tell de impresora es
+tinta UNIFORME a lo largo de toda la página (el tóner es parejo); una pluma real
+carga/descarga y sangra en la fibra. Se subieron los defaults:
+
+| perilla | R17b → R17c | efecto anti-impreso |
+|---|---|---|
+| `hand_energy_sigma` | 0.6 → 0.95 | deriva LENTA de presión visible por párrafo |
+| `pressure_darkness_coupling` | 0.15 → 0.30 | esa deriva oscurece/aclara zonas |
+| `session_shift_prob` | 0.02 → 0.05 | "re-carga de tinta" (saltos de energía) |
+| `glyph_pressure_jitter` | 0.22 → 0.26 | variación rápida por glifo |
+| `ink_along_darkness` | 0.28 → 0.38 | densidad variable a lo largo del trazo |
+| `ink_streak_strength` | 0.20 → 0.28 | textura "riel" de bolígrafo |
+| `ink_pool_boost` | 0.28 → 0.34 | apozamiento en cruces/vueltas |
+| `ink_bleed` | 0.4 → 0.5 | sangrado en la fibra del papel |
+| `ink_edge_irregularity` | 0.5 → 0.72 | borde irregular (no vectorial) |
+| `ink_paper_showthrough` | 0.06 → 0.11 | tinta semi-transparente, no opaca |
+
+**Gate canónico r15_eval: 81.8% vs 83.4% (Δ1.6, PASA).** Combo verificado en
+media de 3 seeds (82.0%, todos estables). Aislamiento: `test_presion_oscurece_el_trazo`
+apaga el stroke-space (el shading enmascaraba la señal pressure→color) y el golden
+de geometría apaga `ink_bleed`/`ink_stroke_space` (el sangrado engorda las cajas
+medidas). Suite: **456 passed**.
+
+**CONCLUSIÓN tras 6 rondas de jurado (30 votos):** el score forense "¿manuscrito?"
+se estanca en ~15-28 PASE LO QUE PASE con tinta/papel. Los 3 delatores dominantes
+son SIEMPRE los mismos y los tres son la LETRA AUTÉNTICA del usuario: (1) estilo
+bloque (o=círculo, f=forma-F → lee como "mayúsculas a media palabra"); (2) `s`
+muy consistente (41 variantes casi iguales → lee como "clon"); (3) `l` de palito
+(lee como `i`/`!`). Ni tinta ni papel los mueven. El clone-breaking geométrico
+(warp/rotación) es veneno de OCR (tumba seeds a 73%). **El único lever restante es
+MODIFICAR las formas de letra** (l distinta, normalizar caja, morphing de variantes)
+— decisión del usuario, cambia SU letra. Rollback R17c: los 10 valores previos de
+la tabla.

@@ -148,7 +148,12 @@ def test_presion_oscurece_el_trazo(tmp_path):
     r = _renderer(tmp_path)
     e = r._select_entry("o")
     assert e and Path(e.image_path).exists()
-    opts = RenderOptions(seed=1, warp_strength=0.0, rotation_range=0.0)
+    # R17c: el shading de trazo (ink_along_darkness/streak/pool) modula el RGB
+    # con ruido independiente de la presión; se apaga para AISLAR la señal
+    # pressure→color que este test afirma.
+    opts = RenderOptions(seed=1, warp_strength=0.0, rotation_range=0.0,
+                         ink_along_darkness=0.0, ink_streak_strength=0.0,
+                         ink_pool_boost=0.0, ink_hue_by_density=0.0)
 
     def _ink_level(press):
         img, _ = r._load_glyph(e.image_path, opts, "o", geo=r._geo(e),

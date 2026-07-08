@@ -140,7 +140,7 @@ class RenderOptions:
     #   ink_hsv_jitter: (ΔS, ΔV) máximos del micro-color por glifo (D1).
     supersample: int = 2
     ink_texture_strength: float = 0.12
-    ink_bleed: float = 0.4
+    ink_bleed: float = 0.5
     ink_hsv_jitter: tuple = (0.04, 0.03)
     # R11 — TEXTURA DE TINTA v2 (intra-trazo). Patch modular sobre apply_paper;
     # NO toca banco/extracción/variación/métricas. El value-noise de R6
@@ -167,7 +167,7 @@ class RenderOptions:
     ink_texture_v2: bool = True
     ink_texture_fine_strength: float = 0.20
     ink_texture_fine_cell_frac: float = 0.15
-    ink_edge_irregularity: float = 0.5
+    ink_edge_irregularity: float = 0.72
     ink_pooling: float = 0.15
     ink_width_jitter: float = 0.0
     # R12 — RECONSTRUCCIÓN DE BORDE (textura por FRONTERA, no por interior). Es la
@@ -226,11 +226,16 @@ class RenderOptions:
     #   session_shift_prob: probabilidad por renglón de un SALTO del latente
     #     (pausa, re-carga de tinta): el estado brinca a un valor fresco en
     #     vez de derivar. 0..0.1 (clamp).
-    hand_energy_sigma: float = 0.6
+    # R17c — deriva de presión SUBIDA (juez: "tinta uniforme a lo largo de toda
+    # la página = tóner de impresora"). Una pluma real carga/descarga: unas
+    # zonas oscuras, otras pálidas. hand_energy_sigma 0.6→0.95 + coupling
+    # 0.15→0.30 + session_shift 0.02→0.05 dan variación LENTA visible por
+    # párrafo. Los goldens apagan hand_energy_sigma=0 (byte-idéntico).
+    hand_energy_sigma: float = 0.95
     hand_energy_corr_lines: float = 3.0
-    pressure_darkness_coupling: float = 0.15
+    pressure_darkness_coupling: float = 0.30
     line_end_cramp: float = 0.12
-    session_shift_prob: float = 0.02
+    session_shift_prob: float = 0.05
     # R17 (Track A2) — jitter I.I.D. de presión POR GLIFO. El latente e(t) es
     # LENTO/correlacionado (misma energía ~3 renglones); pero la letra real
     # tiene además variación RÁPIDA e independiente: una letra sale pálida y la
@@ -240,7 +245,7 @@ class RenderOptions:
     # gamma del alpha en _load_glyph — presión alta = trazo más oscuro/grueso.
     # Gauss truncada a ±2.2σ. 0 = apagado: CERO draws de RNG (byte-idéntico).
     # Riesgo de legibilidad acotado: el gamma efectivo queda en [0.25, 2.5].
-    glyph_pressure_jitter: float = 0.22
+    glyph_pressure_jitter: float = 0.26
     # R14 (Track B) — física de bolígrafo. Defaults en 0 (opt-in, subir con
     # cuidado): son los efectos con más riesgo de legibilidad del R14.
     #   pen_skip_prob: probabilidad POR GLIFO (0..0.05, clamp) de un
@@ -309,13 +314,13 @@ class RenderOptions:
     # en su rango clampeado y sólo tocan RGB/textura-de-alpha, no la geometría;
     # el costo de legibilidad medido es ≈0 (OCR 82→81.5%). Rollback R15: los
     # valores previos eran 0.18/0.10/0.15/0.15/0.10.
-    ink_along_darkness: float = 0.28
+    ink_along_darkness: float = 0.38
     ink_width_along: float = 0.16
-    ink_streak_strength: float = 0.20
+    ink_streak_strength: float = 0.28
     ink_streak_aniso: float = 4.0
-    ink_pool_boost: float = 0.28
+    ink_pool_boost: float = 0.34
     ink_hue_by_density: float = 0.12
-    ink_paper_showthrough: float = 0.06
+    ink_paper_showthrough: float = 0.11
     # R7 — pase de papel:
     #   paper_texture: nombre de PNG en tipografia/{perfil}/papers/ (scans del
     #     usuario) o assets/papers/ (procedurales). None = papel liso. Los

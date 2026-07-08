@@ -151,9 +151,11 @@ def test_golden_metricas_linea_base(stub_renderer):
     opts = RenderOptions(style="", background_style="hoja_blanca", seed=42,
                          edge_reconstruct=False, ink_texture_v2=False,
                          hand_energy_sigma=0.0, line_end_cramp=0.0,
-                         # R17b: las bolitas de tinta engordan las cajas medidas
-                         # (mismo motivo que ink_texture_v2); se aíslan.
-                         ink_blob_strength=0.0)
+                         # R17b/c: las bolitas y el sangrado de tinta engordan
+                         # las cajas medidas (mismo motivo que ink_texture_v2);
+                         # se aíslan para medir SOLO la geometría del layout.
+                         ink_blob_strength=0.0, ink_bleed=0.0,
+                         ink_stroke_space=False)
     pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])
