@@ -121,7 +121,8 @@ class GlyphLoadMixin:
             # invisibles. Repinta la forma con ink_color preservando el alpha.
             # R6 (D1): micro-variación HSV por glifo — la carga del bolígrafo
             # nunca deposita el mismo color exacto dos veces.
-            ink_hex = options.ink_color
+            # R18 — color por documento (self._doc_ink_color) si está activo.
+            ink_hex = getattr(self, "_doc_ink_color", None) or options.ink_color
             sj, vj = getattr(options, "ink_hsv_jitter", (0.0, 0.0)) or (0.0, 0.0)
             if sj > 0 or vj > 0:
                 from core.inkcore.renderer_ink import jitter_ink_color

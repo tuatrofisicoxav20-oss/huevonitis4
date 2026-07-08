@@ -97,7 +97,8 @@ def test_e10_baselines_anclados_a_renglones(tmp_path):
                          # R17d/e: las astas llenan el hueco inter-renglón y el
                          # clustering de filas fusiona líneas; el aspect jitter
                          # mueve baselines. Se apagan para aislar el anclaje.
-                         ascender_boost=0.0, glyph_aspect_jitter=0.0)
+                         ascender_boost=0.0, glyph_aspect_jitter=0.0,
+                         fatigue_strength=0.0)
     pages = renderer.render_pages(texto, opts)
     assert pages
 

@@ -167,6 +167,49 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         )
         self._hand_e = 0.0
         self._hand_e_prev = 0.0
+        # R18 — fatiga: contador de renglón GLOBAL del documento (persiste entre
+        # páginas dentro de un render_pages). _doc_line_start da continuidad
+        # entre trozos de iter_pages (export multipágina).
+        self._doc_line = getattr(self, "_doc_line_start", 0)
+        # deriva de slant por fatiga: una mano cansada se inclina hacia UN lado
+        # (signo fijo por documento), no oscila. Sorteada una vez si hay fatiga.
+        self._fatigue_slant_dir = 0.0
+        if min(1.0, max(0.0, getattr(options, "fatigue_strength", 0.0))) > 0:
+            self._fatigue_slant_dir = self._rng.uniform(-1.0, 1.0)
+        # R18 — color de tinta por documento (RNG DERIVADO del seed: no toca el
+        # stream de _rng, así geometría/selección quedan idénticas). Se guarda en
+        # self._doc_ink_color (NO se muta options: reusar el mismo objeto en dos
+        # renders daría el mismo color, no un doble shift). _load_glyph lo usa.
+        self._doc_ink_color = None
+        cv = min(1.0, max(0.0, getattr(options, "ink_color_doc_var", 0.0)))
+        if cv > 0:
+            import colorsys as _cs
+
+            from PIL import ImageColor as _IC
+            drng = random.Random((seed if seed is not None else 0) * 2654435761
+                                 + 0xC0FFEE)
+            try:
+                _r, _g, _b = _IC.getrgb(options.ink_color)[:3]
+            except (ValueError, TypeError):
+                _r, _g, _b = (26, 26, 46)
+            _h, _s, _v = _cs.rgb_to_hsv(_r / 255.0, _g / 255.0, _b / 255.0)
+            _h = (_h + drng.uniform(-0.017, 0.017) * cv) % 1.0        # ±6° tono
+            _v = min(1.0, max(0.03, _v + drng.uniform(-0.08, 0.08) * cv))
+            _s = min(1.0, max(0.0, _s + drng.uniform(-0.06, 0.06) * cv))
+            _r2, _g2, _b2 = _cs.hsv_to_rgb(_h, _s, _v)
+            self._doc_ink_color = (f"#{int(_r2 * 255):02x}{int(_g2 * 255):02x}"
+                                   f"{int(_b2 * 255):02x}")
+
+    def _fatigue_at(self, options, line_off: float = 0.0) -> float:
+        """Nivel de fatiga 0..strength en el renglón actual (rampa saturante).
+
+        0 si fatigue_strength=0 (cero costo). line_off desplaza el índice."""
+        s = min(1.0, max(0.0, getattr(options, "fatigue_strength", 0.0)))
+        if s <= 0:
+            return 0.0
+        onset = max(4.0, getattr(options, "fatigue_onset_lines", 32.0))
+        n = max(0.0, self._doc_line + line_off)
+        return s * (1.0 - math.exp(-n / onset))
 
     def _hand_energy_step(self, options) -> None:
         """Avanza el latente de mano al EMPEZAR un renglón con texto (R14/A).
@@ -492,6 +535,12 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                     # con jitter_px=0 el anclaje al renglón físico es exacto.
                     y_cursor = options.margin_top_px + round(k * spacing) - boff
                     y_extra = 0
+                    # R18 — hundimiento de baseline por fatiga: los renglones
+                    # se van cayendo un pelo conforme avanza el documento.
+                    gi = page_start + k - 1
+                    fat_line = self._fatigue_at(options, line_off=gi - self._doc_line)
+                    if fat_line > 0.10:
+                        y_extra += int(round(fat_line * 9.0))
                     x = options.margin_left_px + self._next_margin_offset(options)
                     if first_flags[page_start + k - 1]:
                         x += self._next_indent_px(options)

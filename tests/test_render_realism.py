@@ -158,7 +158,8 @@ def test_golden_metricas_linea_base(stub_renderer):
                          ink_stroke_space=False,
                          # R17d/e: astas y jitter de proporción cambian
                          # alturas/aspecto — se apagan para el golden geométrico.
-                         ascender_boost=0.0, glyph_aspect_jitter=0.0)
+                         ascender_boost=0.0, glyph_aspect_jitter=0.0,
+                         fatigue_strength=0.0)
     pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])
@@ -227,7 +228,10 @@ def test_golden_estructura_horizontal(stub_renderer):
                                  draw_lines=draw_lines, seed=seed,
                                  edge_reconstruct=False, ink_texture_v2=False,
                                  hand_energy_sigma=0.0, line_end_cramp=0.0,
-                                 ink_blob_strength=0.0)
+                                 ink_blob_strength=0.0,
+                                 # R17d/R18: astas y fatiga cambian alturas/
+                                 # slant/baseline — fuera para aislar el eje H.
+                                 ascender_boost=0.0, fatigue_strength=0.0)
             m = compute_metrics(stub_renderer.render_pages(PROSA_PARRAFOS, opts)[0])
             camino = "snap" if draw_lines else "clasico"
             assert m["n_paragraphs"] == 4, f"{camino}/{seed}: párrafos mal detectados"

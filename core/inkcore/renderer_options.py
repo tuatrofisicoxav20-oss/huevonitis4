@@ -231,6 +231,20 @@ class RenderOptions:
     # zonas oscuras, otras pálidas. hand_energy_sigma 0.6→0.95 + coupling
     # 0.15→0.30 + session_shift 0.02→0.05 dan variación LENTA visible por
     # párrafo. Los goldens apagan hand_energy_sigma=0 (byte-idéntico).
+    # R18 — FATIGA acumulativa en textos largos. El latente e(t) de R14 es
+    # ESTACIONARIO (deriva alrededor de 0, sin tendencia): el renglón 100 se ve
+    # igual de fresco que el 1. La fatiga real es una tendencia DIRECCIONAL que
+    # se acumula: conforme escribes, la letra crece y se afloja, la inclinación
+    # deriva, la línea base se hunde, la presión se vuelve errática y el
+    # espaciado se ensucia. `fatigue_strength` (0..1, 0=off) es la intensidad al
+    # saturar; `fatigue_onset_lines` es la constante de tiempo (renglones para
+    # llegar a ~63% de la fatiga máxima). Nivel = strength·(1−exp(−línea/onset)).
+    # Acopla a tamaño (crece), slant (deriva), baseline (se hunde), presión
+    # (más errática) y jitter (más sucio). Determinista; 0 = cero draws extra.
+    # Default 0.5 (siempre-on moderado): en 1 párrafo (~6 renglones, onset 32)
+    # el nivel es ~0.08 → imperceptible; en textos largos la fatiga emerge sola.
+    fatigue_strength: float = 0.5
+    fatigue_onset_lines: float = 32.0
     hand_energy_sigma: float = 0.95
     hand_energy_corr_lines: float = 3.0
     pressure_darkness_coupling: float = 0.30
@@ -355,6 +369,12 @@ class RenderOptions:
     # verse sobre la UI oscura; sin recolorear serían INVISIBLES sobre el papel
     # claro. Un azul-negro de bolígrafo se ve más natural que el negro puro.
     ink_color: str = "#1A1A2E"
+    # R18 — variación de color de tinta POR DOCUMENTO: cada tarea parece escrita
+    # con un bolígrafo un pelo distinto (otro día, otra pluma). Desplaza tono y
+    # valor del ink_color una vez por render, con un RNG DERIVADO del seed (NO
+    # toca el stream de _rng → geometría/selección idénticas, sólo el color).
+    # 0..1 (0.5 ≈ ±6° de tono y ±8% de valor). 0 = color fijo.
+    ink_color_doc_var: float = 0.5
     # Semilla opcional para reproducir un render idéntico (debug / regenerar).
     # None = aleatorio cada vez.
     seed: "int | None" = None

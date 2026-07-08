@@ -271,6 +271,9 @@ def test_render_pages_interlineado_fisico_exacto(renderer, tmp_path):
         # encoge letras al final del renglón — ambos mueven el tope de la
         # banda de tinta medida; se apagan igual que size_variation.
         hand_energy_sigma=0.0, line_end_cramp=0.0,
+        # R18: la fatiga hunde la línea base en textos largos (50 renglones) —
+        # se apaga para aislar el interlineado FÍSICO exacto que este test mide.
+        fatigue_strength=0.0,
     )
     pages = renderer.render_pages("\n".join(["aaa aaa"] * 50), opts)
     assert pages[0].size == (1275, 1650), f"no es carta a 150 DPI: {pages[0].size}"

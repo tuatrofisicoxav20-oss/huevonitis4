@@ -351,3 +351,36 @@ warp/rotación fuerte (tumba seeds a 73%), aspect jitter (−3pt), jitter de rit
 renglones"; el usuario eligió hoja blanca. **Acentos**: el banco SÍ los tiene
 (á/é/í/ó/ú×12, ñ×40) — texto sin tildes lee como ASCII; recomendación de uso:
 escribir con tildes.
+
+## R18 — FATIGA en textos largos + variación de color por documento
+
+Dos ejes de variación de DOCUMENTO (el latente e(t) de R14 era estacionario por
+página; esto añade tendencia a lo largo del documento y entre documentos).
+
+**Fatiga acumulativa** (`fatigue_strength` default 0.5, `fatigue_onset_lines` 32):
+la letra se degrada conforme avanza el documento — crece y se afloja, la
+inclinación deriva hacia UN lado, la línea base se hunde, la presión se vuelve
+errática. Nivel = `strength·(1−exp(−línea/onset))`; contador de renglón GLOBAL
+(persiste entre páginas de un `render_pages`; `_doc_line_start` da continuidad en
+`iter_pages`). Acopla a size_drift (+12%·fat), rotación por glifo (drift +
+temblor), presión (más errática) y baseline (hunde ≤9 px). **Umbral 0.10**: por
+debajo (textos <~7 renglones) NO consume RNG → byte-idéntico a fatiga-off,
+protege el gate y no perturba la selección de variantes. Verificado visualmente:
+en una página larga los primeros renglones son limpios y los últimos claramente
+más grandes/desalineados.
+
+**Color por documento** (`ink_color_doc_var` default 0.5): desplaza tono/valor
+del `ink_color` una vez por render con un RNG DERIVADO del seed (NO toca el stream
+de `_rng` → geometría/selección idénticas, sólo color). Cada tarea parece escrita
+con un boli un pelo distinto. Guardado en `self._doc_ink_color` (NO muta options:
+reusar el objeto da el mismo color, no doble shift).
+
+**Gate r15_eval: Δ0.7 pts (PASA).** Aislamiento: goldens de geometría,
+`test_e10_baselines`, `test_calibration` (round-trip de espaciado) apagan
+`fatigue_strength`/`ascender_boost`. Suite 456. Rollback: `fatigue_strength=0`,
+`ink_color_doc_var=0`.
+
+**Nota de entorno (2026-07-08):** `opencv-python 4.5.5.64` (numpy-1) shadueaba a
+`opencv-python-headless` y rompía `import cv2` bajo numpy 2.3.5 (39 tests OCR).
+Resuelto reinstalando opencv (→ 4.11.0, compat numpy 2). No relacionado con el
+render.

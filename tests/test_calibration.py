@@ -77,7 +77,10 @@ def test_roundtrip_calibracion_reproduce_estadisticas(tmp_path):
     bank = _make_stub_bank(tmp_path)
     r = HandwritingRenderer(bank)
     opts_b = RenderOptions.from_calibration(
-        perfil, style="", background_style="hoja_blanca", seed=99)
+        perfil, style="", background_style="hoja_blanca", seed=99,
+        # R17d/R18: astas y fatiga no forman parte de la calibración de
+        # espaciado; se apagan para aislar el round-trip que este test mide.
+        ascender_boost=0.0, fatigue_strength=0.0)
     page_b = r.render_pages(TEXTO, opts_b)[0]
     p_b = tmp_path / "b.png"
     page_b.save(p_b)

@@ -297,6 +297,9 @@ class LayoutMixin:
         # todos los acoples (apagado ⇒ cero draws, byte-idéntico).
         self._hand_energy_step(options)
         hand_on = getattr(self, "_hand_walk", None) is not None
+        # R18 — avanza el contador de renglón global y evalúa la fatiga del doc.
+        self._doc_line = getattr(self, "_doc_line", 0) + 1
+        fat = self._fatigue_at(options)
 
         # R3 — inclinación BASE del renglón: proceso OU ENTRE líneas (la mano
         # hereda el ángulo del renglón anterior y deriva; antes era i.i.d.).
@@ -426,16 +429,31 @@ class LayoutMixin:
                 gpj = getattr(options, "glyph_pressure_jitter", 0.0)
                 press_iid = (tnorm(rnd, 0.0, gpj, -2.2 * gpj, 2.2 * gpj)
                              if gpj > 0 else 0.0)
+                # R18 — fatiga acoplada al glifo: tamaño crece y se afloja,
+                # slant deriva hacia UN lado y tiembla más, presión se vuelve
+                # errática y un pelo más floja. Draws SOLO si hay fatiga.
+                # Umbral 0.10: por debajo (textos cortos, ~<7 renglones) la
+                # fatiga NO consume RNG → byte-idéntica a fatiga-off, protege el
+                # gate de legibilidad y no perturba la selección de variantes.
+                fat_size = fat_slant = fat_press = 0.0
+                if fat > 0.10:
+                    fat_size = (0.12 * fat
+                                + tnorm(rnd, 0.0, 0.10 * fat, -0.28 * fat, 0.28 * fat))
+                    fat_slant = (4.0 * fat * self._fatigue_slant_dir
+                                 + tnorm(rnd, 0.0, 2.2 * fat, -5.5 * fat, 5.5 * fat))
+                    fat_press = (-0.07 * fat
+                                 + tnorm(rnd, 0.0, 0.18 * fat, -0.42 * fat, 0.42 * fat))
                 if entry and Path(entry.image_path).exists():
                     loaded = self._load_glyph(
                         entry.image_path, options, ch, geo=self._geo(entry),
-                        rotation=rot_walk.step() if rot_walk else 0.0, rng=rnd,
+                        rotation=(rot_walk.step() if rot_walk else 0.0) + fat_slant,
+                        rng=rnd,
                         size_drift=(size_walk.step() if size_walk else 0.0)
-                                   + 0.08 * e_now - 0.4 * (1.0 - sq),
+                                   + 0.08 * e_now - 0.4 * (1.0 - sq) + fat_size,
                         slant_extra=(slant_walk.step() if slant_walk else 0.0)
                                     + 0.3 * sl_amp * e_now,
                         pressure=(pd * e_now if (hand_on and pd > 0) else 0.0)
-                                 + press_iid)
+                                 + press_iid + fat_press)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
                     # R3/H8 — glifo faltante: se registra para que la UI avise
