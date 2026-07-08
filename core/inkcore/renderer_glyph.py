@@ -191,6 +191,27 @@ class GlyphLoadMixin:
 
             ratio = target_h / img.height
             target_w = max(1, int(img.width * ratio))
+            # R17d — asta ascendente: la 'l' (etc.) se estira SOLO en vertical
+            # (target_w se fija con el ratio normal, ANTES de crecer target_h),
+            # así deja de confundirse con la 'i'. El baseline escala con la
+            # altura nueva → se queda abajo y el asta crece hacia ARRIBA.
+            asc = getattr(options, "ascender_boost", 0.0)
+            if asc > 0 and char and char in getattr(options, "ascender_chars", ""):
+                b = 1.0 + min(1.2, asc)
+                target_h = max(1, int(target_h * b))
+                if baseline_in >= 0:
+                    baseline_in *= b
+            # R17e — jitter de proporción por instancia (rompe "clones" sin
+            # distorsionar la topología). RNG del layout sólo si la perilla >0.
+            aj = getattr(options, "glyph_aspect_jitter", 0.0)
+            if aj > 0:
+                aj = min(0.2, aj)
+                fx = 1.0 + tnorm(rnd, 0.0, aj, -2.0 * aj, 2.0 * aj)
+                fy = 1.0 + tnorm(rnd, 0.0, aj, -2.0 * aj, 2.0 * aj)
+                target_w = max(1, int(target_w * fx))
+                target_h = max(1, int(target_h * fy))
+                if baseline_in >= 0:
+                    baseline_in *= fy
             img = img.resize((target_w, target_h), Image.LANCZOS)
 
             if rotation is not None:

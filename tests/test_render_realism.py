@@ -155,7 +155,10 @@ def test_golden_metricas_linea_base(stub_renderer):
                          # las cajas medidas (mismo motivo que ink_texture_v2);
                          # se aíslan para medir SOLO la geometría del layout.
                          ink_blob_strength=0.0, ink_bleed=0.0,
-                         ink_stroke_space=False)
+                         ink_stroke_space=False,
+                         # R17d/e: astas y jitter de proporción cambian
+                         # alturas/aspecto — se apagan para el golden geométrico.
+                         ascender_boost=0.0, glyph_aspect_jitter=0.0)
     pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])

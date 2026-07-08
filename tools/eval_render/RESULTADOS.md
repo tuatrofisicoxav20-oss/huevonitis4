@@ -315,3 +315,39 @@ muy consistente (41 variantes casi iguales → lee como "clon"); (3) `l` de pali
 MODIFICAR las formas de letra** (l distinta, normalizar caja, morphing de variantes)
 — decisión del usuario, cambia SU letra. Rollback R17c: los 10 valores previos de
 la tabla.
+
+### R17d — asta ascendente (arregla l≡i y el ritmo "versalita")
+
+La letra del usuario es de altura UNIFORME: `l` (0.45 em) ≡ `i` (0.47 em) → se
+lee `ios` por `los`. Y la ausencia total de astas/colas hace que TODO lea como
+versalita/bloque. `ascender_boost` (default 0.45) estira SOLO en vertical
+(`target_w` se fija con el ratio normal antes de crecer `target_h`; el baseline
+escala con la altura → el asta crece hacia ARRIBA) las letras de `ascender_chars`
+(default `"ldbhk"`). **'t' se EXCLUYE**: la t-cruz del usuario estirada se lee
+como `T` (empeora el look mayúscula — confirmado por el jurado). Mejora la
+legibilidad: r15_eval subió de ~81.8% a **84.2% (Δ1.2, PASA)** — distinguir l/i
+ayuda a tesseract. Aislamiento: los goldens de geometría y
+`test_e10_baselines_anclados_a_renglones` (las astas llenan el hueco
+inter-renglón y el clustering de filas fusiona líneas) apagan `ascender_boost`.
+
+### R17e — jitter de proporción por instancia (perilla opt-in, DEFAULT 0)
+
+`glyph_aspect_jitter` escala ancho/alto independientes por instancia para romper
+"clones" sin distorsionar la topología (a diferencia del warp elástico). **Se
+dejó en 0**: el jurado NO lo acredita —los clones que percibe vienen de que las
+41 variantes de `s`/`o` del usuario son casi iguales entre sí, no del aspecto— y
+cuesta ~3 pts de OCR. Queda disponible para experimentar.
+
+### VEREDICTO FINAL (7 rondas de jurado, 35 votos)
+
+Lo que se arregló y mejora de verdad: tinta viva (R17c), física de bolígrafo +
+charcos (R17/b), y asta ascendente (R17d, arregla l/i + ritmo). Lo IRREDUCIBLE
+sin cambiar las formas de letra del usuario: (1) `o`/`f`/`s`/`c` con forma de
+BLOQUE → un lector ve "mayúsculas a media palabra"; (2) `s` súper consistente →
+"clones". El banco NO tiene variantes de minúscula de esas letras (todas son
+círculos/curvas-S/F-bloque): así escribe el usuario. Levers cerrados por OCR:
+warp/rotación fuerte (tumba seeds a 73%), aspect jitter (−3pt), jitter de ritmo
+(−3pt). Papel de cuaderno (Escolar): no mueve al jurado, añade tell "flota sobre
+renglones"; el usuario eligió hoja blanca. **Acentos**: el banco SÍ los tiene
+(á/é/í/ó/ú×12, ñ×40) — texto sin tildes lee como ASCII; recomendación de uso:
+escribir con tildes.

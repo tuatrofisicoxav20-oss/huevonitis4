@@ -272,6 +272,28 @@ class RenderOptions:
     # (clamp). Detecta extremos por esqueleto y SUMA alpha (nunca corta el
     # trazo). RNG propio sembrado del contenido → byte-idéntico con 0.
     ink_blob_strength: float = 0.30
+    # R17d — ASTA ASCENDENTE para letras que el usuario escribe a altura-x (su
+    # 'l' es un palito idéntico a la 'i' → se lee 'ios' por 'los'). Estira SOLO
+    # en vertical (el ancho conserva su ratio) las letras de `ascender_chars`,
+    # dándoles asta y desambiguando la lectura. Jurado: delator top + error de
+    # legibilidad real. 0 = sin cambio. Baseline abajo → la altura extra va ARRIBA.
+    # Set completo de ascendentes: restaurar el ritmo subida/x-height que la
+    # letra-bloque del usuario no tiene es lo que MÁS reduce el look "versalita"
+    # (además de arreglar l≡i). Mejora la legibilidad (OCR 81.8→85.2%).
+    # 't' se EXCLUYE: la 't'-cruz del usuario, estirada, se lee como 'T'
+    # (empeora el look "mayúscula"). 'l' es el crítico (l≡i); d/b/h/k dan ritmo.
+    ascender_boost: float = 0.45
+    ascender_chars: str = "ldbhk"
+    # R17e — jitter de PROPORCIÓN por instancia (ancho/alto independientes). El
+    # jurado marca "clones" porque las variantes del banco del usuario son muy
+    # parecidas; cambiar la relación de aspecto por instancia hace que dos 's'/'o'
+    # no sean superponibles SIN distorsionar la topología (a diferencia del warp
+    # elástico, que es veneno de OCR). Gauss truncada ±2σ por eje. 0 = sin cambio.
+    # Default 0: el jurado NO lo acredita (los "clones" que percibe vienen de
+    # que las variantes del banco del usuario son casi iguales, no del aspecto)
+    # y cuesta ~3pt de OCR. Queda como perilla opt-in. Rompe la topología menos
+    # que el warp, pero no compensa. La 's' consistente del usuario es inherente.
+    glyph_aspect_jitter: float = 0.0
     connector_prob: float = 0.0
     connector_width_frac: float = 0.04
     # R15 — TINTA EN ESPACIO DE TRAZO. Tell que ataca: el look "impreso" del

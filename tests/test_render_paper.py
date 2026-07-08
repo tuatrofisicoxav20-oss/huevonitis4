@@ -93,7 +93,11 @@ def test_e10_baselines_anclados_a_renglones(tmp_path):
     texto = "\n".join(["lince mono ave dado kiwi"] * 8)
     opts = RenderOptions(style="", background_style="hoja_blanca",
                          paper_texture=None, scan_skew=False, seed=11,
-                         supersample=1, ink_texture_strength=0.0, ink_bleed=0.0)
+                         supersample=1, ink_texture_strength=0.0, ink_bleed=0.0,
+                         # R17d/e: las astas llenan el hueco inter-renglón y el
+                         # clustering de filas fusiona líneas; el aspect jitter
+                         # mueve baselines. Se apagan para aislar el anclaje.
+                         ascender_boost=0.0, glyph_aspect_jitter=0.0)
     pages = renderer.render_pages(texto, opts)
     assert pages
 
