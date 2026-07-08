@@ -39,3 +39,10 @@ reports/
 
 # Fixtures pesados (PDFs reales del usuario, no van a git)
 tests/fixtures/template_pdfs/*.pdf
+
+# Artefactos de inspección regenerables (no son goldens de test) — auditoría de merge v5-dev
+# El directorio real se llama "muestras " con espacio final; se escapa el espacio.
+muestras\ /
+# Salidas de los scripts de eval del renderer (los goldens legítimos viven en golden/)
+tools/eval_render/r1*_*.png
+tools/eval_render/r1*_*.jpg

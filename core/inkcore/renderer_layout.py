@@ -46,6 +46,23 @@ class _BlockLine:
     baseline_offset: int  # px del top del renglón a su línea base (para snap a libreta)
 
 
+def _connector_anchor(glyph_img, side: str, y0: int, y1: int):
+    """Punto de entrada/salida del trazo de un glifo dentro de la banda
+    vertical [y0, y1) (coords del glifo): la columna de tinta más externa
+    del lado pedido y la fila mediana de su tinta en esa columna (R14/B).
+    None si el glifo no tiene tinta en la banda (no hay dónde anclar)."""
+    import numpy as np
+    y0 = max(0, min(glyph_img.height - 1, y0))
+    y1 = max(y0 + 1, min(glyph_img.height, y1))
+    band = np.asarray(glyph_img.getchannel("A"))[y0:y1]
+    cols = np.nonzero((band > 110).any(axis=0))[0]
+    if len(cols) == 0:
+        return None
+    col = int(cols[-1] if side == "right" else cols[0])
+    rows = np.nonzero(band[:, col] > 110)[0]
+    return col, int(rows[len(rows) // 2]) + y0
+
+
 class LayoutMixin:
     """Wrap, render de renglón y flujo de páginas. Espera self.bank y el
     estado por-render que inicializa HandwritingRenderer (_sel_history,
@@ -166,11 +183,28 @@ class LayoutMixin:
         self._ensure_geometry()
         word_space = max(4.0, options.font_size
                          * getattr(options, "word_space_frac", 0.4))
+        # R13 — MARGEN DERECHO IRREGULAR (opt-in): cada renglón corta en un ancho
+        # un poco distinto → el borde derecho deja de ser una línea recta (unas
+        # líneas se pasan un poco del margen, otras cortan antes), como la mano
+        # real. RNG PROPIO sembrado de la seed (no toca el stream del layout).
+        # wrap_margin_jitter=0 (default) → limit = usable_width → wrap IDÉNTICO.
+        jf = max(0.0, getattr(options, "wrap_margin_jitter", 0.0))
+        jit = jf * options.font_size
+        if jit > 0:
+            _seed = int(getattr(options, "seed", 0) or 0)
+            _wrng = random.Random((_seed * 2654435761 + 0x9E37) & 0xFFFFFFFF)
+
+            def _limit():
+                return usable_width + _wrng.uniform(-jit, jit)
+        else:
+            def _limit():
+                return usable_width
         out_lines: list[str] = []
         for raw in text.split("\n"):
             words = raw.split(" ")
             current: list[str] = []
             cur_w = 0.0
+            limit = _limit()
             for w in words:
                 w_px = self._word_px(w, options)
                 sep = word_space if current else 0.0
@@ -179,21 +213,65 @@ class LayoutMixin:
                     for piece in self._hyphenate(w, options, usable_width):
                         p_px = self._word_px(piece, options)
                         sep = word_space if current else 0.0
-                        if current and cur_w + sep + p_px > usable_width:
+                        if current and cur_w + sep + p_px > limit:
                             out_lines.append(" ".join(current))
                             current, cur_w = [piece], p_px
+                            limit = _limit()
                         else:
                             current.append(piece)
                             cur_w += sep + p_px
                     continue
-                if current and cur_w + sep + w_px > usable_width:
+                if current and cur_w + sep + w_px > limit:
                     out_lines.append(" ".join(current))
                     current, cur_w = [w], w_px
+                    limit = _limit()
                 else:
                     current.append(w)
                     cur_w += sep + w_px
             out_lines.append(" ".join(current))
         return out_lines
+
+    def _draw_connector(self, canvas, prev, cur, options, rnd, base_y) -> None:
+        """Unión procedural entre dos glifos contiguos de una palabra (R14/B).
+
+        Traza una curva cuadrática fina del punto de SALIDA del glifo previo
+        al punto de ENTRADA del actual, ambos buscados en una banda alrededor
+        de la línea base (los enlaces reales salen y entran por abajo). Con
+        alpha parcial: un trazo de arrastre deposita menos tinta que el
+        cuerpo. Aborta en silencio si no hay anclajes o el hueco no es de
+        enlace (solapado o demasiado ancho): mejor no unir que unir mal."""
+        from PIL import ImageColor, ImageDraw
+        (pimg, px, py), (cimg, cx, cy) = prev, cur
+        fs = float(options.font_size)
+        b0 = round(base_y - 0.45 * fs)
+        b1 = round(base_y + 0.15 * fs)
+        a_out = _connector_anchor(pimg, "right", b0 - py, b1 - py)
+        a_in = _connector_anchor(cimg, "left", b0 - cy, b1 - cy)
+        if a_out is None or a_in is None:
+            return
+        x0, y0 = px + a_out[0], py + a_out[1]
+        x1, y1 = cx + a_in[0], cy + a_in[1]
+        if not (2 <= x1 - x0 <= 0.4 * fs) or abs(y1 - y0) > 0.35 * fs:
+            return
+        # Curva con panza leve hacia abajo (el enlace natural cuelga).
+        sag = rnd.uniform(0.02, 0.10) * fs
+        mx, my = (x0 + x1) / 2.0, max(y0, y1) + sag
+        pts = []
+        for k in range(9):
+            t = k / 8.0
+            pts.append(((1 - t) ** 2 * x0 + 2 * (1 - t) * t * mx + t * t * x1,
+                        (1 - t) ** 2 * y0 + 2 * (1 - t) * t * my + t * t * y1))
+        try:
+            r, g, b = ImageColor.getrgb(options.ink_color)[:3]
+        except (ValueError, TypeError):
+            r, g, b = (26, 26, 46)
+        w = max(1, round(max(0.0, getattr(options, "connector_width_frac", 0.04))
+                         * fs))
+        # Alpha bajo deliberado (regresión tesseract R14): a 150 el enlace
+        # pesa como trazo de cuerpo y el OCR fusiona letras (−4 pts); a 110
+        # se lee como arrastre tenue y la caída queda dentro del margen.
+        ImageDraw.Draw(canvas, "RGBA").line(pts, fill=(r, g, b, 110), width=w,
+                                            joint="curve")
 
     # ── Render de un renglón ─────────────────────────────────────────────────
 
@@ -214,6 +292,12 @@ class LayoutMixin:
         from core.inkcore.renderer_noise import OUProcess, tnorm
         rnd = getattr(self, "_rng", None) or random.Random()
 
+        # R14 (Track A): avanza el latente de mano e(t) — estado LENTO por
+        # página que acopla tamaño, slant, presión y ritmo. hand_on gatea
+        # todos los acoples (apagado ⇒ cero draws, byte-idéntico).
+        self._hand_energy_step(options)
+        hand_on = getattr(self, "_hand_walk", None) is not None
+
         # R3 — inclinación BASE del renglón: proceso OU ENTRE líneas (la mano
         # hereda el ángulo del renglón anterior y deriva; antes era i.i.d.).
         line_slant_amp = max(0.0, getattr(options, "line_slant_deg", 0.0))
@@ -224,6 +308,12 @@ class LayoutMixin:
                                  bound=line_slant_amp)
                 self._line_slant_walk = walk
             self._cur_line_slant = walk.step()
+            if hand_on:
+                # R14 (Track A): el slant de línea COMPARTE el latente — la
+                # misma "energía" que agranda/presiona también recuesta la
+                # mano, en vez de correr como proceso independiente. Aporta
+                # hasta ±0.35·amp·1.5σ encima del OU acotado.
+                self._cur_line_slant += 0.35 * line_slant_amp * self._hand_e
         else:
             self._cur_line_slant = 0.0
         self._last_line_slants.append(self._cur_line_slant)
@@ -265,18 +355,47 @@ class LayoutMixin:
         slant_walk = OUProcess(rnd, sigma=sl_amp * 0.3, rho=0.85,
                                bound=sl_amp) if sl_amp > 0 else None
 
+        # R14 (Track A) — acoples del latente e(t) y cramping de fin de
+        # renglón. squeeze(): factor de compresión de gaps/espacios en el
+        # último ~18% del ancho (una mano aprieta al ver venir el margen);
+        # rhythm: el espacio de palabra respira con e(t). Con los knobs en 0
+        # ambos factores son EXACTAMENTE 1.0 y no hay draws extra.
+        cramp = min(0.3, max(0.0, getattr(options, "line_end_cramp", 0.0)))
+        pd = min(0.4, max(0.0, getattr(options, "pressure_darkness_coupling", 0.0)))
+        # R14 (Track B) — uniones procedurales entre glifos de una palabra.
+        # prev_glyph = (img, x, y) del glifo anterior; se corta en cada
+        # palabra nueva y en glifos faltantes (nada que unir con un
+        # placeholder). conn_p=0 (default) ⇒ cero draws, byte-idéntico.
+        conn_p = min(0.7, max(0.0, getattr(options, "connector_prob", 0.0)))
+        prev_glyph = None
+
+        def _squeeze() -> float:
+            if cramp <= 0 or max_width <= 0:
+                return 1.0
+            rem = 1.0 - min(1.0, x_cursor / max_width)
+            if rem >= 0.18:
+                return 1.0
+            return 1.0 - cramp * (1.0 - rem / 0.18)
+
         first_word = True
         for word in text.split(" "):
             if word == "":
                 if not first_word:
+                    rhythm = 1.0 + 0.18 * self._hand_energy_at(
+                        x_cursor / max_width) if hand_on else 1.0
                     x_cursor += round(tnorm(rnd, word_space_base, word_space_base * ws_cv,
-                                            word_space_base * 0.5, word_space_base * 2.2))
+                                            word_space_base * 0.5, word_space_base * 2.2)
+                                      * rhythm * _squeeze())
                 continue
             if not first_word:
                 # E1: espacio de palabra VARIABLE (gauss truncada) — era
-                # constante (R-BUG-05, tell #3).
+                # constante (R-BUG-05, tell #3). R14: modulada por e(t) y
+                # comprimida al final del renglón.
+                rhythm = 1.0 + 0.18 * self._hand_energy_at(
+                    x_cursor / max_width) if hand_on else 1.0
                 x_cursor += round(tnorm(rnd, word_space_base, word_space_base * ws_cv,
-                                        word_space_base * 0.5, word_space_base * 2.2))
+                                        word_space_base * 0.5, word_space_base * 2.2)
+                                  * rhythm * _squeeze())
             first_word = False
 
             # R10 (G3): lookup de LIGADURA antes que de char suelto. Si el
@@ -284,6 +403,7 @@ class LayoutMixin:
             # ligature_prob — una mano liga unas veces sí y otras no.
             lig_p = max(0.0, min(1.0, getattr(options, "ligature_prob", 0.0)))
             pairs = getattr(self, "_pair_chars", set())
+            prev_glyph = None   # R14/B: los enlaces no cruzan espacios
             idx = 0
             while idx < len(word):
                 par = word[idx:idx + 2]
@@ -295,12 +415,21 @@ class LayoutMixin:
                 idx += len(ch)
                 entry = self._select_entry(ch)
                 baseline_in = -1
+                # R14 (Track A): e(t) evaluado en la posición del glifo y el
+                # squeeze de fin de renglón. Con el latente apagado e_now=0 y
+                # sq=1.0: los argumentos de _load_glyph quedan idénticos.
+                e_now = (self._hand_energy_at(x_cursor / max_width)
+                         if hand_on else 0.0)
+                sq = _squeeze()
                 if entry and Path(entry.image_path).exists():
                     loaded = self._load_glyph(
                         entry.image_path, options, ch, geo=self._geo(entry),
                         rotation=rot_walk.step() if rot_walk else 0.0, rng=rnd,
-                        size_drift=size_walk.step() if size_walk else 0.0,
-                        slant_extra=slant_walk.step() if slant_walk else 0.0)
+                        size_drift=(size_walk.step() if size_walk else 0.0)
+                                   + 0.08 * e_now - 0.4 * (1.0 - sq),
+                        slant_extra=(slant_walk.step() if slant_walk else 0.0)
+                                    + 0.3 * sl_amp * e_now,
+                        pressure=pd * e_now if (hand_on and pd > 0) else 0.0)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
                     # R3/H8 — glifo faltante: se registra para que la UI avise
@@ -314,6 +443,7 @@ class LayoutMixin:
                             ch, options, missing=True)
                     else:
                         glyph_img = None
+                    prev_glyph = None   # R14/B: no unir con un placeholder
                 if glyph_img is None:
                     continue
 
@@ -328,6 +458,10 @@ class LayoutMixin:
                     gap = max(-int(options.font_size * 0.06), gap)
                 else:
                     gap = max(1, gap)
+                if sq < 1.0:
+                    # R14 (Track A): cramping — los huecos se encogen
+                    # progresivamente al acercarse al margen derecho.
+                    gap = round(gap * sq)
 
                 jitter_y = round(y_walk.step()) if y_walk else 0
                 drift = drift_walk.step() if drift_walk else 0.0
@@ -344,6 +478,14 @@ class LayoutMixin:
                         y_pos = baseline - glyph_img.height
                 y_pos = max(0, min(h - glyph_img.height, y_pos + jitter_y))
                 line_canvas.paste(glyph_img, (x_cursor, y_pos), glyph_img)
+                if conn_p > 0:
+                    # R14 (Track B): con prob conn_p, trazo fino de enlace
+                    # entre el glifo anterior y éste (misma palabra).
+                    if prev_glyph is not None and rnd.random() < conn_p:
+                        self._draw_connector(line_canvas, prev_glyph,
+                                             (glyph_img, x_cursor, y_pos),
+                                             options, rnd, baseline)
+                    prev_glyph = (glyph_img, x_cursor, y_pos)
                 self._glyphs_placed += len(ch)  # una ligadura cubre 2 chars
                 x_cursor += glyph_img.width + gap
 

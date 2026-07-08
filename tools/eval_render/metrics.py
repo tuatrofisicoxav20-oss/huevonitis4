@@ -367,6 +367,115 @@ def _dup_rate(mask: np.ndarray, lines: list[list],
     return round(dup / len(flat), 4)
 
 
+# ── Estructura horizontal (R14 / H5-C1) ─────────────────────────────────────
+
+def _line_baselines_y(lines: list[list]) -> list[float]:
+    """y aproximada de la línea base de cada renglón (mediana del y-inferior)."""
+    return [float(np.median([b[3] for b in ln])) for ln in lines]
+
+
+def _paragraph_starts(lines: list[list]) -> list[bool]:
+    """True si el renglón i ABRE párrafo. Se detecta desde la imagen: un hueco
+    vertical > 1.6× el paso BASE entre renglones delata el renglón en blanco
+    que separa párrafos en la entrada. El primer renglón abre por definición.
+
+    El paso base es la mediana de la MITAD BAJA de los pasos (~p25), no la
+    mediana global: en páginas con párrafos cortos los huecos dobles pueden ser
+    la mitad o más de los pasos y contaminarían la mediana (verificado: página
+    de 3 renglones con 1 salto quedaba sin detectar). Límite conocido: si TODOS
+    los pasos son dobles (poema/lista de renglones sueltos) no hay paso simple
+    de referencia en la imagen y la detección devuelve 1 párrafo — el dominio
+    de estas métricas es prosa (párrafos de ≥2 renglones)."""
+    n = len(lines)
+    flags = [False] * n
+    if n == 0:
+        return flags
+    flags[0] = True
+    if n < 3:
+        return flags
+    steps = np.diff(_line_baselines_y(lines))
+    lower = np.sort(steps)[: max(1, len(steps) // 2)]
+    base = float(np.median(lower))
+    if base <= 0:
+        return flags
+    for i, s in enumerate(steps, start=1):
+        if float(s) > 1.6 * base:
+            flags[i] = True
+    return flags
+
+
+def _margin_metrics(lines: list[list], img_w: int) -> dict:
+    """Métricas de estructura horizontal del margen izquierdo (H5-C1).
+
+    margin_autocorr: autocorrelación lag-1 del residuo de la serie
+    x-inicio-de-tinta por renglón contra una CONSTANTE robusta (mediana), SOLO
+    renglones de cuerpo (las primeras líneas de párrafo se excluyen: con
+    sangría serían outliers estructurales, no ruido). Mismo estilo robusto en
+    dos pasos que _baseline_metrics (descarte >1.8σ y reajuste). Se ajusta
+    constante y NO recta: la deriva lenta ES la señal que se busca — un
+    detrend lineal se come la energía de baja frecuencia del propio OU y
+    sesga el lag-1 hacia abajo en series de ~20 renglones (verificado por
+    simulación: páginas genuinamente OU caían bajo 0.4 en ~1 de cada 3). La
+    medición de arranque externa usó el mismo criterio ("ruido blanco sobre
+    constante"). Mano humana (proceso OU) > 0.4 EN MEDIA sobre varias
+    páginas/seeds — por página el estimador con ~20 puntos tiene varianza
+    alta y no sirve de gate individual. Margen "de regla" ≈ 0.
+    margin_sigma: σ de ese residuo robusto (el "grosor de banda" del margen).
+
+    indent_delta_mu/sigma: sangría de párrafo — x-inicio de la primera línea
+    de cada párrafo menos la MEDIANA del cuerpo. Sin mecanismo de sangría
+    ambas quedan ≈ 0.
+
+    right_ragged_cv: CV de la distancia del fin de tinta al borde derecho de
+    la imagen, excluyendo las líneas de cierre de párrafo y la última (cortas
+    por naturaleza, no por rag). INFORMATIVA: no optimizarla, y comparar SOLO
+    entre imágenes con la misma geometría de página (el denominador incluye el
+    margen derecho: con márgenes distintos el CV no es comparable). En este
+    harness el render actual da ~0.15±0.05 y es sano.
+    """
+    out = {"margin_autocorr": 0.0, "margin_sigma": 0.0,
+           "indent_delta_mu": 0.0, "indent_delta_sigma": 0.0,
+           "n_paragraphs": 0, "right_ragged_cv": 0.0}
+    if len(lines) < 3:
+        return out
+    starts = _paragraph_starts(lines)
+    out["n_paragraphs"] = int(sum(starts))
+    x0s = [float(ln[0][0]) for ln in lines]
+
+    # Margen del CUERPO: residuo robusto contra la MEDIANA y su lag-1.
+    body = np.asarray([x for x, s in zip(x0s, starts) if not s])
+    if len(body) >= 4:
+        res = body - np.median(body)
+        sd = res.std()
+        if sd > 1e-9:
+            keep = np.abs(res) <= 1.8 * sd
+            if keep.sum() >= 4:
+                kept = body[keep]
+                res = kept - np.median(kept)
+        out["margin_sigma"] = round(float(res.std()), 3)
+        den = float((res * res).sum())
+        if den > 1e-9 and len(res) >= 3:
+            out["margin_autocorr"] = round(
+                float((res[:-1] * res[1:]).sum()) / den, 4)
+
+    # Sangría de párrafo contra la mediana del cuerpo.
+    if len(body):
+        med_body = float(np.median(body))
+        deltas = [x - med_body for x, s in zip(x0s, starts) if s]
+        dmu, dsig, _ = _stats(deltas)
+        out["indent_delta_mu"] = round(dmu, 3)
+        out["indent_delta_sigma"] = round(dsig, 3)
+
+    # Rag derecho: distancia del fin de tinta al borde de la imagen.
+    x1s = [float(max(b[2] for b in ln)) for ln in lines]
+    rags = [img_w - x1 for i, x1 in enumerate(x1s)
+            if i + 1 < len(x1s) and not starts[i + 1]]
+    if len(rags) >= 3:
+        _rmu, _rsig, rcv = _stats(rags)
+        out["right_ragged_cv"] = round(rcv, 4)
+    return out
+
+
 # ── API pública ──────────────────────────────────────────────────────────────
 
 def compute_metrics(img: Image.Image,
@@ -374,9 +483,11 @@ def compute_metrics(img: Image.Image,
     """Todas las métricas de realismo de una imagen de texto. JSON-serializable.
 
     Claves: n_boxes, n_lines, height_mu/height_cv, letter_gap_*, word_gap_*,
-    baseline_sigma/baseline_autocorr, slant_mean/slant_std, phash_dup_rate.
+    baseline_sigma/baseline_autocorr, slant_mean/slant_std, phash_dup_rate,
+    margin_autocorr/margin_sigma, indent_delta_mu/indent_delta_sigma,
+    n_paragraphs, right_ragged_cv (R14).
     Referencias humanas: height_cv 0.35-0.60, word_gap_cv >0.10,
-    baseline_autocorr >0.4, phash_dup_rate <0.05.
+    baseline_autocorr >0.4, phash_dup_rate <0.05, margin_autocorr >0.4.
     """
     mask = _ink_mask(img)
     h, w = mask.shape
@@ -398,6 +509,9 @@ def compute_metrics(img: Image.Image,
     out.update(_baseline_metrics(lines))
     out.update(_slant_metrics(mask, lines))
     out["phash_dup_rate"] = _dup_rate(mask, lines, dup_threshold)
+    # R14 (H5-C1) — estructura horizontal: margen del cuerpo, sangría de
+    # párrafo y rag derecho.
+    out.update(_margin_metrics(lines, w))
     # R4 — métricas de layout para calibración: variación del interlineado
     # (CV de los pasos entre líneas) y σ del margen izquierdo (x0 de la
     # primera caja por línea). Con <3 líneas no hay señal.

@@ -49,7 +49,11 @@ class RenderOptions:
     # borde (semi-transparentes por el anti-aliasing) hacia opaco, así el trazo
     # se ve SÓLIDO y oscuro como tinta de bolígrafo y no fino/gris como lápiz.
     # 1.0 = sin efecto.
-    ink_boost: float = 0.7
+    # R15: default 0.7 → 0.92. Forzar la opacidad al máximo UNIFORME era una
+    # causa del look impreso (slab plano): con la densidad variable en espacio
+    # de trazo, el gamma agresivo ya no hace falta y aplana la textura nueva.
+    # Rollback exacto a R12/R14: ink_boost=0.7 + ink_stroke_space=False.
+    ink_boost: float = 0.92
     # Realismo de la escritura (Fase 3). Valores conservadores: suben la
     # credibilidad sin volver el texto ilegible.
     #   baseline_drift: amplitud máx (px) del vaivén lento de la línea base a lo
@@ -73,8 +77,33 @@ class RenderOptions:
     #     por renglón (E2) — el margen de una mano no es láser. 0 = apagado.
     #   margin_drift_per_line: px/línea de deriva LENTA hacia adentro conforme
     #     baja la página (acotada a 10 px), encima del walk.
+    # R14 (H5-C2) — el walk pasa a ser un OU REAL calibrado por sus perillas:
+    #   margin_walk_rho: correlación lag-1 del proceso (memoria de la mano
+    #     entre renglones). La σ por paso se DERIVA de amplitud y ρ
+    #     (σ = 0.45·amp·√(1−ρ²)) para que la excursión estacionaria llene la
+    #     amplitud a cualquier supersampling; antes la σ iba fija en 2 px y el
+    #     margen quedaba en ±2 px finales — de regla (autocorr ≈ 0 medida).
+    #     Aplica también al camino snap (fondos rayados), que pegaba x FIJO.
     margin_walk_px: float = 6.0
+    margin_walk_rho: float = 0.9
     margin_drift_per_line: float = 0.2
+    # R14 (H5-C2) — párrafo humano en el CAMINO PLANO de prosa (párrafo =
+    # línea EN BLANCO en la entrada; jamás toca writer_structure/detección):
+    #   para_indent_frac: sangría media de la primera línea de cada párrafo,
+    #     como fracción de font_size. Cada sangría se sortea con gauss
+    #     truncada (σ=0.35·μ, acotada a [0.45, 1.7]·μ): una mano no sangra
+    #     dos veces igual. La primera línea del documento también sangra.
+    #     0 = apagado (comportamiento previo). La línea sangrada puede apurar
+    #     el margen derecho unos px (el wrap mide a ancho completo) — igual
+    #     que una mano que no replanifica el renglón por la sangría.
+    para_indent_frac: float = 0.85
+    #   para_breath_px: respiración inter-párrafo — desplazamiento vertical
+    #     acotado (gauss truncada, ±para_breath_px) de la PRIMERA línea de
+    #     cada párrafo, NO acumulativo (el cuerpo regresa al renglón físico).
+    #     Sólo en el camino clásico: con fondos rayados (snap) el texto se
+    #     apoya en renglones REALES y la mano no flota entre rayas.
+    #     0 = apagado.
+    para_breath_px: float = 4.0
     # R3/H8 — fallback de FUENTE DE SISTEMA: apagado por default. Un carácter
     # sin glifo se OMITE y se reporta (coverage_report / last_missing_chars);
     # la UI avisa antes de exportar. True = placeholder rojo (sólo preview).
@@ -113,6 +142,160 @@ class RenderOptions:
     ink_texture_strength: float = 0.12
     ink_bleed: float = 0.4
     ink_hsv_jitter: tuple = (0.04, 0.03)
+    # R11 — TEXTURA DE TINTA v2 (intra-trazo). Patch modular sobre apply_paper;
+    # NO toca banco/extracción/variación/métricas. El value-noise de R6
+    # (ink_texture_strength) modula por ZONA de página (cell ∝ font_size×1.2),
+    # así que cada trazo salía de opacidad plana. v2 añade frecuencia FINA
+    # (escala de trazo), bordes irregulares y apozamiento de tinta.
+    #   ink_texture_v2: master switch. False = apply_paper corre EXACTO como en
+    #     R6 (comparación antes/después y rollback con un solo flag).
+    #   ink_texture_fine_strength: profundidad del value-noise de ALTA frecuencia
+    #     que modula la OSCURIDAD del trazo a lo largo (densidad de depósito: el
+    #     color, no el ancho — modular alpha sobre trazos finos solo los aclara).
+    #   ink_texture_fine_cell_frac: celda del ruido fino como fracción de
+    #     font_size (~0.15 → la tinta respira a lo largo del trazo, no por zona).
+    #   ink_edge_irregularity: 0..1, modula el halo de sangrado con ruido para
+    #     que el borde feathee desigual (0 = sangrado uniforme de R6).
+    #   ink_pooling: 0..1, oscurece el COLOR de tinta donde el coverage local es
+    #     alto (cruces, vueltas, trazo grueso) — apozamiento real de tinta.
+    #   ink_width_jitter: 0..1, dilatación ligera modulada por ruido de baja
+    #     frecuencia (engrosa/adelgaza el trazo a lo largo). 0 = apagado (riesgo
+    #     de legibilidad; subir con cuidado).
+    # NOTA R12: con la reconstrucción de borde (abajo) como protagonista del look
+    # manuscrito, la textura INTERIOR se baja a un papel de apoyo (no es la causa
+    # del look de impresión — el borde sí). No subir estos sin razón.
+    ink_texture_v2: bool = True
+    ink_texture_fine_strength: float = 0.20
+    ink_texture_fine_cell_frac: float = 0.15
+    ink_edge_irregularity: float = 0.5
+    ink_pooling: float = 0.15
+    ink_width_jitter: float = 0.0
+    # R12 — RECONSTRUCCIÓN DE BORDE (textura por FRONTERA, no por interior). Es la
+    # causa #1 del look de impresión: el alpha binarizado tiene un borde duro y
+    # regular. Se aplica POR GLIFO en _load_glyph (alpha individual, a resolución
+    # supersampleada) reconstruyendo el contorno con ruido 1D de baja frecuencia
+    # a lo largo del perímetro + feather variable. NO cambia tamaño ni baseline.
+    #   edge_reconstruct: master switch (False = sin paso de borde, vuelve a R11).
+    #   edge_strength: amplitud del desplazamiento del perímetro como FRACCIÓN de
+    #     font_size (el helper la acota a 0.28·dim_menor del glifo → protege
+    #     trazos finos y puntuación de romperse).
+    #   edge_cell_frac: longitud de onda del ruido 1D como fracción de font_size
+    #     (↑ = ondas más largas/suaves; baja frecuencia = orgánico, no dentado).
+    #   edge_feather: sigma máx del feather variable como fracción de font_size.
+    #   edge_feather_amount: 0..1, cuánto del borde "corrido" (blur) se mezcla.
+    #   edge_outward_bias: 0..1, cuánto del desplazamiento es hacia AFUERA (la
+    #     tinta sangra al papel) vs. simétrico. Alto = engrosa el trazo y oscurece
+    #     (pero un engrose CONSTANTE comprimiría el CV de alturas → toca
+    #     proporciones); bajo ≈ media-preservante (solo ondula el borde). Default
+    #     conservador para NO alterar las métricas de proporción del render.
+    edge_reconstruct: bool = True
+    edge_strength: float = 0.028
+    edge_cell_frac: float = 0.47
+    edge_feather: float = 0.025
+    edge_feather_amount: float = 0.55
+    edge_outward_bias: float = 0.3
+    # R13 — margen derecho irregular: amplitud (fracción de font_size) del ancho
+    # de corte por renglón. 0 = borde recto (wrap actual). ~0.5 = borde orgánico
+    # sin salirse del margen físico derecho. Acótalo por debajo del margen físico
+    # derecho para no invadir el borde de la hoja.
+    wrap_margin_jitter: float = 0.0
+    # R13 — jitter I.I.D. (px) del inicio de cada renglón: rompe la apariencia de
+    # "regla" del margen izquierdo con variación independiente por línea (encima
+    # del walk correlacionado). 0 = sin cambio. ~10 px (~1.7 mm) se ve natural.
+    margin_line_jitter_px: float = 0.0
+    # R14 (Track A) — ESTADO LATENTE DE LA MANO e(t). Tell que ataca: la
+    # variación por glifo era casi toda i.i.d.; la escritura real varía LENTO
+    # y CORRELACIONADO (la mano que viene cansada/rápida sigue así unas
+    # líneas). Un único proceso OU por página (mismo estilo que line_slant)
+    # avanza un paso por renglón y se interpola dentro del renglón; su valor
+    # acopla a la vez tamaño, slant (línea y glifo COMPARTEN el latente),
+    # presión→oscuridad y ritmo de espaciado de palabra. NUNCA toca el wrap
+    # ni la geometría anclada a mm (solo modula procesos ya existentes).
+    #   hand_energy_sigma: amplitud del latente en unidades adimensionales
+    #     (0..1.5, clamp). 0 = apagado: CERO draws de RNG, byte-idéntico.
+    #   hand_energy_corr_lines: longitud de correlación en RENGLONES (ρ =
+    #     exp(-1/corr)); ~3 = el estado sobrevive unas 3 líneas.
+    #   pressure_darkness_coupling: 0..0.4 — cuánto empuja e(t) el gamma del
+    #     alpha (ink_boost efectivo): presión alta = trazo más oscuro y un
+    #     pelo más ancho; mano liviana = más claro. Riesgo de legibilidad
+    #     bajo (gamma acotado a [0.25, 2.5] en _load_glyph).
+    #   line_end_cramp: 0..0.3 — compresión progresiva de gaps/espacios (y
+    #     una pizca de tamaño) en el ÚLTIMO ~18% del renglón: una mano
+    #     aprieta las letras cuando ve venir el margen. Riesgo: >0.3 pega
+    #     letras al final del renglón (clamp duro).
+    #   session_shift_prob: probabilidad por renglón de un SALTO del latente
+    #     (pausa, re-carga de tinta): el estado brinca a un valor fresco en
+    #     vez de derivar. 0..0.1 (clamp).
+    hand_energy_sigma: float = 0.6
+    hand_energy_corr_lines: float = 3.0
+    pressure_darkness_coupling: float = 0.15
+    line_end_cramp: float = 0.12
+    session_shift_prob: float = 0.02
+    # R14 (Track B) — física de bolígrafo. Defaults en 0 (opt-in, subir con
+    # cuidado): son los efectos con más riesgo de legibilidad del R14.
+    #   pen_skip_prob: probabilidad POR GLIFO (0..0.05, clamp) de un
+    #     micro-skip: una bolita sin tinta sobre la cresta del trazo (el
+    #     bolígrafo patina). Protegido por tamaño (imita a edge_reconstruct):
+    #     nunca corre en puntuación diminuta ni en trazos con semiancho
+    #     < ~1.6 px — un skip ahí CORTA el trazo en vez de despintarlo.
+    #     RNG propio sembrado del contenido (patrón del borde R12): el flag
+    #     on/off no corre el stream de variación del layout.
+    #   connector_prob: probabilidad (0..0.7, clamp) de unir dos glifos
+    #     CONTIGUOS de la misma palabra con un trazo fino de entrada/salida
+    #     sobre la línea base (extiende la semi-cursiva de las ligaduras
+    #     R10 a pares que no están capturados como par). Sólo une si los
+    #     puntos de anclaje existen y el hueco es chico (2 px..0.4·em);
+    #     riesgo de legibilidad bajo (el conector va con alpha parcial).
+    #   connector_width_frac: grosor del conector como fracción de
+    #     font_size (~0.04 = trazo de salida fino, más fino que el cuerpo).
+    # R15: el skip pasa a ON por default (0.01): ya corre sobre la cresta del
+    # distance transform con tamaño ∝ ancho local (lo que pide R15) y sus
+    # clamps de legibilidad están medidos (Δ OCR ≈ 0 con 0.03 en r14_eval).
+    pen_skip_prob: float = 0.01
+    connector_prob: float = 0.0
+    connector_width_frac: float = 0.04
+    # R15 — TINTA EN ESPACIO DE TRAZO. Tell que ataca: el look "impreso" del
+    # relleno — densidad uniforme, ancho constante y textura ISOTRÓPICA en
+    # espacio de pantalla (los campos 2D de R11 modulan un blob plano). La
+    # tinta de pluma varía A LO LARGO del trazo y su textura fina es
+    # ANISOTRÓPICA (riel alineado a la dirección). El campo de orientación
+    # sale del gradiente del distanceTransform del alpha (sin skeleton
+    # externo); las coordenadas de trazo (a lo largo / cruzando) muestrean
+    # ruido con longitudes de onda distintas por eje. Corre POR GLIFO en
+    # _load_glyph con RNG propio sembrado del contenido (patrón del borde
+    # R12): on/off no corre el stream de variación del layout.
+    #   ink_stroke_space: master. False = pipeline R12/R14 EXACTO (con
+    #     ink_boost=0.7 y pen_skip_prob=0, byte-idéntico; rollback total).
+    #   ink_along_darkness: 0..0.4 — shading de DENSIDAD a lo largo (modula
+    #     el color, no el ancho): la pluma deposita más en unos tramos.
+    #   ink_width_along: 0..0.25 — thick/thin a lo largo (thin en trazos
+    #     rápidos, grueso en lentos), SIMÉTRICO al centro. Clamp fuerte por
+    #     dt: cero erosión donde el semiancho local < ~2.2 px (no rompe
+    #     finos ni puntuación). Se aplica ANTES del borde R12 (el borde
+    #     re-decora la silueta nueva).
+    #   ink_streak_strength: 0..0.4 — textura "riel": fino CRUZANDO el
+    #     trazo, lento A LO LARGO, orientada por la tangente.
+    #   ink_streak_aniso: 1..8 — relación largo/cruce del riel (4 ≈ fibras
+    #     de depósito de bolígrafo).
+    #   ink_pool_boost: 0..0.4 — oscurece donde dt es alto (cruces, vueltas,
+    #     núcleo grueso); complementa el ink_pooling 2D de R11 pero en
+    #     espacio de trazo. (Las "puntas" quedan cubiertas parcialmente por
+    #     el dt bajo de los extremos; el modelado explícito de endpoints se
+    #     evaluó y se dejó fuera: requiere skeleton.)
+    #   ink_hue_by_density: 0..0.3 — donde denso el color vira al azul de
+    #     carga (más saturado); donde tenue, a gris (desaturado): la tinta
+    #     rala pierde cuerpo de color antes que luminancia.
+    #   ink_paper_showthrough: 0..0.2 — cuánto grano de papel se ve BAJO la
+    #     tinta (cap del alpha efectivo en apply_paper): la tinta real nunca
+    #     es 100% opaca sobre fibra.
+    ink_stroke_space: bool = True
+    ink_along_darkness: float = 0.18
+    ink_width_along: float = 0.10
+    ink_streak_strength: float = 0.15
+    ink_streak_aniso: float = 4.0
+    ink_pool_boost: float = 0.15
+    ink_hue_by_density: float = 0.10
+    ink_paper_showthrough: float = 0.06
     # R7 — pase de papel:
     #   paper_texture: nombre de PNG en tipografia/{perfil}/papers/ (scans del
     #     usuario) o assets/papers/ (procedurales). None = papel liso. Los

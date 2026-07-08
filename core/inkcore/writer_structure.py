@@ -107,10 +107,10 @@ def detect_structure(text: str) -> bool:
     que la prosa normal se quede en el camino de texto plano de hoy. Sólo
     lectura — no modifica el texto.
     """
-    for raw in text.split("\n"):
-        if _match_mark(raw.lstrip(" \t")) is not None:
-            return True
-    return False
+    return any(
+        _match_mark(raw.lstrip(" \t")) is not None
+        for raw in text.split("\n")
+    )
 
 
 def parse_structure(text: str) -> list[StructBlock]:
@@ -175,7 +175,7 @@ class WriterStructureRenderer:
     def __init__(self, hw_renderer):
         self.hw = hw_renderer
 
-    def render(self, text: str, options, page_height: "int | None" = None) -> list:
+    def render(self, text: str, options, page_height: int | None = None) -> list:
         if not PIL_OK:
             return []
         hw = self.hw

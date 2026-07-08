@@ -267,6 +267,10 @@ def test_render_pages_interlineado_fisico_exacto(renderer, tmp_path):
         style="", background_style="hoja_blanca",
         size_variation=0.0, rotation_range=0.0, jitter_px=0,
         baseline_drift=0.0, line_slant_deg=0.0,
+        # R14 (Track A): el latente acopla TAMAÑO por glifo y el cramping
+        # encoge letras al final del renglón — ambos mueven el tope de la
+        # banda de tinta medida; se apagan igual que size_variation.
+        hand_energy_sigma=0.0, line_end_cramp=0.0,
     )
     pages = renderer.render_pages("\n".join(["aaa aaa"] * 50), opts)
     assert pages[0].size == (1275, 1650), f"no es carta a 150 DPI: {pages[0].size}"

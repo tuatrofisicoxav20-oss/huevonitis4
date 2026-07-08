@@ -31,6 +31,15 @@ BACKGROUND_STYLES: dict[str, dict] = {
         "margin_color": None,
         "texture": "papel_fibra.png",
     },
+    # Para IMPRESIÓN: blanco PURO sin textura de papel. La textura de fibra se
+    # ve "realista" en pantalla pero al imprimir sale como un tinte/patrón gris
+    # sobre el papel real (efecto fotocopia). Sin textura, la impresora deja el
+    # fondo en blanco y SOLO deposita la tinta → natural sobre el papel físico.
+    "blanco_liso": {
+        "bg": "#FFFFFF",
+        "draw_lines": False,
+        "margin_color": None,
+    },
     "libreta": {
         "bg": "#FEFCE8",
         "draw_lines": True,
@@ -70,11 +79,11 @@ STYLE_PRESETS: dict[str, dict] = {
     # ink_boost más agresivo (gamma menor) empuja el antialiasing a opaco para
     # que el trazo no se vea gris/lápiz tras el downscale del supersampling.
     "Bolígrafo": {"jitter_px": 3, "size_variation": 0.17, "rotation_range": 3.2,
-                  "background_style": "hoja_blanca", "scan_skew": False,
+                  "background_style": "blanco_liso", "scan_skew": False,
                   "baseline_drift": 4.0, "kerning_jitter": 0.55,
                   "warp_strength": 0.18, "glyph_slant_drift_deg": 2.2,
-                  "ink_color": "#0B1A52", "ink_boost": 0.34,
-                  "ink_texture_strength": 0.12, "ink_bleed": 0.75,
+                  "ink_color": "#0B1A52", "ink_boost": 0.15,
+                  "ink_texture_strength": 0.10, "ink_bleed": 1.8,
                   "ink_hsv_jitter": (0.04, 0.05)},
 }
 

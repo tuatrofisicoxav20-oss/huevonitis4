@@ -136,7 +136,21 @@ def test_golden_metricas_linea_base(stub_renderer):
     from tools.eval_render.metrics import compute_metrics
 
     texto = "\n".join([FRASE_PATRON] * 5)
-    opts = RenderOptions(style="", background_style="hoja_blanca", seed=42)
+    # R12: este golden mide la GEOMETRÍA del layout (proporciones, espaciado,
+    # baseline) re-detectando cajas sobre los píxeles. La textura de tinta
+    # (borde R12 + interior R11) es POSTERIOR a la colocación y NO mueve ni un
+    # glifo —probado en test_render_edge.test_edge_no_cambia_colocacion: width y
+    # baseline_in idénticos con/sin textura—, pero la tinta sangrada engorda las
+    # cajas medidas y sesga height_cv/baseline_autocorr (artefacto del detector,
+    # no de la geometría). Se apaga la textura para aislar lo que este test
+    # afirma. La textura tiene sus propios tests de invariancia geométrica.
+    # R14 (Track A): el latente de mano y el cramping se apagan por la misma
+    # razón que la textura — este golden aísla la geometría R2/R3/R5 con la
+    # realización con que se calibró; la coherencia macro tiene sus propios
+    # tests (test_r14_credibilidad).
+    opts = RenderOptions(style="", background_style="hoja_blanca", seed=42,
+                         edge_reconstruct=False, ink_texture_v2=False,
+                         hand_energy_sigma=0.0, line_end_cramp=0.0)
     pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])
@@ -157,6 +171,106 @@ def test_golden_metricas_linea_base(stub_renderer):
     # R5 — warp elástico por instancia: cero sellos incluso con UNA variante
     # por char (era 0.77; el detector está calibrado: ver test anti-sello).
     assert m["phash_dup_rate"] < 0.05
+
+
+PROSA_PARRAFOS = "\n\n".join([
+    "el viento cruzaba el llano seco y la tarde entera olia a polvo mientras"
+    " los cerros se ponian morados a lo lejos sin que nadie los mirara y el"
+    " camino de tierra seguia solo hasta perderse en la loma",
+    "un cuaderno viejo guardaba la letra de un verano que ya nadie recuerda"
+    " con sus renglones torcidos y sus margenes que respiran despacio como"
+    " respira un animal dormido al fondo de un corral vacio",
+    "los grillos cantaban entre las bardas y el pueblo se quedaba quieto"
+    " esperando la primera lluvia fuerte que no acababa de llegar nunca"
+    " aunque el cielo se cargara de nubes gordas cada tarde de mayo",
+    "al final la mano siempre vuelve al margen como el rio a su cauce aunque"
+    " cada renglon salga un poco distinto del anterior siempre igual y"
+    " siempre nuevo como las olas de un mar chico y terco",
+])
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_golden_estructura_horizontal(stub_renderer):
+    """R14 (H5-C2) — golden del eje horizontal en prosa de párrafos.
+
+    Prosa de 4 párrafos (línea en blanco = párrafo, camino PLANO), medida en
+    los DOS sub-caminos (clásico y snap) con 3 seeds. Gates:
+      • margin_sigma: el margen ya no es "de regla" — el camino snap pegaba
+        x FIJO (σ=0.14 px medida) y ahora respira (~2 px). Gate duro: separa
+        muerto/vivo por un orden de magnitud.
+      • margin_autocorr EN MEDIA de las 6 páginas: el estimador lag-1 por
+        página (~12 renglones de cuerpo) tiene varianza alta (ver docstring
+        de _margin_metrics); el objetivo humano (>0.40) se valida con banco
+        real y 5 seeds en RESULTADOS §R14 — aquí el gate ataja regresiones
+        (walk muerto o ruido blanco dan ≈ 0).
+      • indent_delta: la sangría existe (μ ≈ 0.85·font_size) y VARÍA acotada.
+    La prosa con líneas en blanco NO debe disparar el camino estructurado
+    (no-regresión aparte en test_writer_structure).
+    """
+    from core.inkcore.renderer import RenderOptions
+    from tools.eval_render.metrics import compute_metrics
+
+    autocorrs = []
+    for draw_lines in (False, True):
+        for seed in (42, 7, 101):
+            # R14 (Track A): latente/cramp fuera — este golden mide el eje
+            # horizontal de H5-C2 con la realización con que se calibró.
+            opts = RenderOptions(style="", background_style="",
+                                 draw_lines=draw_lines, seed=seed,
+                                 edge_reconstruct=False, ink_texture_v2=False,
+                                 hand_energy_sigma=0.0, line_end_cramp=0.0)
+            m = compute_metrics(stub_renderer.render_pages(PROSA_PARRAFOS, opts)[0])
+            camino = "snap" if draw_lines else "clasico"
+            assert m["n_paragraphs"] == 4, f"{camino}/{seed}: párrafos mal detectados"
+            assert m["margin_sigma"] > 0.6, (
+                f"{camino}/{seed}: margen de regla (σ={m['margin_sigma']})")
+            assert 15 <= m["indent_delta_mu"] <= 65, (
+                f"{camino}/{seed}: sangría fuera de rango ({m['indent_delta_mu']})")
+            assert 2 <= m["indent_delta_sigma"] <= 30, (
+                f"{camino}/{seed}: la sangría no varía humano "
+                f"({m['indent_delta_sigma']})")
+            autocorrs.append(m["margin_autocorr"])
+    media = sum(autocorrs) / len(autocorrs)
+    assert media > 0.25, f"margen sin correlación de mano: {autocorrs} (media {media:.3f})"
+
+
+@pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
+def test_iter_pages_no_sangra_a_media_oracion(stub_renderer):
+    """R14 (H5-C2): iter_pages trocea el texto para exportar página a página;
+    un trozo que empieza a MEDIA ORACIÓN no debe sangrar su primera línea
+    (las flags de párrafo se calculan sobre el texto completo). Sin la señal
+    _first_opens_paragraph, cada salto de página sangraba ~0.85·font_size."""
+    import numpy as np
+
+    from core.inkcore.renderer import RenderOptions
+    from tools.eval_render.metrics import (
+        _filter_boxes,
+        _ink_mask,
+        _merge_vertical_parts,
+        connected_boxes,
+        group_lines,
+    )
+
+    rng = __import__("random").Random(5)
+    palabras = ["viento", "llano", "cerro", "cuaderno", "verano", "margen",
+                "grillo", "barda", "pueblo", "lluvia", "nube", "camino"]
+    # UN solo párrafo largo (sin líneas en blanco): todo salto de trozo cae
+    # a media oración.
+    texto = " ".join(rng.choice(palabras) for _ in range(90))
+    opts = RenderOptions(style="", background_style="", seed=42,
+                         edge_reconstruct=False, ink_texture_v2=False)
+    pages = list(stub_renderer.iter_pages(texto, opts, page_height=500))
+    assert len(pages) >= 2, "el texto debe abarcar 2+ páginas para el caso"
+
+    mask = _ink_mask(pages[1])
+    h, w = mask.shape
+    boxes = _filter_boxes(connected_boxes(mask), w, h)
+    lines = [_merge_vertical_parts(ln) for ln in group_lines(boxes, mask)]
+    assert len(lines) >= 3
+    x0s = [float(ln[0][0]) for ln in lines]
+    delta = abs(x0s[0] - float(np.median(x0s[1:])))
+    assert delta < 14, (
+        f"la primera línea de la página 2 sangró {delta:.0f}px a media oración")
 
 
 @pytest.mark.skipif(not _PIL, reason="Pillow no instalado")
@@ -269,7 +383,13 @@ def test_anti_sello_bilateral(stub_renderer):
                           # noise/bleed/micro-color ya rompen el hash por sí
                           # solos y este es el control NEGATIVO del detector.
                           ink_texture_strength=0.0, ink_bleed=0.0,
-                          ink_hsv_jitter=(0.0, 0.0), supersample=1)
+                          ink_hsv_jitter=(0.0, 0.0), supersample=1,
+                          # R14/R15: las fuentes nuevas de variación también
+                          # se apagan en el control negativo (presión por
+                          # posición y skips rompían el hash de unas letras
+                          # y el gate >0.85 medía eso, no al detector).
+                          hand_energy_sigma=0.0, line_end_cramp=0.0,
+                          pen_skip_prob=0.0, ink_stroke_space=False)
     m_sello = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, sello)[0])
     assert m_sello["phash_dup_rate"] > 0.85, (
         f"el detector dejó de ver sellos: {m_sello['phash_dup_rate']}")

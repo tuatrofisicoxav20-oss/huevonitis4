@@ -69,6 +69,252 @@ def jitter_ink_color(base_hex: str, rng: random.Random,
     return f"#{int(r2 * 255):02x}{int(g2 * 255):02x}{int(b2 * 255):02x}"
 
 
+def _ink_texture_v2(a: np.ndarray, options, rng: random.Random):
+    """Textura intra-trazo (R11). Recibe el alpha (float [0,1]) de la región con
+    tinta y devuelve ``(a, ink_scale)``:
+
+      • a: alpha modulado — grosor variable (dilatación por ruido) + densidad
+        fina A LO LARGO del trazo (value-noise de alta frecuencia).
+      • ink_scale: mapa (h, w) float en (0, 1] para OSCURECER el color de tinta
+        donde el coverage local es alto (apozamiento, D-pool); None si apagado.
+
+    Solo toca valores de alpha/color, nunca geometría: shape y baseline intactos.
+    """
+    h, w = a.shape
+    fs = max(1, int(getattr(options, "font_size", 40)))
+    ink_scale = None  # multiplicador del COLOR de tinta: <1 oscurece, >1 aclara
+
+    # --- grosor variable: dilatación ligera mezclada por campo de baja frecuencia.
+    #     ESTO sí toca el alpha (ancho del trazo); apagado por default.
+    wj = max(0.0, getattr(options, "ink_width_jitter", 0.0))
+    if wj > 0:
+        rad = max(1, round(fs * 0.05 * min(1.0, wj)))
+        a_img = Image.fromarray((np.clip(a, 0.0, 1.0) * 255).astype(np.uint8))
+        dil = np.asarray(a_img.filter(ImageFilter.MaxFilter(rad * 2 + 1)),
+                         dtype=np.float32) / 255.0
+        lf = value_noise_field(w, h, rng, cell_px=max(8, int(fs * 0.5)),
+                               lo=0.0, hi=1.0)
+        a = a + (dil - a) * lf * wj
+
+    # --- densidad fina A LO LARGO del trazo: la tinta real varía en OSCURIDAD,
+    #     no en ancho — unas zonas depositan más (pool), otras saltan (dry). Por
+    #     eso se modula el COLOR, no el alpha: modular alpha sobre trazos ya finos
+    #     solo los adelgaza/aclara y BAJA la variación. El campo va centrado algo
+    #     por debajo de 1.0 (lo<1, hi>1) → más zonas oscuras que claras, sin
+    #     aplanar. cell ∝ font_size (escala de trazo, no de zona como en R6).
+    fstr = max(0.0, getattr(options, "ink_texture_fine_strength", 0.0))
+    if fstr > 0:
+        frac = max(0.05, getattr(options, "ink_texture_fine_cell_frac", 0.15))
+        cell = max(3, int(fs * frac))
+        field = value_noise_field(w, h, rng, cell_px=cell,
+                                  lo=1.0 - fstr, hi=1.0 + fstr * 0.5)
+        ink_scale = field
+
+    # --- apozamiento: coverage local (alpha difuminado) → oscurece el COLOR donde
+    #     se acumula tinta (cruces, vueltas, núcleo grueso). El interior del trazo
+    #     ya está saturado en alpha, así que la acumulación se modela en color.
+    pool = max(0.0, getattr(options, "ink_pooling", 0.0))
+    if pool > 0:
+        sigma = max(0.6, fs * 0.08)
+        a_img = Image.fromarray((np.clip(a, 0.0, 1.0) * 255).astype(np.uint8))
+        cov = np.asarray(a_img.filter(ImageFilter.GaussianBlur(sigma)),
+                         dtype=np.float32) / 255.0
+        pool_scale = 1.0 - pool * np.clip(cov, 0.0, 1.0)
+        ink_scale = pool_scale if ink_scale is None else ink_scale * pool_scale
+
+    return np.clip(a, 0.0, 1.0), ink_scale
+
+
+def apply_pen_skips(img: Image.Image, rng: random.Random, *,
+                    font_size: float) -> Image.Image:
+    """R14 (Track B) — micro-skip de bolígrafo: una bolita sin tinta sobre la
+    CRESTA del trazo (máximos del distance transform ≈ centro del trazo).
+
+    El dropout es un dip gaussiano del alpha (deja residuo tenue, como el
+    patinazo real de una pluma, no un agujero limpio) con radio ∝ semiancho
+    local. CLAMPS de legibilidad: no corre en glifos diminutos (puntuación),
+    ni en trazos con semiancho < 1.6 px (los cortaría), y el radio se acota
+    a 0.06·font_size. Sin cv2 devuelve el glifo intacto. Determinista desde
+    el rng recibido (el caller le pasa uno PROPIO sembrado del contenido)."""
+    try:
+        import cv2
+    except ImportError:
+        return img
+    a = np.asarray(img.getchannel("A"), dtype=np.uint8)
+    h, w = a.shape
+    fs = max(8.0, float(font_size))
+    if min(h, w) < 0.15 * fs:
+        return img          # puntuación/diacríticos: no tocar
+    m = (a > 127).astype(np.uint8)
+    if m.sum() < 0.004 * fs * fs:
+        return img          # tinta insuficiente: un skip la borraría
+    dt = cv2.distanceTransform(m, cv2.DIST_L2, 3)
+    d_max = float(dt.max())
+    if d_max < 1.6:
+        return img          # trazo demasiado fino: cortaría, no despintaría
+    ys, xs = np.nonzero(dt >= max(1.2, 0.55 * d_max))
+    if len(xs) < 8:
+        return img
+    i = rng.randrange(len(xs))
+    cx, cy = float(xs[i]), float(ys[i])
+    d0 = float(dt[int(cy), int(cx)])
+    r = min(0.06 * fs, d0 * rng.uniform(1.3, 2.2))
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    d2 = (xx - cx) ** 2 + (yy - cy) ** 2
+    dip = 0.82 * np.exp(-d2 / max(1.0, (0.6 * r) ** 2))
+    out = np.asarray(img.convert("RGBA")).copy()
+    out[..., 3] = np.clip(a.astype(np.float32) * (1.0 - dip),
+                          0, 255).astype(np.uint8)
+    return Image.fromarray(out)
+
+
+# ── R15 — tinta en ESPACIO DE TRAZO ─────────────────────────────────────────
+# El look impreso del relleno viene de modular un blob plano con campos 2D
+# isotrópicos. Estas funciones construyen un campo de ORIENTACIÓN del trazo
+# (gradiente del distanceTransform → normal; la tangente es su perpendicular)
+# y modulan ancho/densidad/color en coordenadas de trazo. Sin cv2 devuelven
+# el glifo intacto (nunca rompen el render).
+
+def _stroke_orientation(alpha_u8: np.ndarray):
+    """(m, dt, nx, ny) del glifo: máscara binaria, semiancho local y campo
+    normal unitario. El dt se suaviza antes del gradiente: el dt crudo es
+    cónico y su gradiente tirita justo en la cresta (donde más importa)."""
+    import cv2
+    m = (alpha_u8 > 127).astype(np.uint8)
+    dt = cv2.distanceTransform(m, cv2.DIST_L2, 5)
+    dts = cv2.GaussianBlur(dt, (0, 0), 1.2)
+    gy, gx = np.gradient(dts)
+    n = np.sqrt(gx * gx + gy * gy) + 1e-6
+    return m, dt, gx / n, gy / n
+
+
+def _aniso_noise(s_along: np.ndarray, s_cross: np.ndarray | None,
+                 cell_along: float, cell_cross: float,
+                 rng: random.Random) -> np.ndarray:
+    """Ruido suave en [-1, 1] muestreado en COORDENADAS DE TRAZO.
+
+    Textura tileable 128² (grid 32² interpolado ×4) leída con cv2.remap en
+    (s_along/cell_along, s_cross/cell_cross): longitudes de onda distintas
+    por eje = anisotropía real, alineada a la tangente aunque el trazo
+    curve (s_* son proyecciones locales, continuas sobre el glifo).
+    s_cross=None → 1D efectivo (constante cruzando el trazo)."""
+    import cv2
+    grid = np.array([[rng.uniform(-1.0, 1.0) for _ in range(32)]
+                     for _ in range(32)], dtype=np.float32)
+    tex = cv2.resize(grid, (128, 128), interpolation=cv2.INTER_CUBIC)
+    mapy = ((s_along / max(0.5, cell_along)) * 4.0) % 128
+    if s_cross is None:
+        mapx = np.zeros_like(s_along)
+    else:
+        mapx = ((s_cross / max(0.5, cell_cross)) * 4.0) % 128
+    return cv2.remap(tex, mapx.astype(np.float32), mapy.astype(np.float32),
+                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+
+
+def stroke_width_along(img: Image.Image, rng: random.Random, options,
+                       font_size: float) -> Image.Image:
+    """Ancho variable A LO LARGO del trazo (R15): dilata donde la pluma fue
+    lenta, adelgaza donde fue rápida, simétrico al centro (mezcla hacia el
+    MaxFilter/MinFilter del alpha modulada por ruido 1D a lo largo).
+
+    CLAMP por dt: la erosión se anula progresivamente donde el semiancho
+    local (dt dilatado) baja de ~2.2 px — trazos finos y puntuación sólo
+    pueden ENGROSAR, nunca romperse."""
+    wj = min(0.25, max(0.0, getattr(options, "ink_width_along", 0.0)))
+    if wj <= 0:
+        return img
+    try:
+        import cv2
+    except ImportError:
+        return img
+    a8 = np.asarray(img.getchannel("A"), dtype=np.uint8)
+    h, w = a8.shape
+    fs = max(8.0, float(font_size))
+    m, dt, nx, ny = _stroke_orientation(a8)
+    if m.sum() < 25 or float(dt.max()) < 1.4:
+        return img
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    s_along = xx * (-ny) + yy * nx
+    n1 = _aniso_noise(s_along, None, 0.5 * fs, 1.0, rng)
+
+    rad = max(1, round(fs * 0.02))
+    a_img = Image.fromarray(a8)
+    dil = np.asarray(a_img.filter(ImageFilter.MaxFilter(rad * 2 + 1)),
+                     dtype=np.float32)
+    ero = np.asarray(a_img.filter(ImageFilter.MinFilter(rad * 2 + 1)),
+                     dtype=np.float32)
+    a = a8.astype(np.float32)
+    pos = np.clip(n1, 0.0, 1.0) * wj
+    neg = np.clip(-n1, 0.0, 1.0) * wj
+    # semiancho local = dt dilatado (vale también en el borde del trazo);
+    # sin margen suficiente, la erosión se apaga suave.
+    hw = cv2.dilate(dt, np.ones((rad * 2 + 1, rad * 2 + 1), np.uint8))
+    neg *= np.clip((hw - 2.2) / 2.0, 0.0, 1.0)
+    a = a + (dil - a) * pos - (a - ero) * neg
+    out = np.asarray(img.convert("RGBA")).copy()
+    out[..., 3] = np.clip(a, 0, 255).astype(np.uint8)
+    return Image.fromarray(out)
+
+
+def stroke_space_shading(img: Image.Image, rng: random.Random, options,
+                         font_size: float) -> Image.Image:
+    """Densidad/color de pluma en espacio de trazo (R15), sobre el glifo ya
+    bordeado: shading 1D a lo largo + textura "riel" anisotrópica + pooling
+    donde dt es alto + hue por densidad. SOLO toca el RGB (la geometría y el
+    alpha del borde R12 quedan intactos): cero riesgo de cortar trazos."""
+    along = min(0.4, max(0.0, getattr(options, "ink_along_darkness", 0.0)))
+    streak = min(0.4, max(0.0, getattr(options, "ink_streak_strength", 0.0)))
+    pool = min(0.4, max(0.0, getattr(options, "ink_pool_boost", 0.0)))
+    hue = min(0.3, max(0.0, getattr(options, "ink_hue_by_density", 0.0)))
+    if along <= 0 and streak <= 0 and pool <= 0:
+        return img
+    try:
+        import cv2  # noqa: F401  (lo usan los helpers)
+    except ImportError:
+        return img
+    a8 = np.asarray(img.getchannel("A"), dtype=np.uint8)
+    h, w = a8.shape
+    fs = max(8.0, float(font_size))
+    m, dt, nx, ny = _stroke_orientation(a8)
+    if m.sum() < 25:
+        return img
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    s_along = xx * (-ny) + yy * nx
+    s_cross = xx * nx + yy * ny
+
+    density = np.zeros((h, w), np.float32)
+    if along > 0:
+        # depósito a lo largo: onda larga (~0.8·em), la carga de la pluma
+        # respira por tramos de trazo, no por zona de página.
+        density += along * _aniso_noise(s_along, None, 0.8 * fs, 1.0, rng)
+    if streak > 0:
+        aniso = min(8.0, max(1.0, getattr(options, "ink_streak_aniso", 4.0)))
+        cross_cell = max(1.2, 0.03 * fs)
+        density += streak * _aniso_noise(s_along, s_cross,
+                                         cross_cell * aniso, cross_cell, rng)
+    if pool > 0:
+        dmax = max(1.0, float(dt.max()))
+        density += pool * (dt / dmax) ** 1.5
+    density = np.clip(density, -0.85, 0.85)
+
+    rgba = np.asarray(img.convert("RGBA")).astype(np.float32)
+    rgb = rgba[..., :3]
+    d_pos = np.clip(density, 0.0, None)[..., None]
+    d_neg = np.clip(-density, 0.0, None)[..., None]
+    # denso = más oscuro (multiplicativo, como el pooling R11); tenue = el
+    # color sube hacia el papel (la composición MULTIPLY lo deja pasar).
+    rgb = rgb * (1.0 - 0.55 * d_pos) + (255.0 - rgb) * 0.35 * d_neg
+    if hue > 0:
+        # denso → azul de carga (satura el canal frío); tenue → gris (la
+        # tinta rala pierde color antes que luminancia).
+        gray = rgb.mean(axis=2, keepdims=True)
+        rgb = rgb + (gray - rgb) * (hue * 2.0 * d_neg)
+        tint = rgb * np.array([0.82, 0.90, 1.12], np.float32)
+        rgb = rgb + (tint - rgb) * (hue * 2.0 * d_pos)
+    rgba[..., :3] = np.clip(rgb, 0.0, 255.0)
+    return Image.fromarray(rgba.astype(np.uint8))
+
+
 def apply_paper(ink: Image.Image, paper: Image.Image, options,
                 rng: random.Random) -> Image.Image:
     """Compone la capa de tinta (RGBA) sobre el papel (RGB) → página RGB.
@@ -103,6 +349,13 @@ def apply_paper(ink: Image.Image, paper: Image.Image, options,
                                   lo=1.0 - strength, hi=1.0)
         a *= field
 
+    # R11 — textura intra-trazo (densidad fina + grosor + apozamiento). Gateada
+    # por ink_texture_v2; con False, apply_paper queda EXACTO como en R6.
+    v2 = bool(getattr(options, "ink_texture_v2", False))
+    ink_scale = None
+    if v2:
+        a, ink_scale = _ink_texture_v2(a, options, rng)
+
     bleed = max(0.0, getattr(options, "ink_bleed", 0.0))
     if bleed > 0:
         # Halo ADITIVO, no blur destructivo: el GaussianBlur directo resta
@@ -113,10 +366,34 @@ def apply_paper(ink: Image.Image, paper: Image.Image, options,
         a_img = Image.fromarray((np.clip(a, 0.0, 1.0) * 255).astype(np.uint8))
         a_img = a_img.filter(ImageFilter.GaussianBlur(bleed))
         a_blur = np.asarray(a_img, dtype=np.float32) / 255.0
-        np.maximum(a, a_blur * 0.85, out=a)
+        halo = a_blur * 0.85
+        # R11 — borde irregular: modular el halo con ruido para que la tinta
+        # feathee desigual hacia el papel (un borde matemáticamente limpio
+        # delata la impresión). 0 = halo uniforme de R6.
+        edge = max(0.0, getattr(options, "ink_edge_irregularity", 0.0))
+        if v2 and edge > 0:
+            nfield = value_noise_field(x1 - x0, y1 - y0, rng,
+                                       cell_px=max(3, int(options.font_size * 0.12)),
+                                       lo=1.0 - edge, hi=1.0)
+            halo = halo * nfield
+        np.maximum(a, halo, out=a)
+
+    # R15 — showthrough: la tinta real nunca es 100% opaca sobre fibra; un
+    # cap del alpha efectivo deja pasar esa fracción del grano del papel
+    # BAJO el trazo (solo recorta el interior saturado; los bordes y trazos
+    # tenues quedan como están). Gateado por el master de R15.
+    if bool(getattr(options, "ink_stroke_space", False)):
+        st = min(0.2, max(0.0, getattr(options, "ink_paper_showthrough", 0.0)))
+        if st > 0:
+            np.minimum(a, 1.0 - st, out=a)
 
     p = np.asarray(out.crop((x0, y0, x1, y1)), dtype=np.float32)
     t = np.asarray(region.convert("RGB"), dtype=np.float32) / 255.0
+    if ink_scale is not None:
+        # R11: la densidad intra-trazo y el apozamiento se modelan en el COLOR
+        # de tinta (factor MULTIPLY): <1 más oscuro (pool), >1 más claro (dry).
+        # Clip a [0,1] porque el campo fino puede pasar de 1.0 (zonas secas).
+        t = np.clip(t * ink_scale[..., None], 0.0, 1.0)
     np.subtract(1.0, t, out=t)
     t *= a[..., None]
     np.subtract(1.0, t, out=t)

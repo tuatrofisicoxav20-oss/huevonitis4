@@ -76,7 +76,8 @@ class GlyphLoadMixin:
     def _load_glyph(self, path: str, options, char: "str | None" = None,
                     geo: "dict | None" = None, rotation: "float | None" = None,
                     rng: "random.Random | None" = None,
-                    size_drift: float = 0.0, slant_extra: float = 0.0):
+                    size_drift: float = 0.0, slant_extra: float = 0.0,
+                    pressure: float = 0.0):
         """Carga un glifo listo para pegar. Devuelve (imagen, baseline_px) o None.
 
         ``baseline_px`` es la fila de la IMAGEN FINAL (ya escalada/rotada) donde
@@ -91,6 +92,11 @@ class GlyphLoadMixin:
 
         R5: ``size_drift``/``slant_extra`` son la deriva OU intra-renglón (C1):
         el tamaño y la inclinación del vecino se heredan, no se sortean i.i.d.
+
+        R14 (Track A): ``pressure`` (≈coupling·e(t), adimensional) modula el
+        gamma del alpha — presión alta = trazo más oscuro y un pelo más ancho
+        (los bordes suben a opaco); mano liviana = más claro. 0.0 = sin
+        efecto (byte-idéntico).
         """
         if not PIL_OK:
             return None
@@ -120,6 +126,24 @@ class GlyphLoadMixin:
             if sj > 0 or vj > 0:
                 from core.inkcore.renderer_ink import jitter_ink_color
                 ink_hex = jitter_ink_color(ink_hex, rnd, sj, vj)
+            if pressure:
+                # R14 (Track A): la presión modula la DENSIDAD de depósito →
+                # el COLOR (V del HSV), no solo el alpha: edge_reconstruct
+                # binariza y reconstruye el alpha, pero preserva el color del
+                # glifo (mediana de sus opacos) — la oscuridad viaja ahí.
+                import colorsys
+
+                from PIL import ImageColor
+                press = min(0.6, max(-0.6, pressure))
+                try:
+                    pr, pg, pb = ImageColor.getrgb(ink_hex)[:3]
+                except (ValueError, TypeError):
+                    pr, pg, pb = (26, 26, 46)
+                ph, ps, pv = colorsys.rgb_to_hsv(pr / 255, pg / 255, pb / 255)
+                pv = min(1.0, max(0.0, pv * (1.0 - 0.45 * press)))
+                r2, g2, b2 = colorsys.hsv_to_rgb(ph, ps, pv)
+                ink_hex = (f"#{int(r2 * 255):02x}{int(g2 * 255):02x}"
+                           f"{int(b2 * 255):02x}")
             img = self._recolor_ink(img, ink_hex)
             # Recortar al bounding box REAL de la tinta: el padding transparente
             # del banco es irregular y mediría aire. ink_top queda en COORDS DEL
@@ -207,6 +231,13 @@ class GlyphLoadMixin:
             # empuja los píxeles de borde hacia opaco. Luego la "presión" por glifo
             # (alpha_factor) lo atenúa un poco al azar, variando entre letras.
             ink_boost = getattr(options, "ink_boost", 1.0) or 1.0
+            if pressure:
+                # R14 (Track A): presión→oscuridad. El gamma efectivo del
+                # alpha baja con presión positiva (bordes hacia opaco: trazo
+                # más oscuro/ancho) y sube con presión negativa (más claro).
+                # Clamp duro: nunca borra trazos finos ni satura del todo.
+                press = min(0.6, max(-0.6, pressure))
+                ink_boost = min(2.5, max(0.25, ink_boost / (1.0 + press)))
             alpha_factor = rnd.uniform(options.ink_alpha_min, options.ink_alpha_max)
             if ink_boost != 1.0 or alpha_factor < 1.0:
                 r, g, b, a = img.split()
@@ -216,6 +247,77 @@ class GlyphLoadMixin:
                 if alpha_factor < 1.0:
                     a = a.point(lambda v: int(v * alpha_factor))
                 img = Image.merge("RGBA", (r, g, b, a))
+            # R15 — TINTA EN ESPACIO DE TRAZO. RNG PROPIO sembrado del
+            # contenido (patrón del edge_rng de abajo, otra sal): el master
+            # on/off no corre el stream de variación del layout. El ANCHO
+            # a lo largo va ANTES del borde R12 (el borde re-decora la
+            # silueta nueva); el shading de densidad/color va DESPUÉS
+            # (pinta el RGB final, que el borde deja plano).
+            stroke_on = bool(getattr(options, "ink_stroke_space", False))
+            stroke_rng = None
+            if stroke_on:
+                _sh = img.getchannel("A").histogram()
+                _sv2 = (img.width * 40503 + img.height * 65537 + 0x51ED2701)
+                for _i, _v in enumerate(_sh):
+                    _sv2 = (_sv2 * 1000003 + _v * (_i + 7)) & 0xFFFFFFFFFFFF
+                stroke_rng = random.Random(_sv2)
+                from core.inkcore.renderer_ink import stroke_width_along
+                _fs15 = max(1.0, float(getattr(options, "font_size", 40)))
+                img = stroke_width_along(img, stroke_rng, options, _fs15)
+            # R12 — RECONSTRUCCIÓN DE BORDE: último paso sobre el alpha INDIVIDUAL
+            # del glifo (aquí todavía no se ha compuesto en la línea). Reescribe
+            # el contorno binario por uno orgánico + feather variable. Se aplica
+            # DESPUÉS de ink_boost (sobrescribe el borde duro que este endurece).
+            # No cambia tamaño ni baseline → métricas/espaciado intactos.
+            if getattr(options, "edge_reconstruct", False):
+                from core.inkcore.renderer_edge import reconstruct_glyph_edge
+                fs = max(1.0, float(getattr(options, "font_size", 40)))
+                # RNG PROPIO del borde, sembrado del contenido del glifo (su
+                # histograma de alpha ya warpeado) — NO consume del rnd compartido
+                # del layout. Crítico: si tirara del rnd del render, correría el
+                # stream y cambiaría el kerning/jitter de los glifos siguientes
+                # (tocaría la VARIACIÓN). Así la realización de variación queda
+                # byte-idéntica con el borde on/off, y el borde igual es único por
+                # instancia (el histograma varía tras el warp).
+                _hist = img.getchannel("A").histogram()
+                _es = img.width * 2654435761 + img.height
+                for _i, _v in enumerate(_hist):
+                    _es = (_es * 1000003 + _v * (_i + 1)) & 0xFFFFFFFFFFFF
+                edge_rng = random.Random(_es)
+                # Amplitud en px anclada a font_size (el helper la acota a
+                # 0.28·dim_menor del glifo → protege trazos finos y puntuación).
+                img = reconstruct_glyph_edge(
+                    img, edge_rng,
+                    strength_px=getattr(options, "edge_strength", 0.028) * fs,
+                    cell_px=max(3.0, getattr(options, "edge_cell_frac", 0.47) * fs),
+                    feather_px=getattr(options, "edge_feather", 0.025) * fs,
+                    feather_amount=getattr(options, "edge_feather_amount", 0.55),
+                    outward_bias=getattr(options, "edge_outward_bias", 0.3),
+                    # R15: con el master on, el ancho del feather lo modula
+                    # un campo de FIBRA (celdas 3× alargadas): el sangrado
+                    # es direccional, no un blur redondo. 1.0 = R12 exacto.
+                    feather_fiber_aspect=3.0 if stroke_on else 1.0,
+                )
+            if stroke_on:
+                from core.inkcore.renderer_ink import stroke_space_shading
+                img = stroke_space_shading(img, stroke_rng, options, _fs15)
+            # R14 (Track B) — micro-skip de bolígrafo, DESPUÉS del borde (el
+            # dropout debe quedar nítido, no re-feathereado). RNG PROPIO
+            # sembrado del contenido, patrón del edge_rng de arriba: ni el
+            # sorteo del skip ni sus draws corren el stream compartido → la
+            # realización de variación es byte-idéntica con el flag on/off.
+            skip_p = min(0.05, max(0.0, getattr(options, "pen_skip_prob", 0.0)))
+            if skip_p > 0:
+                _hist = img.getchannel("A").histogram()
+                _ss = (img.width * 2246822519 + img.height * 3266489917
+                       + 0x9E3779B9)
+                for _i, _v in enumerate(_hist):
+                    _ss = (_ss * 1000003 + _v * (_i + 3)) & 0xFFFFFFFFFFFF
+                skip_rng = random.Random(_ss)
+                if skip_rng.random() < skip_p:
+                    from core.inkcore.renderer_ink import apply_pen_skips
+                    fs_skip = max(1.0, float(getattr(options, "font_size", 40)))
+                    img = apply_pen_skips(img, skip_rng, font_size=fs_skip)
             return img, round(baseline_in) if baseline_in >= 0 else -1
         except Exception as e:
             logger.debug(f"Could not load glyph {path}: {e}")

@@ -1,4 +1,5 @@
 import logging
+import math
 import random
 from dataclasses import replace
 
@@ -67,6 +68,11 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         self._line_jitter_walk = None             # OU del jitter vertical de línea
         self._line_index = 0                      # para el drift hacia adentro
         self._pair_chars: set[str] = set()        # R10: ligaduras del banco
+        # R14 (Track A) — latente de mano e(t); None = apagado (también cubre
+        # llamadas directas a _render_line sin _begin_render, p. ej. diagramas).
+        self._hand_walk = None
+        self._hand_e = 0.0
+        self._hand_e_prev = 0.0
 
     def last_missing_chars(self) -> set[str]:
         """Caracteres del último render que NO tenían glifo en el banco (Fase 6.5).
@@ -138,9 +144,56 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
             OUProcess(self._rng, sigma=jp * 0.5, rho=0.55, bound=jp) if jp else None
         )
         walk_amp = max(0.0, getattr(options, "margin_walk_px", 6.0))
+        # R14 (H5-C2): σ derivada de amplitud y ρ (σ = 0.45·amp·√(1−ρ²)) — la
+        # excursión estacionaria (~0.45·amp) llena la amplitud a cualquier
+        # supersampling. Con la σ fija de antes (2 px) el walk quedaba en
+        # ±2 px finales: margen "de regla" (margin_autocorr ≈ 0 medida).
+        walk_rho = min(0.99, max(0.0, getattr(options, "margin_walk_rho", 0.9)))
         self._margin_walk = (
-            OUProcess(self._rng, sigma=2.0, rho=0.8, bound=walk_amp) if walk_amp else None
+            OUProcess(self._rng,
+                      sigma=0.45 * walk_amp * math.sqrt(1.0 - walk_rho * walk_rho),
+                      rho=walk_rho, bound=walk_amp) if walk_amp else None
         )
+        # R14 (Track A) — latente de mano e(t): UN proceso lento por página
+        # que acopla tamaño/slant/presión/ritmo (ver renderer_options). σ por
+        # paso derivada de amplitud y ρ (patrón H5-C2) para que la excursión
+        # estacionaria llene hand_energy_sigma sea cual sea la correlación.
+        hs = min(1.5, max(0.0, getattr(options, "hand_energy_sigma", 0.0)))
+        corr = max(0.5, getattr(options, "hand_energy_corr_lines", 3.0))
+        h_rho = math.exp(-1.0 / corr)
+        self._hand_walk = (
+            OUProcess(self._rng, sigma=hs * math.sqrt(1.0 - h_rho * h_rho),
+                      rho=h_rho, bound=1.5 * hs) if hs > 0 else None
+        )
+        self._hand_e = 0.0
+        self._hand_e_prev = 0.0
+
+    def _hand_energy_step(self, options) -> None:
+        """Avanza el latente de mano al EMPEZAR un renglón con texto (R14/A).
+
+        Con session_shift_prob activa, el renglón puede abrir con un SALTO
+        del estado (pausa/re-carga de tinta) en vez de derivar. Sin latente
+        (hand_energy_sigma=0) no consume RNG: byte-idéntico al camino previo.
+        """
+        walk = getattr(self, "_hand_walk", None)
+        if walk is None:
+            return
+        self._hand_e_prev = self._hand_e
+        jp = min(0.1, max(0.0, getattr(options, "session_shift_prob", 0.0)))
+        if jp > 0 and self._rng.random() < jp:
+            from core.inkcore.renderer_noise import tnorm
+            amp = walk.bound or 1.0
+            walk.x = tnorm(self._rng, 0.0, amp * 0.6, -amp, amp)
+        self._hand_e = walk.step()
+
+    def _hand_energy_at(self, frac: float) -> float:
+        """e(t) DENTRO del renglón: interpolación lineal entre el estado del
+        renglón anterior y el actual (t = fracción de avance horizontal).
+        Continuidad glifo a glifo sin draws extra de RNG."""
+        if getattr(self, "_hand_walk", None) is None:
+            return 0.0
+        f = min(1.0, max(0.0, frac))
+        return self._hand_e_prev + (self._hand_e - self._hand_e_prev) * f
 
     def _next_line_y_jitter(self) -> int:
         """Jitter vertical del PRÓXIMO renglón: OU, no ruido blanco (E5).
@@ -150,6 +203,44 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         """
         return round(self._line_jitter_walk.step()) if self._line_jitter_walk else 0
 
+    @staticmethod
+    def _paragraph_first_flags(lines: list) -> list:
+        """True para la primera línea NO vacía del documento y para cada línea
+        no vacía que sigue a una en blanco (R14/H5-C2: párrafo = separación
+        por línea en blanco en la entrada, ya envuelta por el wrap — las
+        líneas de continuación de un párrafo quedan False)."""
+        flags = []
+        prev_blank = True
+        for ln in lines:
+            blank = not str(ln).strip()
+            flags.append(not blank and prev_blank)
+            prev_blank = blank
+        return flags
+
+    def _next_indent_px(self, options) -> int:
+        """Sangría sorteada para la PRIMERA línea de un párrafo (R14/H5-C2).
+
+        Gauss truncada alrededor de para_indent_frac·font_size (σ=0.35·μ,
+        acotada a [0.45, 1.7]·μ): sangría humana, variable pero acotada.
+        Consume RNG sólo cuando la perilla está activa y sólo en líneas que
+        abren párrafo (0 = apagado, cero draws: byte-idéntico al camino previo)."""
+        frac = max(0.0, getattr(options, "para_indent_frac", 0.0))
+        if frac <= 0:
+            return 0
+        from core.inkcore.renderer_noise import tnorm
+        mu = frac * options.font_size
+        return round(tnorm(self._rng, mu, 0.35 * mu, 0.45 * mu, 1.7 * mu))
+
+    def _next_breath_px(self, options) -> int:
+        """Respiración inter-párrafo (R14/H5-C2): desplazamiento vertical
+        acotado de la primera línea de un párrafo, NO acumulativo. Consume RNG
+        sólo con la perilla activa (0 = cero draws, byte-idéntico)."""
+        amp = max(0.0, getattr(options, "para_breath_px", 0.0))
+        if amp <= 0:
+            return 0
+        from core.inkcore.renderer_noise import tnorm
+        return round(tnorm(self._rng, 0.0, 0.5 * amp, -amp, amp))
+
     def _next_margin_offset(self, options) -> int:
         """Offset X del PRÓXIMO renglón (E2): random walk acotado + drift lento
         hacia adentro proporcional al índice de línea — el margen de una mano
@@ -158,7 +249,13 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         walk = self._margin_walk.step() if self._margin_walk else 0.0
         per_line = max(0.0, getattr(options, "margin_drift_per_line", 0.2))
         drift_in = min(10.0, per_line * self._line_index)
-        return round(walk + drift_in)
+        # R13 — jitter I.I.D. por renglón: componente NO correlacionado que rompe
+        # la apariencia de "línea recta" del margen izquierdo (el OU acotado es
+        # muy correlacionado y parece regla). Cada renglón arranca un poco
+        # distinto, como una mano real. 0 (default) = sin cambio.
+        lj = max(0.0, getattr(options, "margin_line_jitter_px", 0.0))
+        line_jit = self._rng.uniform(-lj, lj) if lj else 0.0
+        return round(walk + drift_in + line_jit)
 
     def _scaled_options(self, options: RenderOptions, ss: int) -> RenderOptions:
         """Opciones ×ss para el supersampling (R6/I1): lo anclado a mm escala
@@ -173,6 +270,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
             baseline_drift=options.baseline_drift * ss,
             margin_walk_px=options.margin_walk_px * ss,
             margin_drift_per_line=options.margin_drift_per_line * ss,
+            margin_line_jitter_px=getattr(options, "margin_line_jitter_px", 0.0) * ss,
+            para_breath_px=getattr(options, "para_breath_px", 0.0) * ss,
             ink_bleed=options.ink_bleed * ss,
             supersample=1,
         )
@@ -280,12 +379,18 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
 
         # Cursor flotante con redondeo por renglón: el paso físico (mm) no es
         # entero en px y truncarlo desfasaría las líneas hacia el final.
+        first_flags = self._paragraph_first_flags(wrapped_lines)
         for i, line_img in enumerate(rendered_lines):
             y_cursor = options.margin_top_px + round(i * spacing)
             if line_img:
                 # R3: jitter vertical correlacionado (E5) y margen con deriva (E2)
-                paste_y = max(0, y_cursor + self._next_line_y_jitter())
+                y_extra = 0
                 x = options.margin_left_px + self._next_margin_offset(options)
+                if first_flags[i]:
+                    x += self._next_indent_px(options)
+                    if i > 0:   # R14 (H5-C2.3): respiración inter-párrafo
+                        y_extra = self._next_breath_px(options)
+                paste_y = max(0, y_cursor + self._next_line_y_jitter() + y_extra)
                 if paste_y + line_img.height <= total_h:
                     ink.paste(line_img, (x, paste_y), line_img)
                 else:
@@ -294,7 +399,8 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         return self._compose_page(ink, options, spacing, total_h)
 
     def render_pages(
-        self, text: str, options: RenderOptions, page_height: "int | None" = None
+        self, text: str, options: RenderOptions, page_height: "int | None" = None,
+        *, _first_opens_paragraph: bool = True,
     ) -> list:
         """Renderiza texto dividido en páginas de papel físico (carta por default).
 
@@ -303,6 +409,11 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         options.line_height_px (line_spacing_mm en px): la línea base del
         renglón k cae en margin_top + k·line_spacing, alineada a los renglones
         preimpresos de la hoja. Retorna lista de imágenes RGB.
+
+        _first_opens_paragraph (R14/H5-C2, privado): iter_pages trocea el
+        texto y renderiza cada trozo por separado — sin esta señal, la primera
+        línea de CADA trozo se trataría como inicio de párrafo y el export
+        sangraría a media oración en cada salto de página.
         """
         if not PIL_OK:
             return []
@@ -312,7 +423,9 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
             big = self._scaled_options(options, ss)
             big_h = None if page_height is None else page_height * ss
             return [self._downscale(p, ss)
-                    for p in self.render_pages(text, big, big_h)]
+                    for p in self.render_pages(
+                        text, big, big_h,
+                        _first_opens_paragraph=_first_opens_paragraph)]
         self._begin_render(options)
         options = self._apply_background_style(options)
         if page_height is None:
@@ -329,15 +442,22 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         style_def = BACKGROUND_STYLES.get(options.background_style, {})
         if options.draw_lines and not style_def.get("draw_grid"):
             boff = self._line_baseline_offset(options.font_size)
+            first_flags = self._paragraph_first_flags(lines)
+            if not _first_opens_paragraph and first_flags:
+                first_flags[0] = False
             items = [
                 _BlockLine(
                     img=self._render_line(line, options, usable_width),
-                    x=options.margin_left_px,
+                    # R14 (H5-C2): el snap pegaba x FIJO (margen de regla,
+                    # autocorr ≈ 0 medida) — el walk OU aplica también aquí,
+                    # más la sangría de primera línea de párrafo.
+                    x=options.margin_left_px + self._next_margin_offset(options)
+                      + (self._next_indent_px(options) if first else 0),
                     line_height=line_height_px,
                     gap_before=0,
                     baseline_offset=boff,
                 )
-                for line in lines
+                for line, first in zip(lines, first_flags, strict=True)
             ]
             return self._flow_blocklines_to_pages(items, options, page_height, line_height_px)
 
@@ -355,6 +475,10 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         # de cada renglón se pega restando su baseline_offset; así el avance
         # físico es exacto y no se va desfasando de los renglones de la hoja.
         boff = self._line_baseline_offset(options.font_size)
+        # R14 (H5-C2): sangría de primera línea de párrafo en el camino plano.
+        first_flags = self._paragraph_first_flags(lines)
+        if not _first_opens_paragraph and first_flags:
+            first_flags[0] = False
 
         pages = []
         for page_start in range(0, len(rendered_lines), lines_per_page):
@@ -367,9 +491,17 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                     # R3: jitter correlacionado (E5) + margen con deriva (E2);
                     # con jitter_px=0 el anclaje al renglón físico es exacto.
                     y_cursor = options.margin_top_px + round(k * spacing) - boff
-                    paste_y = max(0, min(page_height - line_img.height,
-                                         y_cursor + self._next_line_y_jitter()))
+                    y_extra = 0
                     x = options.margin_left_px + self._next_margin_offset(options)
+                    if first_flags[page_start + k - 1]:
+                        x += self._next_indent_px(options)
+                        # R14 (H5-C2.3): respiración inter-párrafo, sólo entre
+                        # párrafos (la primera línea del documento no respira).
+                        if page_start + k - 1 > 0:
+                            y_extra = self._next_breath_px(options)
+                    paste_y = max(0, min(page_height - line_img.height,
+                                         y_cursor + self._next_line_y_jitter()
+                                         + y_extra))
                     if paste_y + line_img.height <= page_height:
                         ink.paste(line_img, (x, paste_y), line_img)
 
@@ -404,9 +536,14 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
         if not lines:
             yield Image.new("RGB", (probe.page_width, page_height), probe.background_color)
             return
+        # R14 (H5-C2): las flags de párrafo se calculan sobre el texto COMPLETO
+        # — si un trozo empieza a media oración, su primera línea NO sangra.
+        flags = self._paragraph_first_flags(lines)
         for i in range(0, len(lines), lines_per_page):
             chunk = "\n".join(lines[i:i + lines_per_page])
-            yield from self.render_pages(chunk, options, page_height)
+            yield from self.render_pages(
+                chunk, options, page_height,
+                _first_opens_paragraph=bool(flags[i]))
 
     def render_document(self, doc, options: RenderOptions, page_height: "int | None" = None) -> list:
         """Renderiza un Document estructurado respetando su jerarquía.

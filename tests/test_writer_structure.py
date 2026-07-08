@@ -12,7 +12,6 @@ from core.inkcore.writer_structure import (
     render_text_for_coverage,
 )
 
-
 # ── NO-REGRESIÓN: el detector NO debe disparar con prosa normal ──────────────
 
 def test_prosa_con_lineas_vacias_no_dispara():

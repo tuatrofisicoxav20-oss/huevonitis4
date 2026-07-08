@@ -21,12 +21,21 @@ REL_TOL = 0.30
 
 # Métricas que pueden valer ~0 legítimamente: el veredicto pasa a |Δ| ≤ tol.
 _ABS_TOL: dict[str, float] = {
-    "slant_mean": 1.5,          # grados
-    "baseline_autocorr": 0.25,  # correlación
+    "slant_mean": 1.5,           # grados
+    "baseline_autocorr": 0.25,   # correlación
+    # R14: correlaciones/deltas horizontales centrados en 0. La tolerancia de
+    # margin_autocorr es holgada a propósito: el estimador por página (~20
+    # renglones) tiene varianza alta (ver docstring de _margin_metrics).
+    "margin_autocorr": 0.35,     # correlación
+    "indent_delta_mu": 25.0,     # px (~0.6 em a 150 DPI)
+    "indent_delta_sigma": 20.0,  # px
+    "margin_sigma": 2.5,         # px
 }
 
 # Conteos: informativos, sin veredicto (dependen del texto, no del realismo).
-_INFO_ONLY = {"n_boxes", "n_lines"}
+# R14: n_paragraphs depende del texto; right_ragged_cv está declarada
+# INFORMATIVA en metrics.py (no optimizarla) y depende de la geometría.
+_INFO_ONLY = {"n_boxes", "n_lines", "n_paragraphs", "right_ragged_cv"}
 
 
 def _verdict(key: str, real: float, synth: float) -> str:
