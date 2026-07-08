@@ -43,6 +43,9 @@ def _opts(**kw):
     # R17: la presión i.i.d. por glifo también mueve la oscuridad/bbox de la
     # página (misma dependencia de datos que hand_energy); se apaga aquí.
     kw.setdefault("glyph_pressure_jitter", 0.0)
+    # R17b: las bolitas de tinta engrosan el trazo → mueven el bbox de tinta
+    # (misma dependencia de datos); se apagan para aislar el paso de borde.
+    kw.setdefault("ink_blob_strength", 0.0)
     return RenderOptions(seed=7, background_style="hoja_blanca", **kw)
 
 

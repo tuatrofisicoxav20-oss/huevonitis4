@@ -306,6 +306,21 @@ class GlyphLoadMixin:
             # sembrado del contenido, patrón del edge_rng de arriba: ni el
             # sorteo del skip ni sus draws corren el stream compartido → la
             # realización de variación es byte-idéntica con el flag on/off.
+            # R17b — bolitas de tinta en los extremos (pen-down/pen-up), sobre
+            # el borde ya reconstruido (el charco debe quedar nítido). RNG
+            # PROPIO sembrado del contenido (patrón del edge_rng): no corre el
+            # stream compartido → byte-idéntico con el flag on/off.
+            blob_s = min(0.6, max(0.0, getattr(options, "ink_blob_strength", 0.0)))
+            if blob_s > 0:
+                _hist = img.getchannel("A").histogram()
+                _bs = (img.width * 40009 + img.height * 15485863 + 0x2545F491)
+                for _i, _v in enumerate(_hist):
+                    _bs = (_bs * 1000003 + _v * (_i + 5)) & 0xFFFFFFFFFFFF
+                blob_rng = random.Random(_bs)
+                from core.inkcore.renderer_ink import apply_ink_blobs
+                fs_b = max(1.0, float(getattr(options, "font_size", 40)))
+                img = apply_ink_blobs(img, blob_rng, font_size=fs_b,
+                                      strength=blob_s)
             skip_p = min(0.05, max(0.0, getattr(options, "pen_skip_prob", 0.0)))
             if skip_p > 0:
                 _hist = img.getchannel("A").histogram()

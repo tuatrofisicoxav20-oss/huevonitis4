@@ -125,6 +125,72 @@ def _ink_texture_v2(a: np.ndarray, options, rng: random.Random):
     return np.clip(a, 0.0, 1.0), ink_scale
 
 
+def apply_ink_blobs(img: Image.Image, rng: random.Random, *,
+                    font_size: float, strength: float) -> Image.Image:
+    """R17b — bolitas de tinta en los EXTREMOS del trazo (pen-down / pen-up).
+
+    El delator de tinta que más repitió el jurado: "no hay charco de tinta en
+    arranques/paradas, ni la gota inicial del bolígrafo". Un bolígrafo real
+    deposita un pequeño POOL donde la punta se apoya al empezar el trazo (y a
+    veces al levantar). Se detectan los extremos del trazo con el esqueleto
+    (píxeles con UN solo vecino) y se SUMA un blob gaussiano al alpha:
+    engrosa+solidifica localmente el trazo, como un charco redondeado.
+
+    Sólo AGREGA alpha (np.clip suma) → NUNCA puede cortar el trazo: cero
+    riesgo de romper legibilidad por adelgazamiento. CLAMPS: no corre en glifos
+    diminutos (puntuación/diacríticos), el radio se acota a 0.085·font_size y
+    el blob se ancla al semiancho local (dt) para no desbordar. Sin skimage/cv2
+    devuelve el glifo intacto. Determinista desde el rng recibido (el caller le
+    pasa uno PROPIO sembrado del contenido, patrón de apply_pen_skips)."""
+    try:
+        import cv2
+        from scipy.ndimage import convolve
+        from skimage.morphology import skeletonize
+    except ImportError:
+        return img
+    a = np.asarray(img.getchannel("A"), dtype=np.uint8)
+    h, w = a.shape
+    fs = max(8.0, float(font_size))
+    if min(h, w) < 0.16 * fs:
+        return img                      # puntuación/diacríticos: no tocar
+    m = (a > 110).astype(np.uint8)
+    if m.sum() < 0.01 * fs * fs:
+        return img                      # tinta insuficiente
+    try:
+        skel = skeletonize(m > 0)
+    except Exception:
+        return img
+    if skel.sum() < 3:
+        return img
+    # extremos = píxeles del esqueleto con exactamente 1 vecino esqueleto.
+    k = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
+    nbr = convolve(skel.astype(np.uint8), k, mode="constant", cval=0)
+    ep = np.argwhere(skel & (nbr == 1))
+    if len(ep) == 0:
+        return img
+    dt = cv2.distanceTransform(m, cv2.DIST_L2, 3)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    af = a.astype(np.float32)
+    # nº de bolitas ∝ strength (1 casi siempre; 2 con strength alto). Se
+    # eligen extremos al azar; el pen-down real cae más en el PRIMER trazo,
+    # pero sin orden de trazo se muestrea uniforme (sesgo leve hacia arriba).
+    order = list(range(len(ep)))
+    rng.shuffle(order)
+    n_blobs = 1 + (1 if (len(ep) > 1 and rng.random() < min(0.9, strength * 1.6)) else 0)
+    for idx in order[:n_blobs]:
+        cy, cx = float(ep[idx][0]), float(ep[idx][1])
+        hw = max(1.0, float(dt[int(cy), int(cx)]))
+        r = min(0.085 * fs, max(1.5, hw * rng.uniform(1.4, 2.3)))
+        d2 = (xx - cx) ** 2 + (yy - cy) ** 2
+        blob = np.exp(-d2 / max(1.0, 2.0 * (0.55 * r) ** 2))
+        # amplitud ∝ strength; el blob llena hasta opaco cerca del centro y se
+        # difumina hacia el papel (feather), extendiendo un pelo el extremo.
+        af = np.clip(af + blob * 255.0 * min(1.0, 0.55 + strength), 0.0, 255.0)
+    out = np.asarray(img.convert("RGBA")).copy()
+    out[..., 3] = af.astype(np.uint8)
+    return Image.fromarray(out)
+
+
 def apply_pen_skips(img: Image.Image, rng: random.Random, *,
                     font_size: float) -> Image.Image:
     """R14 (Track B) — micro-skip de bolígrafo: una bolita sin tinta sobre la

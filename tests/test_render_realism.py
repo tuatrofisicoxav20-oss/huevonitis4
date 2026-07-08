@@ -150,7 +150,10 @@ def test_golden_metricas_linea_base(stub_renderer):
     # tests (test_r14_credibilidad).
     opts = RenderOptions(style="", background_style="hoja_blanca", seed=42,
                          edge_reconstruct=False, ink_texture_v2=False,
-                         hand_energy_sigma=0.0, line_end_cramp=0.0)
+                         hand_energy_sigma=0.0, line_end_cramp=0.0,
+                         # R17b: las bolitas de tinta engordan las cajas medidas
+                         # (mismo motivo que ink_texture_v2); se aíslan.
+                         ink_blob_strength=0.0)
     pages = stub_renderer.render_pages(texto, opts)
     assert pages, "render_pages no devolvió páginas"
     m = compute_metrics(pages[0])
@@ -218,7 +221,8 @@ def test_golden_estructura_horizontal(stub_renderer):
             opts = RenderOptions(style="", background_style="",
                                  draw_lines=draw_lines, seed=seed,
                                  edge_reconstruct=False, ink_texture_v2=False,
-                                 hand_energy_sigma=0.0, line_end_cramp=0.0)
+                                 hand_energy_sigma=0.0, line_end_cramp=0.0,
+                                 ink_blob_strength=0.0)
             m = compute_metrics(stub_renderer.render_pages(PROSA_PARRAFOS, opts)[0])
             camino = "snap" if draw_lines else "clasico"
             assert m["n_paragraphs"] == 4, f"{camino}/{seed}: párrafos mal detectados"
@@ -392,7 +396,8 @@ def test_anti_sello_bilateral(stub_renderer):
                           pen_skip_prob=0.0, ink_stroke_space=False,
                           # R17: presión i.i.d. por glifo — otra fuente de
                           # variación nueva; el control negativo la apaga.
-                          glyph_pressure_jitter=0.0)
+                          # R17b: las bolitas de tinta también se apagan.
+                          glyph_pressure_jitter=0.0, ink_blob_strength=0.0)
     m_sello = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, sello)[0])
     assert m_sello["phash_dup_rate"] > 0.85, (
         f"el detector dejó de ver sellos: {m_sello['phash_dup_rate']}")

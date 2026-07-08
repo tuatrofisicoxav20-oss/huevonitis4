@@ -262,6 +262,11 @@ class RenderOptions:
     # distance transform con tamaño ∝ ancho local (lo que pide R15) y sus
     # clamps de legibilidad están medidos (Δ OCR ≈ 0 con 0.03 en r14_eval).
     pen_skip_prob: float = 0.03
+    # R17b — bolitas de tinta en los EXTREMOS del trazo (pen-down/pen-up):
+    # el charco redondeado que deja la punta del bolígrafo al apoyarse. 0..0.6
+    # (clamp). Detecta extremos por esqueleto y SUMA alpha (nunca corta el
+    # trazo). RNG propio sembrado del contenido → byte-idéntico con 0.
+    ink_blob_strength: float = 0.30
     connector_prob: float = 0.0
     connector_width_frac: float = 0.04
     # R15 — TINTA EN ESPACIO DE TRAZO. Tell que ataca: el look "impreso" del

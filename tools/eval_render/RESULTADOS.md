@@ -252,3 +252,30 @@ documentado: bolitas de tinta pen-down/pen-up (requiere detección fiable de
 extremos de trazo — esqueleto; se omitió por riesgo de regresión OCR/visual).
 Rollback exacto a R15: `glyph_pressure_jitter=0.0` + los 6 defaults de tinta
 previos (0.18/0.10/0.15/0.15/0.10/0.01).
+
+### R17b — bolitas de tinta pen-down/pen-up (extremos de trazo)
+
+Se implementó el lever que R17 dejó pendiente por riesgo. `apply_ink_blobs`
+(`renderer_ink.py`) detecta los EXTREMOS del trazo con el esqueleto
+(`skimage.skeletonize` → píxeles con 1 vecino) y SUMA un blob gaussiano al alpha
+en 1-2 extremos por glifo: el charco redondeado que deja la punta del bolígrafo
+al apoyarse. Perilla `ink_blob_strength` (default **0.30**, clamp 0..0.6).
+
+- **Sólo AGREGA alpha** (`np.clip` suma) → nunca adelgaza ni corta el trazo:
+  cero riesgo de romper legibilidad. De hecho el OCR canónico MEJORA levemente
+  (más tinta): r15_eval **82.4% vs 83.5% baseline, Δ1.1 pts**.
+- RNG PROPIO sembrado del contenido (patrón de `apply_pen_skips`) → byte-idéntico
+  con `ink_blob_strength=0` (opt-in real). Corre DESPUÉS del borde R12 (el charco
+  debe quedar nítido).
+- Clamps: no en glifos diminutos (min dim < 0.16·fs), radio ≤ 0.085·fs anclado
+  al semiancho local (dt). Costo de render +18% (1.54→1.82 s/pág; el esqueleto
+  por glifo es barato).
+- **Aislamiento:** las bolitas engordan el bbox de tinta → se apagan en los
+  goldens de geometría (`test_golden_metricas_linea_base`,
+  `test_golden_estructura_horizontal`: mismo motivo que `ink_texture_v2=False`)
+  y en los controles de borde/conector/sello. Suite: **456 passed**.
+- **Verificación visual:** los charcos son visibles al zoom (extremos de `l`,
+  `t`, finales de palabra) — leen como depósito de bolígrafo. En la foto de
+  tarea comprimida se atenúan (el jurado abstracto no los registra fuerte),
+  pero NO introducen artefactos. El jurado sigue en ~15-22 (techo de mixed-case
+  + clones, inherentes). Rollback: `ink_blob_strength=0.0`.
