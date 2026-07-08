@@ -219,7 +219,10 @@ def test_connector_agrega_enlace(tmp_path):
             jitter_px=0, kerning_jitter=0.0, baseline_drift=0.0,
             line_slant_deg=0.0, glyph_slant_drift_deg=0.0, warp_strength=0.0,
             ink_hsv_jitter=(0.0, 0.0), ligature_prob=0.0,
-            hand_energy_sigma=0.0, line_end_cramp=0.0, connector_prob=conn)
+            hand_energy_sigma=0.0, line_end_cramp=0.0,
+            # R17: nuevas fuentes de variación por glifo — el skip QUITA tinta
+            # y la presión cambia el alpha; se apagan para aislar el conector.
+            glyph_pressure_jitter=0.0, pen_skip_prob=0.0, connector_prob=conn)
         r._begin_render(opts)
         img = r._render_line("mono nomo", opts, opts.usable_width_px)
         return (np.asarray(img.getchannel("A")) > 0).sum()

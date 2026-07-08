@@ -389,7 +389,10 @@ def test_anti_sello_bilateral(stub_renderer):
                           # posición y skips rompían el hash de unas letras
                           # y el gate >0.85 medía eso, no al detector).
                           hand_energy_sigma=0.0, line_end_cramp=0.0,
-                          pen_skip_prob=0.0, ink_stroke_space=False)
+                          pen_skip_prob=0.0, ink_stroke_space=False,
+                          # R17: presión i.i.d. por glifo — otra fuente de
+                          # variación nueva; el control negativo la apaga.
+                          glyph_pressure_jitter=0.0)
     m_sello = compute_metrics(stub_renderer.render_pages(FRASE_PATRON, sello)[0])
     assert m_sello["phash_dup_rate"] > 0.85, (
         f"el detector dejó de ver sellos: {m_sello['phash_dup_rate']}")

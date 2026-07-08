@@ -231,6 +231,16 @@ class RenderOptions:
     pressure_darkness_coupling: float = 0.15
     line_end_cramp: float = 0.12
     session_shift_prob: float = 0.02
+    # R17 (Track A2) — jitter I.I.D. de presión POR GLIFO. El latente e(t) es
+    # LENTO/correlacionado (misma energía ~3 renglones); pero la letra real
+    # tiene además variación RÁPIDA e independiente: una letra sale pálida y la
+    # siguiente oscura sin relación (micro-contacto de la punta, no cansancio de
+    # muñeca). Se ve clarísimo en las plantillas del usuario (una 'l' pálida al
+    # lado de una 'k' densa). Suma un término i.i.d. al `pressure` que va al
+    # gamma del alpha en _load_glyph — presión alta = trazo más oscuro/grueso.
+    # Gauss truncada a ±2.2σ. 0 = apagado: CERO draws de RNG (byte-idéntico).
+    # Riesgo de legibilidad acotado: el gamma efectivo queda en [0.25, 2.5].
+    glyph_pressure_jitter: float = 0.22
     # R14 (Track B) — física de bolígrafo. Defaults en 0 (opt-in, subir con
     # cuidado): son los efectos con más riesgo de legibilidad del R14.
     #   pen_skip_prob: probabilidad POR GLIFO (0..0.05, clamp) de un
@@ -251,7 +261,7 @@ class RenderOptions:
     # R15: el skip pasa a ON por default (0.01): ya corre sobre la cresta del
     # distance transform con tamaño ∝ ancho local (lo que pide R15) y sus
     # clamps de legibilidad están medidos (Δ OCR ≈ 0 con 0.03 en r14_eval).
-    pen_skip_prob: float = 0.01
+    pen_skip_prob: float = 0.03
     connector_prob: float = 0.0
     connector_width_frac: float = 0.04
     # R15 — TINTA EN ESPACIO DE TRAZO. Tell que ataca: el look "impreso" del
@@ -289,12 +299,17 @@ class RenderOptions:
     #     tinta (cap del alpha efectivo en apply_paper): la tinta real nunca
     #     es 100% opaca sobre fibra.
     ink_stroke_space: bool = True
-    ink_along_darkness: float = 0.18
-    ink_width_along: float = 0.10
-    ink_streak_strength: float = 0.15
+    # R17 — defaults de tinta subidos (jurado adversarial: "trazo de ancho
+    # uniforme, sin física de bolígrafo, sin pooling ni skips"). Todos siguen
+    # en su rango clampeado y sólo tocan RGB/textura-de-alpha, no la geometría;
+    # el costo de legibilidad medido es ≈0 (OCR 82→81.5%). Rollback R15: los
+    # valores previos eran 0.18/0.10/0.15/0.15/0.10.
+    ink_along_darkness: float = 0.28
+    ink_width_along: float = 0.16
+    ink_streak_strength: float = 0.20
     ink_streak_aniso: float = 4.0
-    ink_pool_boost: float = 0.15
-    ink_hue_by_density: float = 0.10
+    ink_pool_boost: float = 0.28
+    ink_hue_by_density: float = 0.12
     ink_paper_showthrough: float = 0.06
     # R7 — pase de papel:
     #   paper_texture: nombre de PNG en tipografia/{perfil}/papers/ (scans del

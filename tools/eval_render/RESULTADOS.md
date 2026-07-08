@@ -201,3 +201,54 @@ todo-ON 83.1%.
 `core/inkcore/plotter/`: convierte el texto renderizado a trazos vectoriales
 SVG a escala física 1:1 (mm), para plotters/lápiz robótico. Pasos 1-2 del
 plan; línea de investigación abierta en `v5-dev`.
+
+## R17 — Presión por glifo + física de tinta reforzada (juez visual + jurado)
+
+Metodología nueva: **juez de visión en el loop**. Se renderiza, se simula la
+foto de tarea (`photo_export`), y un **jurado adversarial de 5 modelos de
+visión** (workflow) puntúa "manuscrito vs impreso/generado" y lista los tells;
+cada tell se ataca con UNA perilla por ciclo, midiendo OCR canónico
+(`r15_eval`, tesseract spa, media de 3 seeds) y el jurado antes/después.
+
+**Referencia real anclada:** las plantillas del usuario (`Image to PDF *.pdf`)
+y su alfabeto manuscrito (`muestras `) confirman que su letra es de estilo
+BLOQUE: la `o` minúscula es un círculo, la `f` una forma tipo `F`, la `l` un
+palito vertical, la `s` una curva tipo `S`. El "mixed-case" que el jurado tacha
+de artefacto **es la letra auténtica del usuario** — el banco es fiel y NO se
+altera (cambiarla rompería el propósito de la app). Los delatores reales
+atacables son sintéticos: tinta plana y clones perceptuales.
+
+Perilla nueva `glyph_pressure_jitter` (default **0.22**): jitter I.I.D. de
+presión→oscuridad POR glifo (gauss truncada ±2.2σ) sumado al latente OU lento
+de R14. La letra real varía RÁPIDO (una `l` pálida junto a una `k` densa); el
+OU solo daba variación lenta (~3 renglones). RNG sólo si >0 (byte-idéntico con
+0). Lever de realismo #1 confirmado por el jurado.
+
+Defaults de tinta subidos (R15→R17, jurado: "trazo plano, sin física de
+bolígrafo"): `ink_along_darkness` 0.18→0.28, `ink_width_along` 0.10→0.16,
+`ink_streak_strength` 0.15→0.20, `ink_pool_boost` 0.15→0.28,
+`ink_hue_by_density` 0.10→0.12, `pen_skip_prob` 0.01→0.03. Sólo tocan
+RGB/textura-de-alpha, no la geometría.
+
+**Gate canónico r15_eval:** 81.9% vs baseline 83.3% → Δ **1.4 pts** (≤3, PASA).
+⚠ **Gotcha medido:** un harness casero (psm 6, prosa propia) daba −0.7 pt e
+inducía a error; el gate oficial (seed 1234) daba −5 pt con los defaults
+iniciales (gpj 0.30 + warp 0.10). Se recalibró a gpj 0.22 y warp de vuelta a
+0.08 (el clone-breaking geométrico cuesta OCR y apenas ayuda: los clones se
+perciben porque las variantes del banco son muy parecidas entre sí, no por
+reuso — 73/74 fuentes únicas en 74 selecciones). **Validar SIEMPRE con
+`r15_eval`/`r14_eval` en varios seeds, no con métricas caseras.**
+
+**Aislamiento de tests:** las nuevas fuentes de variación se apagan en los
+controles negativos (`test_anti_sello_bilateral`), en los tests que aíslan el
+paso de borde (`test_edge_no_consume_rng_del_layout`: la presión mueve el bbox
+de tinta y cruza celdas del ruido de `apply_paper` — misma dependencia de datos
+que `hand_energy`) y en `test_connector_agrega_enlace` (`pen_skip` quita tinta,
+la presión cambia el alpha). Suite: 456 passed.
+
+**Jurado (foto de tarea, 5 votos):** score medio ~16→~22/100. El techo lo
+imponen mixed-case (inherente) y clones (OCR-limitados). Lever futuro
+documentado: bolitas de tinta pen-down/pen-up (requiere detección fiable de
+extremos de trazo — esqueleto; se omitió por riesgo de regresión OCR/visual).
+Rollback exacto a R15: `glyph_pressure_jitter=0.0` + los 6 defaults de tinta
+previos (0.18/0.10/0.15/0.15/0.10/0.01).

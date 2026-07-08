@@ -421,6 +421,11 @@ class LayoutMixin:
                 e_now = (self._hand_energy_at(x_cursor / max_width)
                          if hand_on else 0.0)
                 sq = _squeeze()
+                # R17 — presión i.i.d. por glifo (rápida, no correlacionada);
+                # RNG sólo si la perilla está activa (byte-idéntico con 0).
+                gpj = getattr(options, "glyph_pressure_jitter", 0.0)
+                press_iid = (tnorm(rnd, 0.0, gpj, -2.2 * gpj, 2.2 * gpj)
+                             if gpj > 0 else 0.0)
                 if entry and Path(entry.image_path).exists():
                     loaded = self._load_glyph(
                         entry.image_path, options, ch, geo=self._geo(entry),
@@ -429,7 +434,8 @@ class LayoutMixin:
                                    + 0.08 * e_now - 0.4 * (1.0 - sq),
                         slant_extra=(slant_walk.step() if slant_walk else 0.0)
                                     + 0.3 * sl_amp * e_now,
-                        pressure=pd * e_now if (hand_on and pd > 0) else 0.0)
+                        pressure=(pd * e_now if (hand_on and pd > 0) else 0.0)
+                                 + press_iid)
                     glyph_img, baseline_in = loaded if loaded else (None, -1)
                 else:
                     # R3/H8 — glifo faltante: se registra para que la UI avise

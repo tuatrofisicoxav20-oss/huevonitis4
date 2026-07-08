@@ -40,6 +40,9 @@ def _opts(**kw):
     # de datos anterior a R14.)
     kw.setdefault("hand_energy_sigma", 0.0)
     kw.setdefault("line_end_cramp", 0.0)
+    # R17: la presión i.i.d. por glifo también mueve la oscuridad/bbox de la
+    # página (misma dependencia de datos que hand_energy); se apaga aquí.
+    kw.setdefault("glyph_pressure_jitter", 0.0)
     return RenderOptions(seed=7, background_style="hoja_blanca", **kw)
 
 
