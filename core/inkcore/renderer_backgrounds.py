@@ -96,7 +96,7 @@ STYLE_PRESETS: dict[str, dict] = {
 # OJO — ink_bleed va en px ABSOLUTOS, así que la carga de tinta depende del DPI:
 # medida contra "Limpio" (seeds 42/7/101, masa umbralizada para descartar el grano
 # del papel, que es una constante aditiva y sesga el ratio hacia 1), este preset
-# rinde ≈1.75× a 150 DPI y ≈1.53× a 300 DPI. No hay un wj que dé lo mismo en ambos.
+# rinde 1.73× a 150 DPI y 1.44× a 300 DPI. No hay un wj que dé lo mismo en ambos.
 STYLE_PRESETS["Bolígrafo grueso"] = {
     **STYLE_PRESETS["Bolígrafo"],
     "ink_boost": 0.20,
