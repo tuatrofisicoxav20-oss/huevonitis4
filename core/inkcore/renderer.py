@@ -540,7 +540,7 @@ class HandwritingRenderer(BackgroundMixin, GlyphLoadMixin, LayoutMixin):
                     gi = page_start + k - 1
                     fat_line = self._fatigue_at(options, line_off=gi - self._doc_line)
                     if fat_line > 0.10:
-                        y_extra += int(round(fat_line * 9.0))
+                        y_extra += round(fat_line * 9.0)
                     x = options.margin_left_px + self._next_margin_offset(options)
                     if first_flags[page_start + k - 1]:
                         x += self._next_indent_px(options)

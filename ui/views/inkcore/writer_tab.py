@@ -91,7 +91,8 @@ class WriterTabMixin(WriterPreviewMixin):
         ).grid(row=2, column=0, sticky="w")
         self._style_menu = ctk.CTkOptionMenu(
             opts,
-            values=["Limpio", "Bolígrafo", "Escolar", "Universitario", "Relajado"],
+            values=["Limpio", "Bolígrafo", "Bolígrafo grueso", "Escolar",
+                    "Universitario", "Relajado"],
             fg_color=theme.BG_TERTIARY,
             button_color=theme.ACCENT_GREEN,
             button_hover_color=theme.ACCENT_GREEN_HOVER,
