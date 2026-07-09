@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(ruff check *)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
